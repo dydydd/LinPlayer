@@ -8,6 +8,9 @@ import android.content.res.Configuration
 import android.net.TrafficStats
 import android.os.BatteryManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.Process
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -18,6 +21,7 @@ import java.net.Proxy
 import java.net.ProxySelector
 import java.net.SocketAddress
 import java.net.URI
+import kotlin.system.exitProcess
 
 class MainActivity : FlutterActivity() {
     private val channelName = "linplayer/app_icon"
@@ -87,6 +91,30 @@ class MainActivity : FlutterActivity() {
                         result.success(setHttpProxy(host, port))
                     } catch (e: Exception) {
                         result.error("set_http_proxy_failed", e.message, null)
+                    }
+                }
+                "exitApp" -> {
+                    // Exit the app and ensure the process is killed shortly after,
+                    // to avoid any background playback or resource leaks.
+                    result.success(true)
+                    Handler(Looper.getMainLooper()).post {
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                                finishAndRemoveTask()
+                            } else {
+                                finish()
+                            }
+                        } catch (_: Exception) {
+                            try {
+                                finish()
+                            } catch (_: Exception) {
+                                // Ignore.
+                            }
+                        }
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            Process.killProcess(Process.myPid())
+                            exitProcess(0)
+                        }, 250)
                     }
                 }
                 else -> result.notImplemented()

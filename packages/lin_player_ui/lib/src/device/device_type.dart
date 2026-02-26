@@ -124,4 +124,24 @@ class DeviceType {
       _isTv = false;
     }
   }
+
+  static Future<bool> exitApp() async {
+    if (kIsWeb) return false;
+
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        final ok = await _channel.invokeMethod<bool>('exitApp');
+        if (ok == true) return true;
+      } catch (_) {
+        // Fall back to SystemNavigator on channel failures.
+      }
+    }
+
+    try {
+      SystemNavigator.pop();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
 }
