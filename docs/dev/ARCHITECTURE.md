@@ -133,6 +133,22 @@ Flutter 页面(lib/*.dart)
 - MPV 路径使用 `media_kit`。
 - Exo 路径使用 `video_player_android`（并通过 patched 包增强轨道能力）。
 
+#### 4.5.1 预加载（Preload）
+
+开关：`AppState.preloadEnabled`（设置 → 预加载，默认关闭）
+
+实现：`StreamPreloadService`（`packages/lin_player_player/lib/src/preload/stream_preload_service.dart`）
+
+行为：
+- 集详情页（`EpisodeDetailPage`）加载完成后，使用 UA `preload-linplayer` 预取：
+  - 当前集前 3 秒
+  - 下一集前 3 秒
+- 播放过程中，当剩余时长 ≤ 5 秒时，预取下一集前 3 秒（兜底：非从详情页进入的场景）。
+
+失败策略：
+- 单次预取最多尝试 3 次；连续失败后本次运行内停止后续预取，并在 UI 侧 Toast 提示「预加载失败」。
+- 预取实现为 best-effort：优先使用直链流的 Range 拉取；若为 HLS（`.m3u8`）则解析并请求初始化段与前若干分片。
+
 ### 4.6 UI 基建层（`packages/lin_player_ui`）
 
 主要文件：
@@ -210,8 +226,9 @@ Flutter 页面(lib/*.dart)
 
 1. 通过 `resolveServerAccess(...)` 获取 `adapter + auth`。
 2. `fetchPlaybackInfo(...)` 获取 `PlaySessionId/MediaSources`。
-3. 组装流 URL 与 header，交给 MPV 或 Exo 播放。
-4. 播放期间上报：
+3. （可选）若开启「预加载」，会在集详情页/播放结束前触发 `StreamPreloadService`，用 UA `preload-linplayer` 预取当前集与下一集的前 3 秒数据。
+4. 组装流 URL 与 header，交给 MPV 或 Exo 播放。
+5. 播放期间上报：
   - `reportPlaybackStart`
   - `reportPlaybackProgress`
   - `reportPlaybackStopped`

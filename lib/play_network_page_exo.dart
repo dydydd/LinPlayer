@@ -95,6 +95,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   int _introSeq = 0;
   bool _skipIntroPromptVisible = false;
   bool _skipIntroHandled = false;
+  bool _nextEpisodePreloadTriggered = false;
 
   static const Duration _gestureOverlayAutoHideDelay =
       Duration(milliseconds: 800);
@@ -1214,6 +1215,95 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     await controller.seekTo(target);
   }
 
+  void _maybePreloadNextEpisode(Duration pos) {
+    if (_nextEpisodePreloadTriggered) return;
+    if (!widget.appState.preloadEnabled) return;
+    if (StreamPreloadService.instance.permanentlyDisabled) return;
+
+    final total = _duration;
+    if (total <= Duration.zero) return;
+    final remaining = total - pos;
+    if (remaining > const Duration(seconds: 5)) return;
+
+    _nextEpisodePreloadTriggered = true;
+    final access = _serverAccess;
+    if (access == null) return;
+    unawaited(_preloadNextEpisodeBestEffort(access));
+  }
+
+  Future<void> _preloadNextEpisodeBestEffort(ServerAccess access) async {
+    final nextId = await _resolveNextEpisodeIdBestEffort(access);
+    if (nextId == null || nextId.trim().isEmpty) return;
+
+    final result = await StreamPreloadService.instance.preloadFirst3Seconds(
+      adapter: access.adapter,
+      auth: access.auth,
+      itemId: nextId.trim(),
+      exoPlayer: true,
+      audioStreamIndex: _selectedAudioStreamIndex,
+      subtitleStreamIndex: _selectedSubtitleStreamIndex,
+      preferredVideoVersion: widget.appState.preferredVideoVersion,
+    );
+
+    if (!mounted) return;
+    if (result.disabledNow) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('预加载失败，后续将不再尝试')),
+      );
+    }
+  }
+
+  Future<String?> _resolveNextEpisodeIdBestEffort(ServerAccess access) async {
+    try {
+      final detail = await access.adapter
+          .fetchItemDetail(access.auth, itemId: widget.itemId);
+      final seriesId = (detail.seriesId ?? widget.seriesId ?? '').trim();
+      final seasonId = (detail.parentId ?? '').trim();
+      if (seriesId.isEmpty || seasonId.isEmpty) return null;
+
+      final eps =
+          await access.adapter.fetchEpisodes(access.auth, seasonId: seasonId);
+      final items = List<MediaItem>.from(eps.items);
+      items.sort((a, b) {
+        final aNo = a.episodeNumber ?? 0;
+        final bNo = b.episodeNumber ?? 0;
+        return aNo.compareTo(bNo);
+      });
+      final idx = items.indexWhere((e) => e.id == widget.itemId);
+      if (idx >= 0 && idx + 1 < items.length) {
+        return items[idx + 1].id;
+      }
+
+      final seasons =
+          await access.adapter.fetchSeasons(access.auth, seriesId: seriesId);
+      final seasonItems =
+          seasons.items.where((s) => s.type.toLowerCase() == 'season').toList();
+      seasonItems.sort((a, b) {
+        final aNo = a.seasonNumber ?? a.episodeNumber ?? 0;
+        final bNo = b.seasonNumber ?? b.episodeNumber ?? 0;
+        return aNo.compareTo(bNo);
+      });
+      if (seasonItems.isEmpty) return null;
+
+      final curIdx = seasonItems.indexWhere((s) => s.id == seasonId);
+      if (curIdx < 0 || curIdx + 1 >= seasonItems.length) return null;
+
+      final nextSeasonId = seasonItems[curIdx + 1].id;
+      final nextEps = await access.adapter
+          .fetchEpisodes(access.auth, seasonId: nextSeasonId);
+      final nextItems = List<MediaItem>.from(nextEps.items);
+      nextItems.sort((a, b) {
+        final aNo = a.episodeNumber ?? 0;
+        final bNo = b.episodeNumber ?? 0;
+        return aNo.compareTo(bNo);
+      });
+      if (nextItems.isEmpty) return null;
+      return nextItems.first.id;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _loadOnlineDanmakuForNetwork({bool showToast = true}) async {
     final appState = widget.appState;
     if (appState.danmakuApiUrls.isEmpty) {
@@ -1593,6 +1683,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       }
 
       _maybeReportPlaybackProgress(_position);
+      _maybePreloadNextEpisode(_position);
 
       if (!_reportedStop &&
           _duration > Duration.zero &&
@@ -3105,6 +3196,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _introTimestamps = null;
     _skipIntroPromptVisible = false;
     _skipIntroHandled = false;
+    _nextEpisodePreloadTriggered = false;
     _controlsVisible = true;
     _isScrubbing = false;
     _subtitleText = '';
@@ -3267,6 +3359,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
         _maybeReportPlaybackProgress(_position);
         _maybeUpdateSkipIntroPrompt(_position);
+        _maybePreloadNextEpisode(_position);
 
         if (!_reportedStop &&
             _duration > Duration.zero &&

@@ -787,6 +787,7 @@ class TvRemoteService extends ChangeNotifier {
         'forceRemoteControlKeys': appState.forceRemoteControlKeys,
         'uiScaleFactor': appState.uiScaleFactor,
         'autoSkipIntro': appState.autoSkipIntro,
+        'preloadEnabled': appState.preloadEnabled,
         'danmakuEnabled': appState.danmakuEnabled,
       },
       'options': {
@@ -976,6 +977,10 @@ class TvRemoteService extends ChangeNotifier {
           case 'autoSkipIntro':
             final enabled = readBool(value, fallback: appState.autoSkipIntro);
             await appState.setAutoSkipIntro(enabled);
+            break;
+          case 'preloadEnabled':
+            final enabled = readBool(value, fallback: appState.preloadEnabled);
+            await appState.setPreloadEnabled(enabled);
             break;
           case 'danmakuEnabled':
             final enabled = readBool(value, fallback: appState.danmakuEnabled);

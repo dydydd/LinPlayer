@@ -2988,6 +2988,19 @@ class _SettingsPageState extends State<SettingsPage> {
                           contentPadding: EdgeInsets.zero,
                         ),
                       ),
+                      const Divider(height: 1),
+                      tvFocusRow(
+                        SwitchListTile(
+                          value: appState.preloadEnabled,
+                          onChanged: (v) => appState.setPreloadEnabled(v),
+                          secondary: const Icon(Icons.download_outlined),
+                          title: const Text('预加载'),
+                          subtitle: const Text(
+                            '集详情页预加载本集前 3 秒，并预加载下一集前 3 秒。',
+                          ),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
                     ] else ...[
                       tvFocusRow(
                         ListTile(
@@ -3113,6 +3126,19 @@ class _SettingsPageState extends State<SettingsPage> {
                         title: const Text('自动跳过片头'),
                         subtitle: const Text(
                           '服务器支持片头数据时，在片头段会提示是否跳过。',
+                        ),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                      const Divider(height: 1),
+                      SwitchListTile(
+                        value: appState.preloadEnabled,
+                        onChanged: (v) async {
+                          await appState.setPreloadEnabled(v);
+                        },
+                        secondary: const Icon(Icons.download_outlined),
+                        title: const Text('预加载'),
+                        subtitle: const Text(
+                          '集详情页预加载本集前 3 秒，并预加载下一集前 3 秒。',
                         ),
                         contentPadding: EdgeInsets.zero,
                       ),

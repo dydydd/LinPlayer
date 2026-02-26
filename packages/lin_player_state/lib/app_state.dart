@@ -150,6 +150,7 @@ class AppState extends ChangeNotifier {
   static const _kFlushBufferOnSeekKey = 'flushBufferOnSeek_v1';
   static const _kUnlimitedStreamCacheKey = 'unlimitedStreamCache_v1';
   static const _kAutoSkipIntroKey = 'autoSkipIntro_v1';
+  static const _kPreloadEnabledKey = 'preloadEnabled_v1';
   static const _kMarkPlayedThresholdPercentKey = 'markPlayedThresholdPercent_v1';
   static const _kPlaybackProxyModeKey = 'playbackProxyMode_v1';
   static const _kPlaybackProxyUrlKey = 'playbackProxyUrl_v1';
@@ -272,6 +273,7 @@ class AppState extends ChangeNotifier {
   bool _flushBufferOnSeek = true;
   bool _unlimitedStreamCache = false;
   bool _autoSkipIntro = false;
+  bool _preloadEnabled = false;
   int _markPlayedThresholdPercent = 90;
   PlaybackProxyMode _playbackProxyMode = PlaybackProxyMode.system;
   String _playbackProxyUrl = '';
@@ -750,6 +752,7 @@ class AppState extends ChangeNotifier {
   bool get flushBufferOnSeek => _flushBufferOnSeek;
   bool get unlimitedStreamCache => _unlimitedStreamCache;
   bool get autoSkipIntro => _autoSkipIntro;
+  bool get preloadEnabled => _preloadEnabled;
   int get markPlayedThresholdPercent => _markPlayedThresholdPercent;
   PlaybackProxyMode get playbackProxyMode => _playbackProxyMode;
   String get playbackProxyUrl => _playbackProxyUrl;
@@ -946,6 +949,7 @@ class AppState extends ChangeNotifier {
       await prefs.setBool(_kUnlimitedStreamCacheKey, _unlimitedStreamCache);
     }
     _autoSkipIntro = prefs.getBool(_kAutoSkipIntroKey) ?? false;
+    _preloadEnabled = prefs.getBool(_kPreloadEnabledKey) ?? false;
     final rawMarkPlayedThresholdPercent =
         prefs.getInt(_kMarkPlayedThresholdPercentKey) ?? 90;
     _markPlayedThresholdPercent =
@@ -1240,6 +1244,7 @@ class AppState extends ChangeNotifier {
         'flushBufferOnSeek': _flushBufferOnSeek,
         'unlimitedStreamCache': _unlimitedStreamCache,
         'autoSkipIntro': _autoSkipIntro,
+        'preloadEnabled': _preloadEnabled,
         'markPlayedThresholdPercent': _markPlayedThresholdPercent,
         'playbackProxyMode': _playbackProxyMode.id,
         'playbackProxyUrl': _playbackProxyUrl,
@@ -1594,6 +1599,8 @@ class AppState extends ChangeNotifier {
       fallback: false,
     );
     final nextAutoSkipIntro = _readBool(data['autoSkipIntro'], fallback: false);
+    final nextPreloadEnabled =
+        _readBool(data['preloadEnabled'], fallback: false);
     final nextMarkPlayedThresholdPercent =
         _readInt(data['markPlayedThresholdPercent'], fallback: 90)
             .clamp(75, 100);
@@ -1820,6 +1827,7 @@ class AppState extends ChangeNotifier {
     _flushBufferOnSeek = nextFlushBufferOnSeek;
     _unlimitedStreamCache = nextUnlimitedStreamCache;
     _autoSkipIntro = nextAutoSkipIntro;
+    _preloadEnabled = nextPreloadEnabled;
     _markPlayedThresholdPercent = nextMarkPlayedThresholdPercent;
     _playbackProxyMode = nextPlaybackProxyMode;
     _playbackProxyUrl = nextPlaybackProxyUrl;
@@ -1936,6 +1944,7 @@ class AppState extends ChangeNotifier {
     await prefs.setBool(_kFlushBufferOnSeekKey, _flushBufferOnSeek);
     await prefs.setBool(_kUnlimitedStreamCacheKey, _unlimitedStreamCache);
     await prefs.setBool(_kAutoSkipIntroKey, _autoSkipIntro);
+    await prefs.setBool(_kPreloadEnabledKey, _preloadEnabled);
     await prefs.setInt(
       _kMarkPlayedThresholdPercentKey,
       _markPlayedThresholdPercent,
@@ -4082,6 +4091,14 @@ class AppState extends ChangeNotifier {
     _autoSkipIntro = enabled;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kAutoSkipIntroKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setPreloadEnabled(bool enabled) async {
+    if (_preloadEnabled == enabled) return;
+    _preloadEnabled = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kPreloadEnabledKey, enabled);
     notifyListeners();
   }
 

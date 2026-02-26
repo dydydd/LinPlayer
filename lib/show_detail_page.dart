@@ -4,6 +4,7 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:lin_player_player/lin_player_player.dart';
 import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:lin_player_state/lin_player_state.dart';
@@ -4371,6 +4372,40 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     return 'episode_detail_local_favorite_${serverKey}_${_episode.id}';
   }
 
+  Future<void> _preloadEpisodeBestEffort({
+    required ServerAccess access,
+    required String itemId,
+    required int loadSeq,
+    String? selectedMediaSourceId,
+    int? audioStreamIndex,
+    int? subtitleStreamIndex,
+  }) async {
+    if (!widget.appState.preloadEnabled) return;
+    if (StreamPreloadService.instance.permanentlyDisabled) return;
+
+    final useExoCore = !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        widget.appState.playerCore == PlayerCore.exo;
+
+    final result = await StreamPreloadService.instance.preloadFirst3Seconds(
+      adapter: access.adapter,
+      auth: access.auth,
+      itemId: itemId,
+      exoPlayer: useExoCore,
+      selectedMediaSourceId: selectedMediaSourceId,
+      audioStreamIndex: audioStreamIndex,
+      subtitleStreamIndex: subtitleStreamIndex,
+      preferredVideoVersion: widget.appState.preferredVideoVersion,
+    );
+
+    if (!mounted || loadSeq != _loadSeq) return;
+    if (result.disabledNow) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('预加载失败，后续将不再尝试')),
+      );
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -4538,6 +4573,18 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
           seriesId: seriesId,
         );
       }
+
+      unawaited(
+        _preloadEpisodeBestEffort(
+          access: access,
+          itemId: episodeId,
+          loadSeq: seq,
+          selectedMediaSourceId: selectedMediaSourceId,
+          audioStreamIndex: selectedAudioStreamIndex,
+          subtitleStreamIndex: selectedSubtitleStreamIndex,
+        ),
+      );
+
       List<ChapterInfo> chaps = const [];
       try {
         chaps = await access.adapter
@@ -6571,6 +6618,63 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
           return aNo.compareTo(bNo);
         });
         episodesCacheForUi[selectedSeasonId] = items;
+      }
+
+      final shouldPreload =
+          widget.appState.preloadEnabled &&
+          !StreamPreloadService.instance.permanentlyDisabled;
+      if (shouldPreload &&
+          selectedSeasonId != null &&
+          selectedSeasonId.isNotEmpty) {
+        final currentEpisodeId = episodeDetail.id.trim();
+        final episodes =
+            episodesCacheForUi[selectedSeasonId] ?? const <MediaItem>[];
+        final idx = episodes.indexWhere((e) => e.id.trim() == currentEpisodeId);
+        final nextEpisode =
+            (idx >= 0 && idx + 1 < episodes.length) ? episodes[idx + 1] : null;
+        if (nextEpisode != null) {
+          unawaited(
+            _preloadEpisodeBestEffort(
+              access: access,
+              itemId: nextEpisode.id,
+              loadSeq: loadSeq,
+              audioStreamIndex: _selectedAudioStreamIndex,
+              subtitleStreamIndex: _selectedSubtitleStreamIndex,
+            ),
+          );
+        } else if (!seasonsVirtual) {
+          final seasonIdx =
+              seasonsForUi.indexWhere((s) => s.id == selectedSeasonId);
+          if (seasonIdx >= 0 && seasonIdx + 1 < seasonsForUi.length) {
+            final nextSeasonId = seasonsForUi[seasonIdx + 1].id;
+            unawaited(() async {
+              try {
+                if (!mounted || loadSeq != _loadSeq) return;
+                final eps = await access.adapter.fetchEpisodes(
+                  access.auth,
+                  seasonId: nextSeasonId,
+                );
+                final items = List<MediaItem>.from(eps.items);
+                items.sort((a, b) {
+                  final aNo = a.episodeNumber ?? 0;
+                  final bNo = b.episodeNumber ?? 0;
+                  return aNo.compareTo(bNo);
+                });
+                final next = items.isNotEmpty ? items.first : null;
+                if (next == null) return;
+                await _preloadEpisodeBestEffort(
+                  access: access,
+                  itemId: next.id,
+                  loadSeq: loadSeq,
+                  audioStreamIndex: _selectedAudioStreamIndex,
+                  subtitleStreamIndex: _selectedSubtitleStreamIndex,
+                );
+              } catch (_) {
+                // Best-effort only.
+              }
+            }());
+          }
+        }
       }
 
       if (!mounted || loadSeq != _loadSeq) return;
