@@ -604,6 +604,7 @@ class TvRemoteService extends ChangeNotifier {
     final proxy = BuiltInProxyService.instance.status;
     final subscriptionUrl =
         await BuiltInProxyService.instance.getSubscriptionUrl();
+    final mediaLines = await BuiltInProxyService.instance.getMediaServerLines();
 
     return {
       'ok': true,
@@ -611,6 +612,9 @@ class TvRemoteService extends ChangeNotifier {
         'tvRemoteEnabled': appState.tvRemoteEnabled,
         'tvBuiltInProxyEnabled': appState.tvBuiltInProxyEnabled,
         'tvBuiltInProxySubscriptionUrl': subscriptionUrl,
+        'tvBuiltInProxyMediaServerLines': mediaLines
+            .map(BuiltInProxyService.mediaServerLineForDisplay)
+            .toList(growable: false),
         'tvBackgroundMode': appState.tvBackgroundMode.id,
         'tvBackgroundColor': appState.tvBackgroundColor,
         'tvBackgroundImage': appState.tvBackgroundImage,
@@ -729,7 +733,28 @@ class TvRemoteService extends ChangeNotifier {
           case 'tvBuiltInProxySubscriptionUrl':
             await BuiltInProxyService.instance
                 .setSubscriptionUrl((value ?? '').toString());
-            await BuiltInProxyService.instance.prepareConfig();
+            await BuiltInProxyService.instance.applyConfig(restartIfRunning: true);
+            break;
+          case 'tvBuiltInProxyMediaServerLineAdd':
+            final raw = (value ?? '').toString();
+            final added =
+                await BuiltInProxyService.instance.addMediaServerLinesFromText(
+              raw,
+            );
+            if (added <= 0) {
+              return {'ok': false, 'error': 'no valid media server lines'};
+            }
+            await BuiltInProxyService.instance.applyConfig(
+              restartIfRunning: true,
+            );
+            break;
+          case 'tvBuiltInProxyMediaServerLinesClear':
+            if (readBool(value, fallback: false)) {
+              await BuiltInProxyService.instance.clearMediaServerLines();
+              await BuiltInProxyService.instance.applyConfig(
+                restartIfRunning: true,
+              );
+            }
             break;
           case 'forceRemoteControlKeys':
             final enabled =

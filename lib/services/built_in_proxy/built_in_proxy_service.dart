@@ -59,11 +59,11 @@ class BuiltInProxyService extends ChangeNotifier {
   static const int controllerPort = 9090;
   static const String _nativeMihomoSoName = 'libmihomo.so';
   static const String _kSubscriptionUrlKey = 'tvBuiltInProxySubscriptionUrl_v1';
+  static const String _kMediaServerLinesKey = 'tvBuiltInProxyMediaServerLines_v1';
+  static const String _mediaServerGroupName = '媒体服务器';
 
   static const Duration _startupTimeout = Duration(seconds: 2);
   static const Duration _shutdownTimeout = Duration(seconds: 2);
-  static final List<_CountryGroup> _defaultCountryGroups =
-      _CountryGroup.defaultPreset();
 
   Process? _process;
   int? _lastExitCode;
@@ -127,11 +127,144 @@ class BuiltInProxyService extends ChangeNotifier {
     }
   }
 
+  Future<List<String>> getMediaServerLines() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getStringList(_kMediaServerLinesKey) ?? const [];
+    final out = <String>[];
+    for (final e in raw) {
+      final v = e.trim();
+      if (v.isEmpty) continue;
+      out.add(v);
+    }
+    out.sort();
+    return out;
+  }
+
+  static String mediaServerLineForDisplay(String entry) {
+    final e = entry.trim();
+    if (e.startsWith('domain:')) return e.substring('domain:'.length);
+    if (e.startsWith('ip:')) return e.substring('ip:'.length);
+    return e;
+  }
+
+  Future<void> clearMediaServerLines() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kMediaServerLinesKey);
+  }
+
+  Future<bool> removeMediaServerLine(String entry) async {
+    final target = entry.trim();
+    if (target.isEmpty) return false;
+
+    final prefs = await SharedPreferences.getInstance();
+    final current = prefs.getStringList(_kMediaServerLinesKey) ?? const [];
+    final next = current.where((e) => e.trim() != target).toList(growable: false);
+    if (next.length == current.length) return false;
+
+    if (next.isEmpty) {
+      await prefs.remove(_kMediaServerLinesKey);
+    } else {
+      await prefs.setStringList(_kMediaServerLinesKey, next);
+    }
+    return true;
+  }
+
+  Future<int> addMediaServerLinesFromText(String raw) async {
+    final lines = raw.split(RegExp(r'\r?\n'));
+    final normalized = <String>[];
+    for (final line in lines) {
+      final v = _normalizeMediaServerLine(line);
+      if (v == null) continue;
+      normalized.add(v);
+    }
+    if (normalized.isEmpty) return 0;
+
+    final prefs = await SharedPreferences.getInstance();
+    final current = prefs.getStringList(_kMediaServerLinesKey) ?? const [];
+    final set = <String>{
+      ...current.map((e) => e.trim()).where((e) => e.isNotEmpty),
+    };
+    var added = 0;
+    for (final e in normalized) {
+      if (set.add(e)) added++;
+    }
+
+    final next = set.toList()..sort();
+    await prefs.setStringList(_kMediaServerLinesKey, next);
+    return added;
+  }
+
+  Future<void> applyConfig({bool restartIfRunning = false}) async {
+    if (!isSupported) return;
+
+    if (restartIfRunning && _process != null) {
+      await stop();
+      await start();
+      return;
+    }
+
+    await prepareConfig();
+  }
+
   Future<void> prepareConfig() async {
     if (!isSupported) return;
     final uiRoot = await _ensureMetacubexdReady();
     await _ensureConfigPatched(externalUiDir: uiRoot);
     await refresh();
+  }
+
+  static String? _normalizeMediaServerLine(String raw) {
+    final input = raw.trim();
+    if (input.isEmpty) return null;
+
+    // Support basic URL / host(:port) inputs. Keep this tolerant: we only reject
+    // entries that are obviously unsafe for rule generation (spaces/commas).
+    if (input.contains(RegExp(r'[\s,]'))) return null;
+
+    String hostOrCidr = input;
+    if (!hostOrCidr.contains('://')) {
+      final parsed = Uri.tryParse('http://$hostOrCidr');
+      if (parsed != null && parsed.host.isNotEmpty) {
+        hostOrCidr = parsed.host;
+      }
+    } else {
+      final parsed = Uri.tryParse(hostOrCidr);
+      if (parsed != null && parsed.host.isNotEmpty) {
+        hostOrCidr = parsed.host;
+      }
+    }
+
+    hostOrCidr = hostOrCidr.trim();
+    if (hostOrCidr.isEmpty) return null;
+
+    // Normalize domain wildcards: *.example.com / .example.com -> example.com
+    if (hostOrCidr.startsWith('*.')) hostOrCidr = hostOrCidr.substring(2);
+    if (hostOrCidr.startsWith('.')) hostOrCidr = hostOrCidr.substring(1);
+    hostOrCidr = hostOrCidr.trim();
+    if (hostOrCidr.isEmpty) return null;
+
+    // IP / CIDR
+    if (hostOrCidr.contains('/')) {
+      final parts = hostOrCidr.split('/');
+      if (parts.length != 2) return null;
+      final ip = InternetAddress.tryParse(parts[0].trim());
+      final prefix = int.tryParse(parts[1].trim());
+      if (ip == null || ip.type != InternetAddressType.IPv4) return null;
+      if (prefix == null || prefix < 0 || prefix > 32) return null;
+      return 'ip:${ip.address}/$prefix';
+    }
+    final ip = InternetAddress.tryParse(hostOrCidr);
+    if (ip != null && ip.type == InternetAddressType.IPv4) {
+      return 'ip:${ip.address}/32';
+    }
+
+    // Domain/host
+    final domain = hostOrCidr.toLowerCase();
+    if (domain.contains(RegExp(r'[/:]'))) return null;
+    final cleaned =
+        domain.endsWith('.') ? domain.substring(0, domain.length - 1) : domain;
+    if (cleaned.trim().isEmpty) return null;
+    return 'domain:$cleaned';
   }
 
   Future<void> installFromFile(String srcPath) async {
@@ -433,25 +566,21 @@ class BuiltInProxyService extends ChangeNotifier {
   }
 
   Future<void> _ensureConfigPatched({required Directory? externalUiDir}) async {
+    // Ensure working dirs for providers/rules exist before mihomo parses config.
+    // (Missing directories can cause config load failure on some versions.)
+    final baseDir = await _baseDir();
+    await Directory('${baseDir.path}/providers').create(recursive: true);
+
     final file = await _configFile();
-    if (!await file.exists()) {
-      await file.writeAsString(_defaultConfigYaml, flush: true);
-    }
-
-    String content = await file.readAsString();
-    if (content.trim().isEmpty) {
-      content = _defaultConfigYaml;
-    }
-
     final subscriptionUrl = (await getSubscriptionUrl()).trim();
-    if (subscriptionUrl.isNotEmpty) {
-      content = await _buildManagedConfigYaml(subscriptionUrl);
-    }
+    final content = subscriptionUrl.isNotEmpty
+        ? await _buildManagedConfigYaml(subscriptionUrl)
+        : await _buildDirectConfigYaml();
 
     // Backward-compat: older default config accidentally created a proxy-group named "DIRECT"
     // which self-referenced and caused mihomo to fail with:
     // "loop is detected in ProxyGroup ... [DIRECT]".
-    content = _migrateDirectGroupLoop(content);
+    var patched = _migrateDirectGroupLoop(content);
 
     String quoteYamlString(String value) {
       final fixed = value.replaceAll("'", "''");
@@ -470,308 +599,173 @@ class BuiltInProxyService extends ChangeNotifier {
       return '$raw$suffix$key: $value\n';
     }
 
-    content = upsert(content, 'mixed-port', '$mixedPort');
-    content = upsert(content, 'socks-port', '${mixedPort + 1}');
-    content = upsert(content, 'allow-lan', 'false');
-    content = upsert(content, 'bind-address', '127.0.0.1');
-    content =
-        upsert(content, 'external-controller', '127.0.0.1:$controllerPort');
-    content = upsert(content, 'secret', '""');
+    patched = upsert(patched, 'mixed-port', '$mixedPort');
+    patched = upsert(patched, 'socks-port', '${mixedPort + 1}');
+    patched = upsert(patched, 'allow-lan', 'false');
+    patched = upsert(patched, 'bind-address', '127.0.0.1');
+    patched =
+        upsert(patched, 'external-controller', '127.0.0.1:$controllerPort');
+    patched = upsert(patched, 'secret', '""');
 
     if (externalUiDir != null) {
-      content =
-          upsert(content, 'external-ui', quoteYamlString(externalUiDir.path));
+      patched = upsert(
+        patched,
+        'external-ui',
+        quoteYamlString(externalUiDir.path),
+      );
     }
 
-    await file.writeAsString(content, flush: true);
+    await file.writeAsString(patched, flush: true);
   }
 
-  Future<String> _buildManagedConfigYaml(String subscriptionUrl) async {
-    // Best-effort: to hide empty country groups we need to peek into the
-    // subscription contents. If it fails, fall back to a common preset.
-    final scan = await _tryScanSubscription(subscriptionUrl);
-    final countryGroups = scan?.countryGroups ?? _defaultCountryGroups;
-    final includeLowRate = scan?.hasLowRate ?? true;
-    const lowRateGroupName = '低倍率/LOWRATE节点';
+  Future<String> _buildDirectConfigYaml() {
+    return _buildRepczLiteConfigYaml(subscriptionUrl: '');
+  }
 
-    String q(String value) {
-      final fixed = value.replaceAll("'", "''");
-      return "'$fixed'";
-    }
+  Future<String> _buildManagedConfigYaml(String subscriptionUrl) {
+    return _buildRepczLiteConfigYaml(subscriptionUrl: subscriptionUrl);
+  }
 
-    // For mihomo `filter:` regex strings, prefer YAML single-quoted strings:
-    // - Backslashes are treated literally.
-    // - Only single quotes need escaping by doubling.
-    String qRe(String value) => q(value);
-
-    final proxyEntryCandidates = <String>[
-      'AUTO',
-      ...countryGroups.map((g) => g.name),
-      if (includeLowRate) lowRateGroupName,
-      'MANUAL',
-      'DIRECT',
-    ];
+  Future<String> _buildRepczLiteConfigYaml({
+    required String subscriptionUrl,
+  }) async {
+    final subUrl = subscriptionUrl.trim();
+    final hasSubscription = subUrl.isNotEmpty;
+    final mediaRules = await _loadMediaServerRules();
 
     final b = StringBuffer()
-      ..writeln('# LinPlayer built-in proxy (mihomo) - Managed config')
-      ..writeln('# Generated by app. Edits may be overwritten.')
-      ..writeln('')
-      ..writeln('mode: rule')
-      ..writeln('log-level: info')
-      ..writeln('ipv6: false')
-      ..writeln('')
-      ..writeln('mixed-port: $mixedPort')
-      ..writeln('socks-port: ${mixedPort + 1}')
-      ..writeln('allow-lan: false')
-      ..writeln('bind-address: 127.0.0.1')
-      ..writeln('')
-      ..writeln('external-controller: 127.0.0.1:$controllerPort')
-      ..writeln('external-ui: ""')
-      ..writeln('secret: ""')
-      ..writeln('')
-      ..writeln('profile:')
-      ..writeln('  store-selected: true')
-      ..writeln('')
-      ..writeln('proxy-providers:')
-      ..writeln('  sub:')
-      ..writeln('    type: http')
-      ..writeln('    url: ${q(subscriptionUrl)}')
-      ..writeln('    interval: 86400')
-      ..writeln('    path: ./providers/sub.yaml')
-      ..writeln('    proxy: DIRECT')
-      ..writeln('    health-check:')
-      ..writeln('      enable: true')
-      ..writeln("      url: 'http://www.gstatic.com/generate_204'")
-      ..writeln('      interval: 600')
-      ..writeln('')
-      ..writeln('proxy-groups:')
-      ..writeln('  - name: AUTO')
-      ..writeln('    type: url-test')
-      ..writeln('    use: [sub]')
-      ..writeln("    url: 'http://www.gstatic.com/generate_204'")
-      ..writeln('    interval: 300')
-      ..writeln('    tolerance: 50')
-      ..writeln('')
-      ..writeln('  - name: MANUAL')
-      ..writeln('    type: select')
-      ..writeln('    use: [sub]')
-      ..writeln('    proxies: [DIRECT]')
+      ..writeln('# Author:https://github.com/Repcz')
+      ..writeln('# Template: config_lite.yaml (updated 2025-12-14 10:15)')
+      ..writeln('# Generated by LinPlayer. Edits may be overwritten.')
       ..writeln('');
 
-    for (final g in countryGroups) {
+    if (hasSubscription) {
       b
-        ..writeln('  - name: ${q(g.name)}')
-        ..writeln('    type: select')
-        ..writeln('    use: [sub]')
-        ..writeln('    filter: ${qRe(g.filterRegex)}')
-        ..writeln('');
-    }
-    if (includeLowRate) {
-      b
-        ..writeln('  - name: ${q(lowRateGroupName)}')
-        ..writeln('    type: select')
-        ..writeln('    use: [sub]')
-        ..writeln(
-          '    filter: ${qRe(r"(?i)(^|[^0-9.])0\.[0-9]{1,3} *(x|倍|倍率)?($|[^0-9.])")}',
-        )
+        ..writeln('proxy-providers:')
+        ..writeln('  Subscribe:')
+        ..writeln('    type: http')
+        ..writeln('    url: ${_q(subUrl)}')
+        ..writeln('    interval: 86400')
+        ..writeln('    path: ./providers/sub.yaml')
+        ..writeln('    proxy: DIRECT')
+        ..writeln('    health-check:')
+        ..writeln('      enable: true')
+        ..writeln('      url: http://1.1.1.1/generate_204')
+        ..writeln('      interval: 1800')
+        ..writeln('      timeout: 5000')
         ..writeln('');
     }
 
     b
-      ..writeln('  - name: PROXY')
-      ..writeln('    type: select')
-      ..writeln('    proxies:');
-    for (final name in proxyEntryCandidates) {
-      b.writeln('      - ${q(name)}');
-    }
-    b
+      ..writeln('mode: rule')
+      ..writeln('mixed-port: 7893')
+      ..writeln('tcp-concurrent: true')
+      ..writeln('allow-lan: true')
+      ..writeln('ipv6: false')
+      ..writeln('log-level: info')
+      ..writeln('unified-delay: true')
+      ..writeln('global-client-fingerprint: chrome')
+      ..writeln('find-process-mode: strict')
       ..writeln('')
-      ..writeln('  - name: 漏网之鱼')
+      ..writeln('geodata-mode: true')
+      ..writeln('geox-url:')
+      ..writeln(
+        '  geoip: "https://git.repcz.link/raw.githubusercontent.com/Loyalsoldier/geoip/release/geoip.dat"',
+      )
+      ..writeln(
+        '  geosite: "https://git.repcz.link/github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat"',
+      )
+      ..writeln(
+        '  mmdb: "https://git.repcz.link/raw.githubusercontent.com/Loyalsoldier/geoip/release/Country.mmdb"',
+      )
+      ..writeln(
+        '  asn: "https://git.repcz.link/raw.githubusercontent.com/Loyalsoldier/geoip/release/GeoLite2-ASN.mmdb"',
+      )
+      ..writeln('')
+      ..writeln('profile: { store-selected: true, store-fake-ip: false }')
+      ..writeln(
+        'sniffer: { enable: true, sniff: { HTTP: { ports: [80], override-destination: true }, TLS: { ports: [443, 8443] }, QUIC: { ports: [443, 8443] } } }',
+      )
+      ..writeln('')
+      ..writeln('tun:')
+      ..writeln('  enable: false')
+      ..writeln('  stack: mixed')
+      ..writeln('  dns-hijack: [any:53]')
+      ..writeln('')
+      ..writeln('dns:')
+      ..writeln('  enable: true')
+      ..writeln('  ipv6: false')
+      ..writeln('  enhanced-mode: fake-ip')
+      ..writeln('  listen: 127.0.0.1:1053')
+      ..writeln('  fake-ip-range: 198.18.0.1/16')
+      ..writeln(
+        "  fake-ip-filter: ['+.lan', '*', '+.local', '+.cmpassport.com', 'id6.me', 'open.e.189.cn', 'mdn.open.wo.cn', 'opencloud.wostore.cn', 'auth.wosms.cn', '+.10099.com.cn', '+.msftconnecttest.com', '+.msftncsi.com', 'lancache.steamcontent.com']",
+      )
+      ..writeln('  nameserver: [223.5.5.5, 119.29.29.29]')
+      ..writeln('')
+      ..writeln('proxy-groups:')
+      ..writeln('  - name: Proxy')
+      ..writeln('    type: select');
+
+    if (hasSubscription) {
+      b.writeln('    use: [Subscribe]');
+    }
+
+    b
+      ..writeln('    proxies: [DIRECT]')
+      ..writeln('')
+      ..writeln('  - name: ${_q(_mediaServerGroupName)}')
       ..writeln('    type: select')
-      ..writeln('    proxies: [PROXY, DIRECT]')
+      ..writeln('    proxies: [Proxy, DIRECT]')
       ..writeln('')
       ..writeln('rules:')
-      ..writeln('  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve')
-      ..writeln('  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve')
-      ..writeln('  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve')
-      ..writeln('  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve')
-      ..writeln('  - IP-CIDR,169.254.0.0/16,DIRECT,no-resolve')
-      ..writeln('  - MATCH,漏网之鱼')
+      ..writeln('  # LinPlayer: 用户添加的“媒体服务器线路”优先匹配')
+      ..writeln('  # （在这里添加规则可以覆盖后续的 GEOIP/GEOSITE 等规则）');
+
+    for (final r in mediaRules) {
+      b.writeln('  - ${r.toRuleLine(group: _mediaServerGroupName)}');
+    }
+
+    b
+      ..writeln('')
+      ..writeln('  - GEOSITE,openai,Proxy')
+      ..writeln('  - GEOSITE,category-games,Proxy')
+      ..writeln('  - GEOSITE,github,Proxy')
+      ..writeln('  - GEOSITE,telegram,Proxy')
+      ..writeln('  - GEOSITE,twitter,Proxy')
+      ..writeln('  - GEOSITE,microsoft,Proxy')
+      ..writeln('  - GEOSITE,youtube,Proxy')
+      ..writeln('  - GEOSITE,google,Proxy')
+      ..writeln('  - GEOSITE,geolocation-!cn,Proxy')
+      ..writeln('  - GEOSITE,private,DIRECT')
+      ..writeln('')
+      ..writeln('  - GEOIP,telegram,Proxy')
+      ..writeln('  - GEOIP,twitter,Proxy')
+      ..writeln('  - GEOIP,google,Proxy')
+      ..writeln('  - GEOIP,private,DIRECT')
+      ..writeln('  - GEOIP,cn,DIRECT')
+      ..writeln('')
+      ..writeln('  - MATCH,Proxy')
       ..writeln('');
 
     return b.toString();
   }
 
-  Future<_SubscriptionScanResult?> _tryScanSubscription(String url) async {
-    try {
-      final names = await _fetchSubscriptionNodeNames(url);
-      if (names.isEmpty) return null;
-      final countryGroups = _CountryGroup.buildFromNodeNames(names);
-      final hasLowRate = names.any(_SubscriptionPatterns.lowRate.hasMatch);
-      return _SubscriptionScanResult(
-        countryGroups: countryGroups,
-        hasLowRate: hasLowRate,
-      );
-    } catch (_) {
-      return null;
-    }
+  static String _q(String value) {
+    final fixed = value.replaceAll("'", "''");
+    return "'$fixed'";
   }
 
-  Future<List<String>> _fetchSubscriptionNodeNames(String url) async {
-    final uri = Uri.tryParse(url);
-    if (uri == null || !uri.hasScheme) return const [];
-
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 6)
-      ..findProxy = (_) => 'DIRECT';
-
-    try {
-      final req = await client.getUrl(uri).timeout(const Duration(seconds: 6));
-      req.headers.set('accept', '*/*');
-      final resp = await req.close().timeout(const Duration(seconds: 6));
-      final bytes = await consolidateHttpClientResponseBytes(resp);
-      final text = utf8.decode(bytes, allowMalformed: true);
-      return _extractSubscriptionNodeNames(text);
-    } finally {
-      client.close(force: true);
+  Future<List<_MediaServerRule>> _loadMediaServerRules() async {
+    final entries = await getMediaServerLines();
+    final rules = <_MediaServerRule>[];
+    for (final entry in entries) {
+      final e = entry.trim();
+      if (e.isEmpty) continue;
+      final rule = _MediaServerRule.tryParse(e);
+      if (rule != null) rules.add(rule);
     }
-  }
-
-  static List<String> _extractSubscriptionNodeNames(String raw) {
-    final text = raw.trim();
-    if (text.isEmpty) return const [];
-
-    // 1) Clash/Mihomo YAML (subconverter output).
-    final fromYaml = _extractProxyNamesFromYaml(text);
-    if (fromYaml.isNotEmpty) return fromYaml;
-
-    // 2) Base64 subscription: decode then retry YAML / URI list.
-    final decodedBytes = _tryDecodeBase64(text);
-    if (decodedBytes != null) {
-      final decodedText =
-          utf8.decode(decodedBytes, allowMalformed: true).trim();
-      final yaml2 = _extractProxyNamesFromYaml(decodedText);
-      if (yaml2.isNotEmpty) return yaml2;
-      final uri2 = _extractProxyNamesFromUriList(decodedText);
-      if (uri2.isNotEmpty) return uri2;
-    }
-
-    // 3) URI list as-is.
-    return _extractProxyNamesFromUriList(text);
-  }
-
-  static List<String> _extractProxyNamesFromYaml(String raw) {
-    final lines = raw.split(RegExp(r'\r?\n'));
-    int index = -1;
-    for (var i = 0; i < lines.length; i++) {
-      final t = lines[i].trimLeft();
-      if (t == 'proxies:' || t.startsWith('proxies: ')) {
-        index = i;
-        break;
-      }
-    }
-    if (index < 0) return const [];
-
-    int indentOf(String s) => s.length - s.trimLeft().length;
-    final baseIndent = indentOf(lines[index]);
-
-    final names = <String>[];
-    for (var i = index + 1; i < lines.length; i++) {
-      final line = lines[i];
-      if (line.trim().isEmpty) continue;
-      final trimmed = line.trimLeft();
-      if (trimmed.startsWith('#')) continue;
-
-      final indent = indentOf(line);
-      if (indent <= baseIndent && !trimmed.startsWith('-')) {
-        break;
-      }
-
-      if (!trimmed.startsWith('-')) continue;
-
-      final inline =
-          RegExp(r'-\s*\{\s*name\s*:\s*([^,}]+)').firstMatch(trimmed);
-      if (inline != null) {
-        final name = _cleanYamlString(inline.group(1)!);
-        if (name.isNotEmpty) names.add(name);
-        continue;
-      }
-
-      final multi = RegExp(r'-\s*name\s*:\s*(.+)$').firstMatch(trimmed);
-      if (multi != null) {
-        final name = _cleanYamlString(multi.group(1)!);
-        if (name.isNotEmpty) names.add(name);
-      }
-    }
-    return names;
-  }
-
-  static List<String> _extractProxyNamesFromUriList(String raw) {
-    final lines = raw.split(RegExp(r'\r?\n'));
-    final names = <String>[];
-    for (final line in lines) {
-      final s = line.trim();
-      if (s.isEmpty || s.startsWith('#')) continue;
-
-      // Most formats use URL fragment (#name).
-      final fragIdx = s.indexOf('#');
-      if (fragIdx >= 0 && fragIdx + 1 < s.length) {
-        final frag = s.substring(fragIdx + 1);
-        final decoded = Uri.decodeComponent(frag.replaceAll('+', '%20')).trim();
-        if (decoded.isNotEmpty) names.add(decoded);
-        continue;
-      }
-
-      // vmess://base64(json) uses `ps` as display name.
-      if (s.startsWith('vmess://')) {
-        final body = s.substring('vmess://'.length).trim();
-        final decoded = _tryDecodeBase64(body);
-        if (decoded == null) continue;
-        try {
-          final jsonStr = utf8.decode(decoded, allowMalformed: true);
-          final obj = jsonDecode(jsonStr);
-          if (obj is Map) {
-            final ps = obj['ps']?.toString().trim();
-            if (ps != null && ps.isNotEmpty) names.add(ps);
-          }
-        } catch (_) {}
-      }
-    }
-    return names;
-  }
-
-  static String _cleanYamlString(String raw) {
-    var s = raw.trim();
-    s = s.replaceAll(RegExp(r'\s+#.*$'), '').trim();
-    if (s.length >= 2) {
-      if ((s.startsWith("'") && s.endsWith("'")) ||
-          (s.startsWith('"') && s.endsWith('"'))) {
-        s = s.substring(1, s.length - 1);
-      }
-    }
-    s = s.replaceAll("''", "'");
-    return s.trim();
-  }
-
-  static Uint8List? _tryDecodeBase64(String raw) {
-    final s = raw.trim().replaceAll(RegExp(r'\s+'), '');
-    if (s.isEmpty) return null;
-
-    String pad(String v) {
-      final mod = v.length % 4;
-      if (mod == 0) return v;
-      return v + ('=' * (4 - mod));
-    }
-
-    try {
-      return Uint8List.fromList(base64.decode(pad(s)));
-    } catch (_) {
-      try {
-        return Uint8List.fromList(base64Url.decode(pad(s)));
-      } catch (_) {
-        return null;
-      }
-    }
+    return rules;
   }
 
   static String _migrateDirectGroupLoop(String raw) {
@@ -1061,170 +1055,63 @@ class BuiltInProxyService extends ChangeNotifier {
   }
 }
 
-class _SubscriptionPatterns {
-  static final RegExp countryCode = RegExp(
-    r'(?<![A-Z0-9])([A-Z]{2})(?=[0-9]|[^A-Z0-9]|$)',
-  );
+enum _MediaServerRuleType { domainSuffix, ipCidr }
 
-  static final RegExp lowRate = RegExp(
-    r'(^|[^0-9.])0\.[0-9]{1,3} *(x|倍|倍率)?($|[^0-9.])',
-    caseSensitive: false,
-  );
-}
+class _MediaServerRule {
+  final _MediaServerRuleType type;
+  final String value;
 
-class _SubscriptionScanResult {
-  final List<_CountryGroup> countryGroups;
-  final bool hasLowRate;
-
-  const _SubscriptionScanResult({
-    required this.countryGroups,
-    required this.hasLowRate,
-  });
-}
-
-class _CountryGroup {
-  const _CountryGroup({
-    required this.code,
-    required this.flagCode,
-    required this.matchCodes,
+  const _MediaServerRule({
+    required this.type,
+    required this.value,
   });
 
-  final String code;
-  final String flagCode;
-  final List<String> matchCodes;
+  static _MediaServerRule? tryParse(String entry) {
+    final e = entry.trim();
+    if (e.isEmpty) return null;
 
-  String get name {
-    final flag = _flagEmoji(flagCode);
-    if (flag.isEmpty) return code;
-    return '$flag $code';
-  }
-
-  String get filterRegex {
-    final codes = matchCodes.toSet().toList(growable: false)..sort();
-    final body = codes.map(RegExp.escape).join('|');
-    return r'(?i)(^|[^A-Z0-9])(?:' + body + r')(?=[0-9]|[^A-Z0-9]|$)';
-  }
-
-  static List<_CountryGroup> defaultPreset() {
-    return const [
-      _CountryGroup(code: 'HK', flagCode: 'HK', matchCodes: ['HK']),
-      _CountryGroup(code: 'SG', flagCode: 'SG', matchCodes: ['SG']),
-      _CountryGroup(code: 'JP', flagCode: 'JP', matchCodes: ['JP']),
-      _CountryGroup(code: 'US', flagCode: 'US', matchCodes: ['US']),
-      _CountryGroup(code: 'UK', flagCode: 'GB', matchCodes: ['UK', 'GB']),
-      _CountryGroup(code: 'GE', flagCode: 'DE', matchCodes: ['GE', 'DE']),
-    ];
-  }
-
-  static List<_CountryGroup> buildFromNodeNames(List<String> names) {
-    final rawCodes = <String>{};
-    for (final name in names) {
-      final upper = name.toUpperCase();
-      for (final m in _SubscriptionPatterns.countryCode.allMatches(upper)) {
-        final code = m.group(1);
-        if (code != null && code.isNotEmpty) rawCodes.add(code);
-      }
+    if (e.startsWith('domain:')) {
+      final v = e.substring('domain:'.length).trim();
+      if (v.isEmpty) return null;
+      return _MediaServerRule(type: _MediaServerRuleType.domainSuffix, value: v);
+    }
+    if (e.startsWith('ip:')) {
+      final v = e.substring('ip:'.length).trim();
+      if (v.isEmpty) return null;
+      return _MediaServerRule(type: _MediaServerRuleType.ipCidr, value: v);
     }
 
-    final groups = <_CountryGroup>[];
-
-    bool take(String code) => rawCodes.remove(code);
-
-    // Germany: users sometimes tag it as "GE" (non-ISO) or "DE" (ISO).
-    final hasGE = take('GE');
-    final hasDE = take('DE');
-    if (hasGE || hasDE) {
-      groups.add(
-        _CountryGroup(
-          code: hasGE ? 'GE' : 'DE',
-          flagCode: 'DE',
-          matchCodes: [
-            if (hasGE) 'GE',
-            if (hasDE) 'DE',
-          ],
-        ),
+    // Backward-compat: accept raw domain / ip / cidr forms.
+    if (e.contains('/')) {
+      final parts = e.split('/');
+      if (parts.length != 2) return null;
+      final ip = InternetAddress.tryParse(parts[0].trim());
+      final prefix = int.tryParse(parts[1].trim());
+      if (ip == null || ip.type != InternetAddressType.IPv4) return null;
+      if (prefix == null || prefix < 0 || prefix > 32) return null;
+      return _MediaServerRule(
+        type: _MediaServerRuleType.ipCidr,
+        value: '${ip.address}/$prefix',
       );
     }
 
-    // United Kingdom: users may tag it as "UK" (alias) or "GB" (ISO).
-    final hasUK = take('UK');
-    final hasGB = take('GB');
-    if (hasUK || hasGB) {
-      groups.add(
-        _CountryGroup(
-          code: hasUK ? 'UK' : 'GB',
-          flagCode: 'GB',
-          matchCodes: [
-            if (hasUK) 'UK',
-            if (hasGB) 'GB',
-          ],
-        ),
+    final ip = InternetAddress.tryParse(e);
+    if (ip != null && ip.type == InternetAddressType.IPv4) {
+      return _MediaServerRule(
+        type: _MediaServerRuleType.ipCidr,
+        value: '${ip.address}/32',
       );
     }
 
-    for (final code in rawCodes) {
-      groups.add(_CountryGroup(code: code, flagCode: code, matchCodes: [code]));
-    }
-
-    const preferred = <String>[
-      'HK',
-      'SG',
-      'JP',
-      'TW',
-      'KR',
-      'US',
-      'UK',
-      'GB',
-      'GE',
-      'DE',
-    ];
-    int weight(String c) {
-      final idx = preferred.indexOf(c);
-      return idx < 0 ? 999 : idx;
-    }
-
-    groups.sort((a, b) {
-      final wa = weight(a.code);
-      final wb = weight(b.code);
-      if (wa != wb) return wa.compareTo(wb);
-      return a.code.compareTo(b.code);
-    });
-    return groups;
+    return _MediaServerRule(type: _MediaServerRuleType.domainSuffix, value: e);
   }
 
-  static String _flagEmoji(String code) {
-    final v = code.trim().toUpperCase();
-    if (!RegExp(r'^[A-Z]{2}$').hasMatch(v)) return '';
-    final a = 0x1F1E6 + (v.codeUnitAt(0) - 0x41);
-    final b = 0x1F1E6 + (v.codeUnitAt(1) - 0x41);
-    return String.fromCharCode(a) + String.fromCharCode(b);
+  String toRuleLine({required String group}) {
+    switch (type) {
+      case _MediaServerRuleType.domainSuffix:
+        return 'DOMAIN-SUFFIX,$value,$group';
+      case _MediaServerRuleType.ipCidr:
+        return 'IP-CIDR,$value,$group,no-resolve';
+    }
   }
 }
-
-const String _defaultConfigYaml = r'''# LinPlayer built-in proxy (mihomo) - MVP
-#
-# Security: bind to 127.0.0.1 only.
-# This config intentionally starts in DIRECT mode (no subscriptions).
-#
-mixed-port: 7890
-socks-port: 7891
-allow-lan: false
-bind-address: 127.0.0.1
-mode: rule
-log-level: info
-ipv6: false
-
-external-controller: 127.0.0.1:9090
-external-ui: ""
-secret: ""
-
-proxies: []
-proxy-groups:
-  - name: PROXY
-    type: select
-    proxies:
-      - DIRECT
-
-rules:
-  - MATCH,PROXY
-''';

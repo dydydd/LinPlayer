@@ -68,11 +68,26 @@
     <div class="row" id="proxySubRow">
       <div class="label">
         <div class="title">订阅地址（可选）</div>
-        <div class="desc">保存后将写入 mihomo 配置（需重启内置代理生效）</div>
+        <div class="desc">保存后将写入 mihomo 配置（运行中会自动重启生效）</div>
       </div>
       <div class="control" style="width: 360px;">
         <input id="tvBuiltInProxySubscriptionUrl" placeholder="https://..." />
         <button type="button" id="saveProxySubBtn" style="margin-top: 8px;">保存</button>
+      </div>
+    </div>
+
+    <div class="row" id="proxyMediaRow">
+      <div class="label">
+        <div class="title">添加线路</div>
+        <div class="desc">自定义媒体服务器线路；保存后写入 mihomo 规则（运行中会自动重启生效）</div>
+      </div>
+      <div class="control" style="width: 360px;">
+        <input id="tvBuiltInProxyMediaServerLine" placeholder="https://example.com:8920 / example.com / 1.2.3.4/32" />
+        <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px;">
+          <button type="button" id="addProxyMediaBtn">添加</button>
+          <button type="button" id="clearProxyMediaBtn">清空</button>
+        </div>
+        <pre id="proxyMediaPreview" style="margin-top: 8px;"></pre>
       </div>
     </div>
 
@@ -216,6 +231,11 @@
       proxySubRow: document.getElementById('proxySubRow'),
       tvBuiltInProxySubscriptionUrl: document.getElementById('tvBuiltInProxySubscriptionUrl'),
       saveProxySubBtn: document.getElementById('saveProxySubBtn'),
+      proxyMediaRow: document.getElementById('proxyMediaRow'),
+      tvBuiltInProxyMediaServerLine: document.getElementById('tvBuiltInProxyMediaServerLine'),
+      addProxyMediaBtn: document.getElementById('addProxyMediaBtn'),
+      clearProxyMediaBtn: document.getElementById('clearProxyMediaBtn'),
+      proxyMediaPreview: document.getElementById('proxyMediaPreview'),
       tvBackgroundMode: document.getElementById('tvBackgroundMode'),
       bgColorWrap: document.getElementById('bgColorWrap'),
       tvBackgroundColorPicker: document.getElementById('tvBackgroundColorPicker'),
@@ -281,7 +301,11 @@
         els.tvBuiltInProxyEnabled.disabled = !proxySupported;
         els.proxyDesc.textContent = proxySupported ? (proxyStatus.message || '支持') : '仅 Android TV 支持';
         els.proxySubRow.style.display = proxySupported ? '' : 'none';
+        els.proxyMediaRow.style.display = proxySupported ? '' : 'none';
         els.tvBuiltInProxySubscriptionUrl.value = String(values.tvBuiltInProxySubscriptionUrl || '');
+        const mediaLines = Array.isArray(values.tvBuiltInProxyMediaServerLines) ? values.tvBuiltInProxyMediaServerLines : [];
+        els.proxyMediaPreview.textContent = mediaLines.length ? mediaLines.join('\n') : '未添加';
+        els.clearProxyMediaBtn.disabled = !proxySupported || mediaLines.length === 0;
 
         setSelectOptions(els.tvBackgroundMode, options.tvBackgroundMode || []);
         const bgMode = String(values.tvBackgroundMode || 'none');
@@ -386,6 +410,17 @@
       await save({
         tvBuiltInProxySubscriptionUrl: String(els.tvBuiltInProxySubscriptionUrl.value || '').trim(),
       });
+    });
+    els.addProxyMediaBtn.addEventListener('click', async () => {
+      const v = String(els.tvBuiltInProxyMediaServerLine.value || '').trim();
+      if (!v) { log('请输入线路'); return; }
+      await save({ tvBuiltInProxyMediaServerLineAdd: v });
+      els.tvBuiltInProxyMediaServerLine.value = '';
+    });
+    els.clearProxyMediaBtn.addEventListener('click', async () => {
+      const ok = confirm('确定清空所有线路吗？');
+      if (!ok) return;
+      await save({ tvBuiltInProxyMediaServerLinesClear: true });
     });
     els.tvBackgroundMode.addEventListener('change', async (e) => {
       await save({ tvBackgroundMode: String(e.target.value || 'none') });

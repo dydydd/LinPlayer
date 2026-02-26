@@ -52,6 +52,7 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _tvRemoteBusy = false;
   bool _tvProxyBusy = false;
   String _tvProxySubscriptionUrl = '';
+  List<String> _tvProxyMediaServerLines = const [];
   final ScrollController _scrollController = ScrollController();
   VoidCallback? _primaryFocusListener;
   Timer? _focusEnsureTimer;
@@ -65,6 +66,7 @@ class _SettingsPageState extends State<SettingsPage> {
     if (DeviceType.isTv) {
       unawaited(BuiltInProxyService.instance.refresh());
       unawaited(_loadTvProxySubscriptionUrl());
+      unawaited(_loadTvProxyMediaServerLines());
     }
   }
 
@@ -141,6 +143,14 @@ class _SettingsPageState extends State<SettingsPage> {
       final url = await BuiltInProxyService.instance.getSubscriptionUrl();
       if (!mounted) return;
       setState(() => _tvProxySubscriptionUrl = url);
+    } catch (_) {}
+  }
+
+  Future<void> _loadTvProxyMediaServerLines() async {
+    try {
+      final lines = await BuiltInProxyService.instance.getMediaServerLines();
+      if (!mounted) return;
+      setState(() => _tvProxyMediaServerLines = lines);
     } catch (_) {}
   }
 
@@ -1498,7 +1508,7 @@ class _SettingsPageState extends State<SettingsPage> {
           textInputAction: TextInputAction.done,
           decoration: const InputDecoration(
             hintText: 'https://...',
-            helperText: '保存后将写入 mihomo 配置（需重启内置代理生效）',
+            helperText: '保存后将写入 mihomo 配置（运行中会自动重启生效）',
           ),
         ),
         actions: [
@@ -1517,16 +1527,131 @@ class _SettingsPageState extends State<SettingsPage> {
 
     if (next == null) return;
     setState(() => _tvProxyBusy = true);
+    final wasRunning =
+        BuiltInProxyService.instance.status.state == BuiltInProxyState.running;
 
     try {
       await BuiltInProxyService.instance.setSubscriptionUrl(next);
-      await BuiltInProxyService.instance.prepareConfig();
+      await BuiltInProxyService.instance.applyConfig(restartIfRunning: true);
       if (!context.mounted) return;
       setState(() => _tvProxySubscriptionUrl = next);
 
       final effective = next.trim();
-      final hint = effective.isEmpty ? '已清空订阅地址' : '已保存订阅地址（重启内置代理后生效）';
+      final hint = effective.isEmpty
+          ? (wasRunning ? '已清空订阅地址，并重启内置代理生效' : '已清空订阅地址')
+          : (wasRunning ? '已保存订阅地址，并重启内置代理生效' : '已保存订阅地址（下次启动内置代理生效）');
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(hint)));
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('保存失败：$e')),
+      );
+    } finally {
+      if (mounted) setState(() => _tvProxyBusy = false);
+    }
+  }
+
+  Future<void> _editTvProxyMediaServerLines(BuildContext context) async {
+    if (_tvProxyBusy) return;
+
+    const clearSentinel = '__clear__';
+    final controller = TextEditingController();
+    final preview = _tvProxyMediaServerLines.isEmpty
+        ? '未添加'
+        : _tvProxyMediaServerLines
+            .take(6)
+            .map(BuiltInProxyService.mediaServerLineForDisplay)
+            .join('\n');
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('添加线路'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: controller,
+                autofocus: true,
+                keyboardType: TextInputType.url,
+                textInputAction: TextInputAction.done,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  hintText: 'https://example.com:8920\nexample.com\n1.2.3.4/32',
+                  helperText:
+                      '支持 URL / 域名 / IP / CIDR（每行一个）\n保存后写入 mihomo 规则，并在内置代理运行中时自动重启生效',
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '已添加（最多预览 6 条）：\n$preview',
+                style: Theme.of(dctx).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(dctx).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(null),
+            child: const Text('取消'),
+          ),
+          if (_tvProxyMediaServerLines.isNotEmpty)
+            TextButton(
+              onPressed: () => Navigator.of(dctx).pop(clearSentinel),
+              child: const Text('清空'),
+            ),
+          FilledButton(
+            onPressed: () => Navigator.of(dctx).pop(controller.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+
+    if (result == null) return;
+    setState(() => _tvProxyBusy = true);
+
+    final wasRunning =
+        BuiltInProxyService.instance.status.state == BuiltInProxyState.running;
+
+    try {
+      if (result == clearSentinel) {
+        await BuiltInProxyService.instance.clearMediaServerLines();
+        await BuiltInProxyService.instance.applyConfig(restartIfRunning: true);
+        final lines = await BuiltInProxyService.instance.getMediaServerLines();
+        if (!context.mounted) return;
+        setState(() => _tvProxyMediaServerLines = lines);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(wasRunning ? '已清空并重启内置代理' : '已清空线路')),
+        );
+        return;
+      }
+
+      final added =
+          await BuiltInProxyService.instance.addMediaServerLinesFromText(result);
+      if (added <= 0) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('未识别到有效线路')),
+        );
+        return;
+      }
+
+      await BuiltInProxyService.instance.applyConfig(restartIfRunning: true);
+      final lines = await BuiltInProxyService.instance.getMediaServerLines();
+      if (!context.mounted) return;
+      setState(() => _tvProxyMediaServerLines = lines);
+      final msg = wasRunning
+          ? '已添加 $added 条线路，并重启内置代理生效'
+          : '已添加 $added 条线路（下次启动内置代理生效）';
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(msg)));
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1607,6 +1732,15 @@ class _SettingsPageState extends State<SettingsPage> {
                           ? proxyStatus.message
                           : '仅 Android TV 支持';
 
+                      final mediaLines = _tvProxyMediaServerLines;
+                      final mediaPreview = mediaLines
+                          .take(2)
+                          .map(BuiltInProxyService.mediaServerLineForDisplay)
+                          .join('、');
+                      final mediaSubtitle = mediaLines.isEmpty
+                          ? '未添加（可强制媒体服务器走代理）'
+                          : '已添加 ${mediaLines.length} 条：$mediaPreview${mediaLines.length > 2 ? '…' : ''}';
+
                       return Column(
                         children: [
                           SwitchListTile(
@@ -1673,6 +1807,26 @@ class _SettingsPageState extends State<SettingsPage> {
                             onTap: _tvProxyBusy
                                 ? null
                                 : () => _editTvProxySubscriptionUrl(context),
+                          ),
+                          const Divider(height: 1),
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.alt_route_outlined),
+                            title: const Text('添加线路'),
+                            subtitle: Text(
+                              mediaSubtitle,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            trailing: FilledButton(
+                              onPressed: _tvProxyBusy
+                                  ? null
+                                  : () => _editTvProxyMediaServerLines(context),
+                              child: Text(mediaLines.isEmpty ? '添加' : '管理'),
+                            ),
+                            onTap: _tvProxyBusy
+                                ? null
+                                : () => _editTvProxyMediaServerLines(context),
                           ),
                           if (proxyEnabled) ...[
                             const Divider(height: 1),
