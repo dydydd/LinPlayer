@@ -171,12 +171,15 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
   // Genres rarely change compared to item lists. Cache aggressively and rely on
   // a lightweight change-detection check to refresh when the library updates.
   static const Duration _kGenresCacheMaxAge = Duration(days: 365);
+  static const Duration _kYearsCacheMaxAge = Duration(hours: 24);
 
   final ScrollController _scroll = ScrollController();
   final TextEditingController _minRatingController = TextEditingController();
   final TextEditingController _maxRatingController = TextEditingController();
   final TextEditingController _yearFromController = TextEditingController();
   final TextEditingController _yearToController = TextEditingController();
+  final TextEditingController _customPrefixInputController =
+      TextEditingController();
 
   bool _loadingMore = false;
   bool _isRequesting = false;
@@ -199,13 +202,16 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
   List<String>? _availableGenresFromServer;
   List<int>? _availableYearsFromServer;
   int? _availableGenresFetchedAtMs;
+  int? _availableYearsFetchedAtMs;
   int? _availableGenresLibraryTotal;
   String? _availableGenresLibraryLatestItemId;
   int? _availableGenresLibrarySignatureAtMs;
   Future<LibraryFilterOptions>? _availableGenresInFlight;
   Future<void>? _availableGenresSignatureInFlight;
+  Future<void>? _availableYearsScanInFlight;
   String _lastServerGenresKey = '';
   bool _isLoadingGenresFromServer = false;
+  bool _isScanningYearsFromServer = false;
   bool _pendingGenresReload = false;
 
   bool _filterPanelOpen = false;
@@ -248,9 +254,15 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
     if (!mounted) return;
     await _restoreGenresCache();
     if (!mounted) return;
-    _maybeReloadServerGenres(force: !_isGenresCacheFresh());
+    final pinned = widget.appState.libraryFilterPanelPinned;
+    final cachedYearsEmpty =
+        _availableYearsFromServer != null && _availableYearsFromServer!.isEmpty;
+    _maybeReloadServerGenres(
+      force: !_isGenresCacheFresh() || (pinned && cachedYearsEmpty),
+    );
     await _load(reset: true);
     if (!mounted) return;
+    _maybeScanYearsFromServer(requestKey: _serverGenresKey());
     _checkLibraryChangedAndMaybeReloadGenres();
   }
 
@@ -261,6 +273,14 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
     final now = DateTime.now().millisecondsSinceEpoch;
     final age = now - at;
     return age >= 0 && age <= _kGenresCacheMaxAge.inMilliseconds;
+  }
+
+  bool _isYearsCacheFresh() {
+    final at = _availableYearsFetchedAtMs;
+    if (at == null || at <= 0) return false;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final age = now - at;
+    return age >= 0 && age <= _kYearsCacheMaxAge.inMilliseconds;
   }
 
   Future<void> _restoreGenresCache() async {
@@ -307,6 +327,13 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
           ? fetchedAt
           : int.tryParse((fetchedAt ?? '').toString().trim());
 
+      final yearsFetchedAt = decoded['yearsFetchedAt'];
+      final yearsFetchedAtMs = yearsFetchedAt is int
+          ? yearsFetchedAt
+          : int.tryParse((yearsFetchedAt ?? '').toString().trim());
+      final fallbackYearsFetchedAtMs =
+          yearsFetchedAtMs ?? (outYears.isNotEmpty ? fetchedAtMs : null);
+
       final rawLibraryTotal = decoded['libraryTotal'];
       final libraryTotal = rawLibraryTotal is int
           ? rawLibraryTotal
@@ -323,6 +350,7 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
         _availableGenresFromServer = rawGenres is List ? outGenres : null;
         _availableYearsFromServer = rawYears is List ? outYears : null;
         _availableGenresFetchedAtMs = fetchedAtMs;
+        _availableYearsFetchedAtMs = fallbackYearsFetchedAtMs;
         _availableGenresLibraryTotal = libraryTotal;
         _availableGenresLibraryLatestItemId = latestItemId;
         _availableGenresLibrarySignatureAtMs = signatureAtMs;
@@ -337,6 +365,7 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
     List<String>? genres,
     List<int>? years,
     int? fetchedAtMs,
+    int? yearsFetchedAtMs,
     int? libraryTotal,
     String? libraryLatestItemId,
     int? librarySignatureAtMs,
@@ -363,6 +392,7 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
       if (genres != null) merged['genres'] = genres;
       if (years != null) merged['years'] = years;
       if (fetchedAtMs != null) merged['fetchedAt'] = fetchedAtMs;
+      if (yearsFetchedAtMs != null) merged['yearsFetchedAt'] = yearsFetchedAtMs;
       if (libraryTotal != null) merged['libraryTotal'] = libraryTotal;
       if (libraryLatestItemId != null) {
         merged['libraryLatestItemId'] = libraryLatestItemId;
@@ -708,30 +738,44 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
     request.then((filters) {
       if (!mounted) return;
       if (requestKey != _serverGenresKey()) return;
+      final currentYears = _availableYearsFromServer;
       final genres = filters.genres;
       final years = filters.years;
       final fetchedAtMs = DateTime.now().millisecondsSinceEpoch;
+      final reuseExistingYears = requestKey == _lastServerGenresKey;
+      final nextYears =
+          years.isNotEmpty
+              ? years
+              : (reuseExistingYears ? (currentYears ?? years) : years);
+      final nextYearsFetchedAtMs =
+          years.isNotEmpty
+              ? fetchedAtMs
+              : (reuseExistingYears ? _availableYearsFetchedAtMs : null);
       setState(() {
         _availableGenresFromServer = genres;
-        _availableYearsFromServer = years;
+        _availableYearsFromServer = nextYears;
         _availableGenresFetchedAtMs = fetchedAtMs;
+        _availableYearsFetchedAtMs = nextYearsFetchedAtMs;
         _lastServerGenresKey = requestKey;
         _isLoadingGenresFromServer = false;
       });
       unawaited(
         _persistGenresCache(
           genres: genres,
-          years: years,
+          years: nextYears,
           fetchedAtMs: fetchedAtMs,
+          yearsFetchedAtMs: nextYearsFetchedAtMs,
           libraryTotal: _availableGenresLibraryTotal,
           libraryLatestItemId: _availableGenresLibraryLatestItemId,
           librarySignatureAtMs: _availableGenresLibrarySignatureAtMs,
         ),
       );
+      _maybeScanYearsFromServer(requestKey: requestKey);
     }).catchError((_) {
       if (!mounted) return;
       if (requestKey != _serverGenresKey()) return;
       setState(() => _isLoadingGenresFromServer = false);
+      _maybeScanYearsFromServer(requestKey: requestKey);
     }).whenComplete(() {
       if (_availableGenresInFlight == request) {
         _availableGenresInFlight = null;
@@ -744,6 +788,98 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
         _maybeReloadServerGenres(force: true);
       }
     });
+  }
+
+  void _maybeScanYearsFromServer({
+    required String requestKey,
+    bool force = false,
+  }) {
+    if (!mounted) return;
+    if (requestKey != _serverGenresKey()) return;
+
+    if (!force && _availableYearsFromServer != null && _isYearsCacheFresh()) {
+      return;
+    }
+
+    final inFlight = _availableYearsScanInFlight;
+    if (inFlight != null) return;
+
+    final access = resolveServerAccess(appState: widget.appState);
+    if (access == null) return;
+
+    setState(() => _isScanningYearsFromServer = true);
+
+    final future = _scanAvailableYearsFromServer(
+      access: access,
+      requestKey: requestKey,
+    );
+    _availableYearsScanInFlight = future;
+
+    future.catchError((_) {
+      // Best-effort.
+    }).whenComplete(() {
+      if (_availableYearsScanInFlight == future) {
+        _availableYearsScanInFlight = null;
+      }
+      if (mounted && _isScanningYearsFromServer) {
+        setState(() => _isScanningYearsFromServer = false);
+      }
+    });
+  }
+
+  Future<void> _scanAvailableYearsFromServer({
+    required ServerAccess access,
+    required String requestKey,
+  }) async {
+    const pageSize = 500;
+    final seen = <int>{};
+    int startIndex = 0;
+    int total = 0;
+
+    while (true) {
+      if (!mounted) return;
+      if (requestKey != _serverGenresKey()) return;
+
+      final result = await access.adapter.fetchItems(
+        access.auth,
+        parentId: widget.parentId,
+        startIndex: startIndex,
+        limit: pageSize,
+        includeItemTypes: _serverIncludeItemTypes(),
+        recursive: true,
+        excludeFolders: true,
+        fields: 'ProductionYear,PremiereDate',
+      );
+
+      for (final item in result.items) {
+        final y = _itemYear(item);
+        if (y != null) seen.add(y);
+      }
+
+      total = result.total;
+      startIndex += result.items.length;
+
+      if (result.items.isEmpty) break;
+      if (total != 0 && startIndex >= total) break;
+    }
+
+    final years = seen.toList()..sort((a, b) => b.compareTo(a));
+    final fetchedAtMs = DateTime.now().millisecondsSinceEpoch;
+
+    if (!mounted) return;
+    if (requestKey != _serverGenresKey()) return;
+
+    setState(() {
+      _availableYearsFromServer = years;
+      _availableYearsFetchedAtMs = fetchedAtMs;
+      _lastServerGenresKey = requestKey;
+    });
+    unawaited(
+      _persistGenresCache(
+        years: years,
+        yearsFetchedAtMs: fetchedAtMs,
+      ),
+    );
   }
 
   void _checkLibraryChangedAndMaybeReloadGenres() {
@@ -951,6 +1087,22 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
     return MapEntry(prefix, value);
   }
 
+  void _addCustomPrefixFromInput() {
+    final parsed = _parseCustomPrefix(_customPrefixInputController.text);
+    if (parsed == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('格式：前缀:值（如 语言:中文）')),
+      );
+      return;
+    }
+
+    setState(() {
+      _customPrefixSelections[parsed.key] = parsed.value;
+      _customPrefixInputController.text = '';
+    });
+    _onFiltersChanged();
+  }
+
   bool _matchesRating(MediaItem item) {
     if (_minRating == null && _maxRating == null) return true;
     final rating = item.communityRating;
@@ -1096,6 +1248,7 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
     _maxRatingController.dispose();
     _yearFromController.dispose();
     _yearToController.dispose();
+    _customPrefixInputController.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -1269,7 +1422,6 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
 
         final genres = <String>{};
         final years = <int>{};
-        final customGroups = <String, Set<String>>{};
         for (final item in allItems) {
           final y = _itemYear(item);
           if (y != null) years.add(y);
@@ -1277,27 +1429,7 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
           for (final raw in item.genres) {
             final normalized = raw.trim();
             if (normalized.isEmpty) continue;
-            final parsed =
-                customPrefixEnabled ? _parseCustomPrefix(normalized) : null;
-            if (parsed != null) {
-              customGroups
-                  .putIfAbsent(parsed.key, () => <String>{})
-                  .add(parsed.value);
-              continue;
-            }
             genres.add(normalized);
-          }
-
-          if (customPrefixEnabled) {
-            for (final raw in item.tags) {
-              final normalized = raw.trim();
-              if (normalized.isEmpty) continue;
-              final parsed = _parseCustomPrefix(normalized);
-              if (parsed == null) continue;
-              customGroups
-                  .putIfAbsent(parsed.key, () => <String>{})
-                  .add(parsed.value);
-            }
           }
         }
         final localGenreList = genres.toList()
@@ -1357,8 +1489,6 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
 
         mergedYearList.sort((a, b) => b.compareTo(a));
         final yearList = mergedYearList;
-        final customGroupList = customGroups.entries.toList()
-          ..sort((a, b) => a.key.toLowerCase().compareTo(b.key.toLowerCase()));
 
         final items = allItems
             .where(
@@ -1452,7 +1582,11 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
                 : () {
                     final next = !_filterPanelOpen;
                     setState(() => _filterPanelOpen = next);
-                    if (next) _maybeReloadServerGenres();
+                    if (next) {
+                      final cachedYearsEmpty = _availableYearsFromServer != null &&
+                          _availableYearsFromServer!.isEmpty;
+                      _maybeReloadServerGenres(force: cachedYearsEmpty);
+                    }
                   },
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -1561,9 +1695,9 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
                       },
                     ),
                     if (!usingServerYearList &&
-                        _availableYearsFromServer == null &&
                         canLoadMore &&
-                        !_isLoadingGenresFromServer)
+                        !_isLoadingGenresFromServer &&
+                        !_isScanningYearsFromServer)
                       _optionChip(
                         context,
                         uiScale: uiScale,
@@ -1571,7 +1705,7 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
                         selected: false,
                         onTap: () => _maybeReloadServerGenres(force: true),
                       ),
-                    if (_isLoadingGenresFromServer)
+                    if (_isLoadingGenresFromServer || _isScanningYearsFromServer)
                       Padding(
                         padding: EdgeInsets.symmetric(horizontal: 4 * uiScale),
                         child: SizedBox(
@@ -1755,54 +1889,66 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
                   ],
                 ),
                 if (customPrefixEnabled)
-                  for (final entry in customGroupList)
-                    _filterRow(
-                      context,
-                      uiScale: uiScale,
-                      label: entry.key,
-                      children: [
+                  _filterRow(
+                    context,
+                    uiScale: uiScale,
+                    label: '自定义前缀',
+                    children: [
+                      ConstrainedBox(
+                        constraints: BoxConstraints.tightFor(
+                          width: 220 * uiScale,
+                          height: 34 * uiScale,
+                        ),
+                        child: TextField(
+                          controller: _customPrefixInputController,
+                          style: const TextStyle(fontSize: 13),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            hintText: '前缀:值（如 语言:中文）',
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 8 * uiScale,
+                              vertical: 9 * uiScale,
+                            ),
+                            border: const OutlineInputBorder(
+                              borderRadius: BorderRadius.zero,
+                            ),
+                          ),
+                          onSubmitted: (_) => _addCustomPrefixFromInput(),
+                        ),
+                      ),
+                      _optionChip(
+                        context,
+                        uiScale: uiScale,
+                        label: '添加',
+                        selected: false,
+                        onTap: _addCustomPrefixFromInput,
+                      ),
+                      if (_customPrefixSelections.isNotEmpty)
                         _optionChip(
                           context,
                           uiScale: uiScale,
-                          label: '全部',
-                          selected: (_customPrefixSelections[entry.key] ?? '')
-                              .trim()
-                              .isEmpty,
+                          label: '清空',
+                          selected: false,
                           onTap: () {
-                            if ((_customPrefixSelections[entry.key] ?? '')
-                                .trim()
-                                .isEmpty) {
-                              return;
-                            }
-                            setState(
-                              () => _customPrefixSelections.remove(entry.key),
-                            );
+                            setState(() => _customPrefixSelections.clear());
                             _onFiltersChanged();
                           },
                         ),
-                        for (final value in (entry.value.toList()
-                          ..sort((a, b) =>
-                              a.toLowerCase().compareTo(b.toLowerCase()))))
-                          _optionChip(
-                            context,
-                            uiScale: uiScale,
-                            label: value,
-                            selected: _customPrefixSelections[entry.key] == value,
-                            onTap: () {
-                              final current =
-                                  _customPrefixSelections[entry.key];
-                              setState(() {
-                                if (current == value) {
-                                  _customPrefixSelections.remove(entry.key);
-                                } else {
-                                  _customPrefixSelections[entry.key] = value;
-                                }
-                              });
-                              _onFiltersChanged();
-                            },
-                          ),
-                      ],
-                    ),
+                      for (final entry in (_customPrefixSelections.entries.toList()
+                        ..sort((a, b) =>
+                            a.key.toLowerCase().compareTo(b.key.toLowerCase()))))
+                        _optionChip(
+                          context,
+                          uiScale: uiScale,
+                          label: '${entry.key}:${(entry.value ?? '').trim()} ×',
+                          selected: true,
+                          onTap: () {
+                            setState(() => _customPrefixSelections.remove(entry.key));
+                            _onFiltersChanged();
+                          },
+                        ),
+                    ],
+                  ),
               ],
             ),
           );

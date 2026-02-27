@@ -90,6 +90,19 @@ List<String> _normalizeStringList(dynamic raw) {
   return out;
 }
 
+List<String> _stringListPreserveOrder(dynamic raw) {
+  if (raw is! List) return const <String>[];
+  final out = <String>[];
+  final seen = <String>{};
+  for (final entry in raw) {
+    final v = _stringFromListOrName(entry).trim();
+    if (v.isEmpty) continue;
+    final key = v.toLowerCase();
+    if (seen.add(key)) out.add(v);
+  }
+  return out;
+}
+
 int? _intFromListOrName(dynamic raw) {
   if (raw == null) return null;
   if (raw is int) return raw;
@@ -187,8 +200,18 @@ class MediaItem {
         premiereDate: json['PremiereDate'] as String?,
         productionYear: json['ProductionYear'] as int?,
         status: json['Status'] as String?,
-        genres: (json['Genres'] as List?)?.cast<String>() ?? const <String>[],
-        tags: (json['Tags'] as List?)?.cast<String>() ?? const <String>[],
+        genres: _stringListPreserveOrder(
+          json['Genres'] ??
+              json['genres'] ??
+              json['GenreItems'] ??
+              json['genreItems'],
+        ),
+        tags: _stringListPreserveOrder(
+          json['Tags'] ??
+              json['tags'] ??
+              json['TagItems'] ??
+              json['tagItems'],
+        ),
         runTimeTicks: json['RunTimeTicks'] as int?,
         sizeBytes: json['Size'] as int?,
         container: json['Container'] as String?,
@@ -1140,17 +1163,23 @@ class EmbyApi {
         sawSuccess200 = true;
 
         final map = jsonDecode(resp.body) as Map<String, dynamic>;
+        final lowerPath = path.toLowerCase();
+        final isGenreEndpoint = lowerPath.contains('genres');
         final genres = _normalizeStringList(
           map['Genres'] ??
               map['genres'] ??
               map['GenreItems'] ??
               map['genreItems'] ??
-              map['Items'] ??
-              map['items'],
+              (isGenreEndpoint ? (map['Items'] ?? map['items']) : null),
         );
         if (bestGenres.isEmpty && genres.isNotEmpty) bestGenres = genres;
 
-        final years = _normalizeIntList(map['Years'] ?? map['years']);
+        final years = _normalizeIntList(
+          map['Years'] ??
+              map['years'] ??
+              map['ProductionYears'] ??
+              map['productionYears'],
+        );
         if (bestYears.isEmpty && years.isNotEmpty) bestYears = years;
 
         if (bestGenres.isNotEmpty && bestYears.isNotEmpty) {
