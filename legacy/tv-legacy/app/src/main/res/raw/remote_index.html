@@ -40,27 +40,16 @@
         <details open>
           <summary>添加服务器</summary>
           <form id="addForm">
-            <label>类型</label>
-            <select id="type">
-              <option value="emby">Emby</option>
-              <option value="jellyfin">Jellyfin</option>
-              <option value="plex">Plex (Token)</option>
-              <option value="webdav">WebDAV</option>
-            </select>
-
             <label>Base URL</label>
             <input id="baseUrl" placeholder="例如：http://192.168.1.2:8096 或 https://example.com" />
 
-            <label>API key / Token（Emby/Jellyfin/Plex）</label>
-            <input id="apiKey" placeholder="Plex 填 token" />
-
             <div class="row">
               <div>
-                <label>WebDAV 用户名</label>
+                <label>用户名</label>
                 <input id="username" />
               </div>
               <div>
-                <label>WebDAV 密码</label>
+                <label>密码</label>
                 <input id="password" type="password" />
               </div>
             </div>
@@ -76,6 +65,12 @@
               </div>
             </div>
 
+            <label>图标 URL（可选）</label>
+            <input id="iconUrl" placeholder="https://..." />
+
+            <label>其他线路（可选，一行一个，name|url）</label>
+            <textarea id="linesText" placeholder="例如：&#10;主线|https://example.com&#10;CDN|https://cdn.example.com"></textarea>
+
             <label class="chk">
               <input id="activate" type="checkbox" checked />
               添加后设为当前服务器
@@ -86,34 +81,6 @@
               <button type="button" id="btnClearAdd">清空</button>
             </div>
           </form>
-        </details>
-
-        <details>
-          <summary>批量解析（可选）</summary>
-          <label>批量文本（每行一个）</label>
-          <textarea id="bulkText" placeholder="示例：&#10;emby|http://192.168.1.2:8096|API_KEY|备注&#10;plex|http://192.168.1.5:32400|PLEX_TOKEN|备注&#10;webdav|https://example.com/dav|user|pass|备注"></textarea>
-          <div class="row">
-            <div>
-              <label>默认类型</label>
-              <select id="bulkDefaultType">
-                <option value="emby">Emby</option>
-                <option value="jellyfin">Jellyfin</option>
-                <option value="plex">Plex</option>
-                <option value="webdav">WebDAV</option>
-              </select>
-            </div>
-            <div>
-              <label class="chk" style="margin-top:34px">
-                <input id="bulkActivateFirst" type="checkbox" checked />
-                首个设为当前
-              </label>
-            </div>
-          </div>
-          <div class="btnRow">
-            <button type="button" id="btnBulkAdd">批量添加</button>
-            <button type="button" id="btnBulkClear">清空</button>
-          </div>
-          <div class="hint">支持简写：emby|baseUrl|apiKey|remark；plex|baseUrl|token|remark；webdav|baseUrl|user|pass|remark。也支持完整格式：type|baseUrl|apiKey(token)|username|password|displayName|remark|activate(true/false)。</div>
         </details>
 
         <details>
@@ -218,7 +185,7 @@
       setInterval(loadPlayer, 1200);
 
       document.getElementById('btnClearAdd').addEventListener('click', () => {
-        for (const id of ['baseUrl','apiKey','username','password','displayName','remark']) {
+        for (const id of ['baseUrl','username','password','displayName','remark','iconUrl','linesText']) {
           document.getElementById(id).value = '';
         }
       });
@@ -228,13 +195,13 @@
         if (!token) return log('缺少 token');
         const payload = {
           token,
-          type: document.getElementById('type').value,
           baseUrl: document.getElementById('baseUrl').value,
-          apiKey: document.getElementById('apiKey').value,
           username: document.getElementById('username').value,
           password: document.getElementById('password').value,
           displayName: document.getElementById('displayName').value,
           remark: document.getElementById('remark').value,
+          iconUrl: document.getElementById('iconUrl').value,
+          linesText: document.getElementById('linesText').value,
           activate: document.getElementById('activate').checked,
         };
         log('提交中...');
@@ -245,30 +212,6 @@
         } catch (e2) {
           log(`失败：${e2}`);
         }
-      });
-
-      document.getElementById('btnBulkAdd').addEventListener('click', async () => {
-        if (!token) return log('缺少 token');
-        const text = document.getElementById('bulkText').value || '';
-        log('批量提交中...');
-        try {
-          const data = await apiPost('/api/bulkAddServers', {
-            token,
-            text,
-            defaultType: document.getElementById('bulkDefaultType').value,
-            activateFirst: document.getElementById('bulkActivateFirst').checked,
-          });
-          log(`成功：added=${data.added || 0} errors=${(data.errors||[]).length}`);
-          if (data.errors && data.errors.length) {
-            for (const err of data.errors.slice(0, 20)) log(`- ${err}`);
-          }
-          await loadInfo();
-        } catch (e) {
-          log(`失败：${e}`);
-        }
-      });
-      document.getElementById('btnBulkClear').addEventListener('click', () => {
-        document.getElementById('bulkText').value = '';
       });
 
       document.getElementById('btnApplyProxy').addEventListener('click', async () => {

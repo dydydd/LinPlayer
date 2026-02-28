@@ -5,7 +5,9 @@ import com.linplayer.tvlegacy.AppPrefs;
 import com.linplayer.tvlegacy.BuildConfig;
 import com.linplayer.tvlegacy.ProxyService;
 import com.linplayer.tvlegacy.R;
+import com.linplayer.tvlegacy.servers.EmbyApi;
 import com.linplayer.tvlegacy.servers.ServerConfig;
+import com.linplayer.tvlegacy.servers.ServerLine;
 import com.linplayer.tvlegacy.servers.ServerStore;
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
@@ -21,6 +23,7 @@ import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.json.JSONArray;
@@ -238,47 +241,67 @@ final class RemoteHttpServer {
                     return;
                 }
 
-                String type = req.optString("type", "emby").trim().toLowerCase();
-                String baseUrl = normalizeBaseUrl(req.optString("baseUrl", ""));
-                String apiKey = req.optString("apiKey", req.optString("token", ""));
+                String baseUrl = EmbyApi.normalizeBaseUrl(req.optString("baseUrl", ""));
                 String username = req.optString("username", "");
                 String password = req.optString("password", "");
                 String displayName = req.optString("displayName", "");
                 String remark = req.optString("remark", "");
+                String iconUrl = req.optString("iconUrl", "");
+                JSONArray linesArr = req.optJSONArray("lines");
+                String linesText = req.optString("linesText", "");
                 boolean activate = readBool(req.opt("activate"), true);
 
                 if (baseUrl.isEmpty()) {
                     writeJson(out, jsonError("missing baseUrl"));
                     return;
                 }
-                if ("webdav".equals(type)) {
-                    if (username == null || username.trim().isEmpty()) {
-                        writeJson(out, jsonError("missing username"));
-                        return;
+                if (username == null || username.trim().isEmpty()) {
+                    writeJson(out, jsonError("missing username"));
+                    return;
+                }
+
+                EmbyApi.LoginResult login =
+                        EmbyApi.authenticateByName(appContext, baseUrl, username, password);
+                String apiBase = login != null ? login.baseUrl : baseUrl;
+                String apiKey = login != null ? login.accessToken : "";
+                if (apiKey.isEmpty()) {
+                    writeJson(out, jsonError("login failed"));
+                    return;
+                }
+
+                String resolvedName = displayName;
+                if (resolvedName == null || resolvedName.trim().isEmpty()) {
+                    try {
+                        resolvedName = EmbyApi.fetchServerName(appContext, apiBase, apiKey);
+                    } catch (Exception ignored) {
+                        // best-effort
                     }
-                } else if ("plex".equals(type)) {
-                    if (apiKey == null || apiKey.trim().isEmpty()) {
-                        writeJson(out, jsonError("missing token"));
-                        return;
-                    }
-                } else {
-                    if (apiKey == null || apiKey.trim().isEmpty()) {
-                        writeJson(out, jsonError("missing apiKey/token"));
-                        return;
-                    }
-                    if (!"emby".equals(type) && !"jellyfin".equals(type)) type = "emby";
+                }
+                if (resolvedName == null) resolvedName = "";
+
+                List<ServerLine> parsedLines = mergeLines(parseLines(linesArr), parseLinesText(linesText));
+                if (parsedLines.isEmpty() && !apiBase.isEmpty()) {
+                    parsedLines = Collections.singletonList(new ServerLine("", apiBase));
+                }
+                try {
+                    List<ServerLine> synced = EmbyApi.fetchExtDomains(appContext, apiBase, apiKey, true);
+                    parsedLines = mergeLines(parsedLines, synced);
+                } catch (Exception ignored) {
+                    // best-effort
                 }
 
                 ServerConfig cfg =
                         new ServerConfig(
                                 "",
-                                type,
-                                baseUrl,
+                                "emby",
+                                apiBase,
                                 apiKey,
                                 username,
                                 password,
-                                displayName,
-                                remark);
+                                resolvedName,
+                                remark,
+                                iconUrl,
+                                parsedLines);
                 ServerConfig saved = ServerStore.upsert(appContext, cfg, activate);
 
                 JSONObject resp = new JSONObject();
@@ -288,6 +311,8 @@ final class RemoteHttpServer {
                 writeJson(out, resp);
             } catch (JSONException e) {
                 writeJson(out, jsonError("invalid json"));
+            } catch (Exception e) {
+                writeJson(out, jsonError(String.valueOf(e.getMessage())));
             }
             return;
         }
@@ -607,7 +632,18 @@ final class RemoteHttpServer {
             if (!"emby".equals(t) && !"jellyfin".equals(t)) t = "emby";
         }
 
-        ServerConfig cfg = new ServerConfig("", t, b, k, u, p, displayName, remark);
+        ServerConfig cfg =
+                new ServerConfig(
+                        "",
+                        t,
+                        b,
+                        k,
+                        u,
+                        p,
+                        displayName,
+                        remark,
+                        "",
+                        java.util.Collections.emptyList());
         return new ParsedServer(cfg, activate);
     }
 
@@ -621,6 +657,76 @@ final class RemoteHttpServer {
         if ("true".equals(s) || "1".equals(s) || "yes".equals(s) || "y".equals(s)) return Boolean.TRUE;
         if ("false".equals(s) || "0".equals(s) || "no".equals(s) || "n".equals(s)) return Boolean.FALSE;
         return null;
+    }
+
+    private static List<ServerLine> parseLines(JSONArray arr) {
+        if (arr == null || arr.length() == 0) return Collections.emptyList();
+        List<ServerLine> out = new ArrayList<>(arr.length());
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject o = arr.optJSONObject(i);
+            if (o == null) continue;
+            String name = o.optString("name", "");
+            String url = o.optString("url", o.optString("domain", ""));
+            String u = EmbyApi.normalizeBaseUrl(url);
+            if (u.isEmpty()) continue;
+            out.add(new ServerLine(name, u));
+        }
+        return Collections.unmodifiableList(out);
+    }
+
+    private static List<ServerLine> parseLinesText(String text) {
+        String t = text != null ? text.trim() : "";
+        if (t.isEmpty()) return Collections.emptyList();
+
+        List<ServerLine> out = new ArrayList<>();
+        String[] lines = t.split("\\r?\\n");
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i] != null ? lines[i].trim() : "";
+            if (line.isEmpty()) continue;
+            if (line.startsWith("#")) continue;
+
+            String name = "";
+            String url = line;
+            if (line.contains("|")) {
+                String[] parts = line.split("\\|", 2);
+                name = parts.length > 0 ? parts[0].trim() : "";
+                url = parts.length > 1 ? parts[1].trim() : "";
+            }
+            String u = EmbyApi.normalizeBaseUrl(url);
+            if (u.isEmpty()) continue;
+            out.add(new ServerLine(name, u));
+        }
+        return Collections.unmodifiableList(out);
+    }
+
+    private static List<ServerLine> mergeLines(List<ServerLine> a, List<ServerLine> b) {
+        LinkedHashMap<String, ServerLine> map = new LinkedHashMap<>();
+        addLines(map, a);
+        addLines(map, b);
+        if (map.isEmpty()) return Collections.emptyList();
+        return Collections.unmodifiableList(new ArrayList<>(map.values()));
+    }
+
+    private static void addLines(LinkedHashMap<String, ServerLine> map, List<ServerLine> lines) {
+        if (map == null || lines == null || lines.isEmpty()) return;
+        for (int i = 0; i < lines.size(); i++) {
+            ServerLine l = lines.get(i);
+            if (l == null) continue;
+            String u = l.url != null ? l.url.trim() : "";
+            if (u.isEmpty()) continue;
+
+            ServerLine existing = map.get(u);
+            if (existing == null) {
+                map.put(u, l);
+                continue;
+            }
+
+            String existingName = existing.name != null ? existing.name.trim() : "";
+            String name = l.name != null ? l.name.trim() : "";
+            if (existingName.isEmpty() && !name.isEmpty()) {
+                map.put(u, new ServerLine(name, u));
+            }
+        }
     }
 
     private static String safe(String s) {

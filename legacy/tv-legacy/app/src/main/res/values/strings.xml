@@ -11,7 +11,7 @@
 
     <string name="servers_title">Servers</string>
     <string name="open_servers">Servers</string>
-    <string name="servers_hint">Click to activate. Long press to edit.</string>
+    <string name="servers_hint">Click to activate. Long press to manage.</string>
     <string name="view_list">List</string>
     <string name="view_grid">Grid</string>
     <string name="add_server">Add</string>
@@ -22,12 +22,15 @@
     <string name="qr_title">Scan QR</string>
     <string name="qr_loading">Loading...</string>
 
-    <string name="server_base_url_hint">Base URL (with http/https)</string>
-    <string name="server_api_key_hint">API key / token (Emby/Jellyfin/Plex)</string>
-    <string name="server_username_hint">Username (WebDAV)</string>
-    <string name="server_password_hint">Password (WebDAV)</string>
+    <string name="server_base_url_hint">Base URL (e.g. http://192.168.1.2:8096)</string>
+    <string name="server_api_key_hint">API key / token</string>
+    <string name="server_username_hint">Username</string>
+    <string name="server_password_hint">Password</string>
     <string name="server_display_name_hint">Display name (optional)</string>
     <string name="server_remark_hint">Remark (optional)</string>
+    <string name="server_icon_url_hint">Icon URL (optional)</string>
+    <string name="server_line_name_hint">Line name (optional)</string>
+    <string name="server_lines_hint">Other lines: one per row, name|url (optional)</string>
     <string name="server_activate">Set as active after save</string>
 
     <string-array name="server_type_entries">

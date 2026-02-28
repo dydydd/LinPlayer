@@ -31,15 +31,6 @@
                 android:textSize="22sp" />
         </LinearLayout>
 
-        <Spinner
-            android:id="@+id/type_spinner"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:background="@drawable/tv_focusable_bg"
-            android:entries="@array/server_type_entries"
-            android:padding="12dp" />
-
         <EditText
             android:id="@+id/base_url_input"
             android:layout_width="match_parent"
@@ -48,17 +39,6 @@
             android:background="@drawable/tv_focusable_bg"
             android:hint="@string/server_base_url_hint"
             android:inputType="textUri"
-            android:padding="12dp"
-            android:singleLine="true" />
-
-        <EditText
-            android:id="@+id/api_key_input"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:background="@drawable/tv_focusable_bg"
-            android:hint="@string/server_api_key_hint"
-            android:inputType="text"
             android:padding="12dp"
             android:singleLine="true" />
 
@@ -105,6 +85,41 @@
             android:inputType="text"
             android:padding="12dp"
             android:singleLine="true" />
+
+        <EditText
+            android:id="@+id/icon_url_input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/tv_focusable_bg"
+            android:hint="@string/server_icon_url_hint"
+            android:inputType="textUri"
+            android:padding="12dp"
+            android:singleLine="true" />
+
+        <EditText
+            android:id="@+id/line_name_input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/tv_focusable_bg"
+            android:hint="@string/server_line_name_hint"
+            android:inputType="text"
+            android:padding="12dp"
+            android:singleLine="true" />
+
+        <EditText
+            android:id="@+id/lines_text_input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/tv_focusable_bg"
+            android:gravity="top"
+            android:hint="@string/server_lines_hint"
+            android:inputType="textMultiLine"
+            android:minLines="5"
+            android:padding="12dp"
+            android:singleLine="false" />
 
         <CheckBox
             android:id="@+id/activate_checkbox"

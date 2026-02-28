@@ -95,13 +95,15 @@ public final class ServerStore {
                         i,
                         new ServerConfig(
                                 id,
-                                config.type,
+                                "emby",
                                 config.baseUrl,
                                 config.apiKey,
                                 config.username,
                                 config.password,
                                 config.displayName,
-                                config.remark));
+                                config.remark,
+                                config.iconUrl,
+                                config.lines));
                 replaced = true;
                 break;
             }
@@ -110,13 +112,15 @@ public final class ServerStore {
             current.add(
                     new ServerConfig(
                             id,
-                            config.type,
+                            "emby",
                             config.baseUrl,
                             config.apiKey,
                             config.username,
                             config.password,
                             config.displayName,
-                            config.remark));
+                            config.remark,
+                            config.iconUrl,
+                            config.lines));
         }
 
         save(context, current);

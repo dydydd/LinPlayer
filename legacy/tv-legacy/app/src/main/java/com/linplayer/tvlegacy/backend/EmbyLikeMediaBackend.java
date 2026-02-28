@@ -160,7 +160,7 @@ final class EmbyLikeMediaBackend implements MediaBackend {
                         cb.onError(
                                 new IllegalStateException(
                                         serverName
-                                                + " not configured. Open Settings and set Server URL + API key.")));
+                                                + " not configured. Open Servers and login.")));
     }
 
     private HttpUrl.Builder apiUrl(String path) {
@@ -168,6 +168,7 @@ final class EmbyLikeMediaBackend implements MediaBackend {
         String p = path != null ? path.trim() : "";
         if (p.startsWith("/")) p = p.substring(1);
         HttpUrl.Builder b = baseUrl.newBuilder();
+        b.addPathSegment("emby");
         if (!p.isEmpty()) b.addPathSegments(p);
         if (apiKey != null && !apiKey.isEmpty()) b.addQueryParameter("api_key", apiKey);
         return b;
