@@ -86,8 +86,8 @@
 
 ### 引用 / 上游
 
-- Anime4K：https://github.com/bloc97/Anime4K（本项目内置部分 GLSL shader：`assets/shaders/anime4k/`）
-- TV Remote（web UI / base assets）：https://github.com/synamedia-senza/remote（ISC）；本项目内置静态资源：`assets/tv_remote/`
+- Anime4K： https://github.com/bloc97/Anime4K （本项目内置部分 GLSL shader：`assets/shaders/anime4k/`）
+- TV Remote（web UI / base assets）： https://github.com/synamedia-senza/remote （ISC）；本项目内置静态资源：`assets/tv_remote/`
 
 ### 文档
 
