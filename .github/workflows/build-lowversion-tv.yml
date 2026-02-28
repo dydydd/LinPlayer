@@ -1,16 +1,16 @@
-name: Build LowVersion TV (tv-legacy)
+name: Build LowVersion TV (legacy/tv-legacy)
 
 on:
   workflow_dispatch:
   pull_request:
     paths:
-      - "tv-legacy/**"
+      - "legacy/tv-legacy/**"
       - ".github/workflows/build-lowversion-tv.yml"
   push:
     branches:
       - main
     paths:
-      - "tv-legacy/**"
+      - "legacy/tv-legacy/**"
       - ".github/workflows/build-lowversion-tv.yml"
 
 permissions:
@@ -45,28 +45,28 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
-          build-root-directory: tv-legacy
+          build-root-directory: legacy/tv-legacy
 
       - name: Make Gradle wrapper executable
         shell: bash
-        run: chmod +x tv-legacy/gradlew
+        run: chmod +x legacy/tv-legacy/gradlew
 
       - name: Assemble debug APK
         shell: bash
         run: |
           set -euo pipefail
-          ./tv-legacy/gradlew -p tv-legacy :app:assembleDebug
+          ./legacy/tv-legacy/gradlew -p legacy/tv-legacy :app:assembleDebug
 
       - name: Rename APK
         shell: bash
         run: |
           set -euo pipefail
-          VERSION_NAME="$(sed -n 's/.*versionName\\s*=\\s*\"\\([^\"]*\\)\".*/\\1/p' tv-legacy/app/build.gradle.kts | head -n 1)"
+          VERSION_NAME="$(sed -n 's/.*versionName\\s*=\\s*\"\\([^\"]*\\)\".*/\\1/p' legacy/tv-legacy/app/build.gradle.kts | head -n 1)"
           if [[ -z "${VERSION_NAME:-}" ]]; then
             VERSION_NAME="unknown"
           fi
           mkdir -p dist
-          cp -v tv-legacy/app/build/outputs/apk/debug/app-debug.apk "dist/LinPlayer-LowVersion-TV-${VERSION_NAME}.apk"
+          cp -v legacy/tv-legacy/app/build/outputs/apk/debug/app-debug.apk "dist/LinPlayer-LowVersion-TV-${VERSION_NAME}.apk"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

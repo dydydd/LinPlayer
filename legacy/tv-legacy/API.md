@@ -1,18 +1,18 @@
 # LinPlayer TV Legacy — 接口文档（MVP）
 
-本文档描述 `tv-legacy/`（Android 4.4 / API 19）低版本 TV 端 **本地服务**的接口与约定，覆盖：
+本文档描述 `legacy/tv-legacy/`（Android 4.4 / API 19）低版本 TV 端 **本地服务**的接口与约定，覆盖：
 
 - 订阅链接写入后由 mihomo 拉取订阅
 - 代理开关：开启时 App 内 **OkHttp / ExoPlayer 全量走代理**；关闭时直连
 - UA 约定：App 请求统一 `LinPlayer/<versionName>`；mihomo 自身请求保持默认 UA
 
-> 版本：`0.1.0`（对应 `tv-legacy/app/build.gradle.kts` 的 `versionName`）
+> 版本：`0.1.0`（对应 `legacy/tv-legacy/app/build.gradle.kts` 的 `versionName`）
 
 ---
 
 ## 1. 术语
 
-- **TV Legacy App**：`tv-legacy/` 这个独立 Android 工程（Java + XML/View）
+- **TV Legacy App**：`legacy/tv-legacy/` 这个独立 Android 工程（Java + XML/View）
 - **mihomo**：内置代理内核（以 `libmihomo.so` 形式放入 `jniLibs` 后执行）
 - **Mixed Port**：HTTP(S)+SOCKS 混合端口（默认 `7890`）
 - **Controller Port**：mihomo 管理端口（默认 `9090`，仅回环）
@@ -39,7 +39,7 @@ Key：
 - `remote_token`：扫码控制的 token（字符串）
 - `remote_port`：扫码控制 HTTP server 端口（int，随机端口）
 
-对应代码：`tv-legacy/app/src/main/java/com/linplayer/tvlegacy/AppPrefs.java`
+对应代码：`legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/AppPrefs.java`
 
 ### 2.2 mihomo 工作目录
 
@@ -52,7 +52,7 @@ Key：
 订阅 provider 落地路径（由 config 指定）：
 - `<filesDir>/mihomo/providers/sub.yaml`
 
-对应代码：`tv-legacy/app/src/main/java/com/linplayer/tvlegacy/MihomoConfig.java`
+对应代码：`legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/MihomoConfig.java`
 
 ---
 
@@ -84,8 +84,8 @@ Key：
   - 当 `proxy_enabled=false`：返回 `Proxy.NO_PROXY` 的 OkHttpClient（强制直连）
 
 对应代码：
-- `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/NetworkClients.java`
-- `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/PerAppProxySelector.java`
+- `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/NetworkClients.java`
+- `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/PerAppProxySelector.java`
 
 ### 4.2 进程级 ProxySelector（兜底：对 HttpURLConnection 等生效）
 
@@ -102,7 +102,7 @@ Key：
   `HttpURLConnection`（含 ExoPlayer 默认网络栈）也能走代理（仍然只影响本 App 进程）
 
 对应代码：
-- `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/ProxyEnv.java`
+- `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/ProxyEnv.java`
 
 ---
 
@@ -117,7 +117,7 @@ TV Legacy（API 19）为了兼容 Android 4.4，播放链路使用 ExoPlayer 默
   - 代理：由 `ProxyEnv.enable()` 的 `ProxySelector` + 进程级 `http(s).proxy*` systemProp 兜底生效
 
 对应代码：
-- `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/ExoNetwork.java`
+- `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/ExoNetwork.java`
 
 ---
 
@@ -132,8 +132,8 @@ TV Legacy（API 19）为了兼容 Android 4.4，播放链路使用 ExoPlayer 默
 - OkHttp 拦截器强制覆盖每个 request 的 `User-Agent` header
 
 对应代码：
-- `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/NetworkConfig.java`
-- `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/NetworkClients.java`
+- `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/NetworkConfig.java`
+- `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/NetworkClients.java`
 
 ### 6.2 mihomo 自己发起的请求（订阅拉取/健康检查等）
 
@@ -154,7 +154,7 @@ UI 入口：
 - 点击 `Save Subscription` 写入 `subscription_url`
 
 对应代码：
-- `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/SettingsActivity.java`
+- `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/SettingsActivity.java`
 
 ### 7.2 配置生成逻辑
 
@@ -168,7 +168,7 @@ UI 入口：
 - `health-check` 使用 `http://www.gstatic.com/generate_204`
 
 对应代码：
-- `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/MihomoConfig.java`
+- `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/MihomoConfig.java`
 
 ### 7.3 何时触发 mihomo 拉取订阅
 
@@ -176,7 +176,7 @@ UI 入口：
 - 代理运行中修改订阅：点击保存后触发 `applyConfig`，若代理正在运行且 `proxy_enabled=true`，会自动重启 mihomo，使新订阅生效并重新拉取
 
 对应代码：
-- `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/ProxyService.java`
+- `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/ProxyService.java`
 
 ---
 
@@ -194,7 +194,7 @@ UI 入口：
   - 写配置；若代理运行中且已启用，则重启 mihomo
 
 对应代码：
-- `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/ProxyService.java`
+- `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/ProxyService.java`
 
 ### 8.2 状态广播
 
@@ -205,8 +205,8 @@ UI 入口：
 - UI 监听该广播以更新状态文本
 
 对应代码：
-- `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/MainActivity.java`
-- `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/ProxyService.java`
+- `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/MainActivity.java`
+- `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/ProxyService.java`
 
 ---
 
@@ -299,7 +299,7 @@ TV Legacy 的首页/详情页目前通过一个“媒体数据后端”抽象拿
   - UA 统一为 `LinPlayer/<versionName>`
 
 对应代码：
-- `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/backend/MediaBackend.java`
-- `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/backend/Backends.java`
-- `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/backend/DemoMediaBackend.java`
-- `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/NetworkClients.java`
+- `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/backend/MediaBackend.java`
+- `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/backend/Backends.java`
+- `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/backend/DemoMediaBackend.java`
+- `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/NetworkClients.java`

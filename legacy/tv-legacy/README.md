@@ -9,11 +9,11 @@ Goals:
 
 ## Open & Build
 
-Open this folder (`tv-legacy/`) in Android Studio.
+Open this folder (`legacy/tv-legacy/`) in Android Studio.
 
 ## Docs
 
-- API / interfaces: `tv-legacy/API.md`
+- API / interfaces: `legacy/tv-legacy/API.md`
 
 ## UI Pages (WIP)
 
@@ -31,7 +31,7 @@ Media sources (WIP):
   - Basic player controls (play/pause/seek/stop)
 
 CI:
-- GitHub Actions workflow builds `tv-legacy` debug APK:
+- GitHub Actions workflow builds `legacy/tv-legacy` debug APK:
   - `.github/workflows/build-lowversion-tv.yml`
   - Output name: `LinPlayer-LowVersion-TV-<versionName>.apk`
 

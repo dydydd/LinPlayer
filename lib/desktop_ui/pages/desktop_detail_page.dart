@@ -4334,17 +4334,17 @@ List<_ExternalLink> _buildExternalLinks(MediaItem item) {
     _ExternalLink(
       label: 'IMDb',
       url: imdbUrl,
-      iconAssetPath: 'imdb.png',
+      iconAssetPath: 'assets/images/imdb.png',
     ),
     _ExternalLink(
       label: 'Trakt',
       url: traktUrl,
-      iconAssetPath: 'trakt.png',
+      iconAssetPath: 'assets/images/trakt.png',
     ),
     _ExternalLink(
       label: 'TMDB',
       url: tmdbUrl,
-      iconAssetPath: 'TMDB.png',
+      iconAssetPath: 'assets/images/TMDB.png',
     ),
   ];
 }

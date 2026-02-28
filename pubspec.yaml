@@ -86,9 +86,9 @@ flutter:
   uses-material-design: true
   assets:
     - assets/app_icon.jpg
-    - imdb.png
-    - TMDB.png
-    - trakt.png
+    - assets/images/imdb.png
+    - assets/images/TMDB.png
+    - assets/images/trakt.png
     - assets/shaders/anime4k/
     - assets/tv_proxy/
     - assets/tv_proxy/mihomo/android/arm64-v8a/
