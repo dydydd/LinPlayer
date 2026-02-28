@@ -1,9 +1,7 @@
-enum AppProduct { lin, emos, uhd }
+enum AppProduct { lin, uhd }
 
 AppProduct appProductFromId(String? id) {
   switch ((id ?? '').trim().toLowerCase()) {
-    case 'emos':
-      return AppProduct.emos;
     case 'uhd':
       return AppProduct.uhd;
     case 'lin':
@@ -17,8 +15,6 @@ extension AppProductX on AppProduct {
     switch (this) {
       case AppProduct.lin:
         return 'lin';
-      case AppProduct.emos:
-        return 'emos';
       case AppProduct.uhd:
         return 'uhd';
     }
@@ -28,8 +24,6 @@ extension AppProductX on AppProduct {
     switch (this) {
       case AppProduct.lin:
         return 'LinPlayer';
-      case AppProduct.emos:
-        return 'EmosPlayer';
       case AppProduct.uhd:
         return 'UPlayer';
     }

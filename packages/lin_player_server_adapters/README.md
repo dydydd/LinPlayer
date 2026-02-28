@@ -15,7 +15,7 @@
   - `ServerAdapterFactory`：按 `AppConfig.current.product` 选择具体 adapter，实现“差异收口点”。
 - `server_adapters/lin/lin_emby_adapter.dart`
   - 当前主实现：基于 `EmbyApi` 的 adapter（同时覆盖 Emby/Jellyfin）。
-- `server_adapters/emos/*`、`server_adapters/uhd/*`
+- `server_adapters/uhd/*`
   - 目前为占位/复用实现（后续可按需要替换为真正实现）。
 
 ## 不放什么（边界）

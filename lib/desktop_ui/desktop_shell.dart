@@ -10,7 +10,6 @@ import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
 
-import '../ass/ass_home_page.dart';
 import '../server_adapters/server_access.dart';
 import '../library_page.dart';
 import '../library_items_page.dart';
@@ -66,9 +65,6 @@ class DesktopShell extends StatelessWidget {
         }
         if (active.serverType == MediaServerType.webdav) {
           return DesktopWebDavHomePage(appState: appState);
-        }
-        if (active.serverType == MediaServerType.ass) {
-          return AssHomePage(appState: appState, desktopLayout: true);
         }
         if (!appState.hasActiveServer) {
           return DesktopServerPage(appState: appState);

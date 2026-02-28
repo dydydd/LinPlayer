@@ -33,14 +33,12 @@ class AppFeatureFlags {
   static AppFeatureFlags forProduct(AppProduct product) {
     switch (product) {
       case AppProduct.lin:
-      case AppProduct.emos:
       case AppProduct.uhd:
         return const AppFeatureFlags(
           allowedServerTypes: {
             MediaServerType.emby,
             MediaServerType.jellyfin,
             MediaServerType.uhd,
-            MediaServerType.ass,
             MediaServerType.plex,
             MediaServerType.webdav,
           },

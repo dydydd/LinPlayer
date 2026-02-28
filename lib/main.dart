@@ -16,7 +16,6 @@ import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'desktop_ui/desktop_shell.dart';
-import 'ass/ass_home_page.dart';
 import 'home_page.dart';
 import 'server_page.dart';
 import 'webdav_home_page.dart';
@@ -204,8 +203,6 @@ class _LinPlayerAppState extends State<LinPlayerApp>
                     null => ServerPage(appState: appState),
                     _ when !appState.hasActiveServerProfile =>
                       ServerPage(appState: appState),
-                    final s when s.serverType == MediaServerType.ass =>
-                      AssHomePage(appState: appState),
                     final s when s.serverType == MediaServerType.webdav =>
                       WebDavHomePage(appState: appState),
                     _ when appState.hasActiveServer =>

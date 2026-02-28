@@ -95,7 +95,6 @@ Flutter 页面(lib/*.dart)
 
 现有实现：
 - `lin/lin_emby_adapter.dart`（Emby/Jellyfin 主实现）
-- `emos/emos_adapter.dart`
 - `uhd/uhd_adapter.dart`
 
 页面侧统一接入点：
@@ -180,7 +179,7 @@ Flutter 页面(lib/*.dart)
 - `state/media_server_type.dart`
 
 职责：
-- 产品线差异（`lin/emos/uhd`）
+- 产品线差异（`lin/uhd`）
 - 功能开关（允许的 server type）
 - 基础枚举与全局配置上下文
 

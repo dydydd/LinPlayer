@@ -1901,14 +1901,11 @@ class _AddServerSheetState extends State<_AddServerSheet> {
         .toList(growable: false);
     final loading = widget.appState.isLoading;
     final showHostFields = _serverType.isEmbyLike ||
-        _serverType == MediaServerType.ass ||
         _serverType == MediaServerType.webdav ||
         (_serverType == MediaServerType.plex &&
             _plexMode == _PlexAddMode.manual);
     final showUserPass =
-        _serverType.isEmbyLike ||
-        _serverType == MediaServerType.ass ||
-        _serverType == MediaServerType.webdav;
+        _serverType.isEmbyLike || _serverType == MediaServerType.webdav;
     final showPlexToken =
         _serverType == MediaServerType.plex && _plexMode == _PlexAddMode.manual;
 
@@ -2296,7 +2293,8 @@ class _AddServerSheetState extends State<_AddServerSheet> {
                           controller: _userCtrl,
                           decoration: const InputDecoration(labelText: '账号'),
                           validator: (v) {
-                            if (_serverType.isEmbyLike &&
+                            if ((_serverType.isEmbyLike ||
+                                    _serverType == MediaServerType.webdav) &&
                                 (v == null || v.trim().isEmpty)) {
                               return '请输入账号';
                             }
@@ -2320,6 +2318,7 @@ class _AddServerSheetState extends State<_AddServerSheet> {
                             ),
                           ),
                           obscureText: !_pwdVisible,
+                          validator: (_) => null,
                         ),
                       ],
                     ],
