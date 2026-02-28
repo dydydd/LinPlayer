@@ -269,7 +269,9 @@ class _ServerTextImportSheetState extends State<ServerTextImportSheet> {
         unawaited(
           Future<void>.delayed(
             const Duration(milliseconds: 10),
-            () => appState.enterServer(firstAddedServerId!),
+            () async {
+              await appState.enterServer(firstAddedServerId!);
+            },
           ),
         );
       }

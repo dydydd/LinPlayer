@@ -97,22 +97,17 @@ class DesktopSidebar extends StatelessWidget {
                         final item = servers[index];
                         return Opacity(
                           opacity: item.enabled ? 1 : 0.45,
-                          child: IgnorePointer(
-                            ignoring: !item.enabled,
-                            child: DesktopSidebarItem(
-                              serverName: item.name,
-                              subtitle: item.subtitle,
-                              serverType: item.serverType,
-                              iconUrl: item.iconUrl,
-                              selected: selectedServerId == item.id,
-                              collapsed: collapsed,
-                              onTap: () => onSelected(item.id),
-                              onActionSelected:
-                                  collapsed || onServerAction == null
-                                      ? null
-                                      : (action) =>
-                                          onServerAction!(item.id, action),
-                            ),
+                          child: DesktopSidebarItem(
+                            serverName: item.name,
+                            subtitle: item.subtitle,
+                            serverType: item.serverType,
+                            iconUrl: item.iconUrl,
+                            selected: selectedServerId == item.id,
+                            collapsed: collapsed,
+                            onTap: () => onSelected(item.id),
+                            onActionSelected: collapsed || onServerAction == null
+                                ? null
+                                : (action) => onServerAction!(item.id, action),
                           ),
                         );
                       },

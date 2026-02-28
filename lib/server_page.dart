@@ -256,6 +256,25 @@ class _ServerPageState extends State<ServerPage> {
                             onTap: loading
                                 ? null
                                 : () async {
+                                    final hasError =
+                                        server.lastErrorCode != null ||
+                                            (server.lastErrorMessage ?? '')
+                                                .trim()
+                                                .isNotEmpty;
+                                    if (hasError) {
+                                      final msg =
+                                          (server.lastErrorMessage ?? '').trim();
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            msg.isNotEmpty
+                                                ? msg
+                                                : '服务器不可用（${server.lastErrorCode}）',
+                                          ),
+                                        ),
+                                      );
+                                      return;
+                                    }
                                     if (server.serverType ==
                                         MediaServerType.plex) {
                                       ScaffoldMessenger.of(context).showSnackBar(
@@ -272,9 +291,22 @@ class _ServerPageState extends State<ServerPage> {
                                       await Navigator.of(context).maybePop();
                                       return;
                                     }
-                                    await widget.appState.enterServer(server.id);
+                                    final ok = await widget.appState
+                                        .enterServer(server.id);
                                     if (!context.mounted) return;
-                                    await Navigator.of(context).maybePop();
+                                    if (ok) {
+                                      await Navigator.of(context).maybePop();
+                                      return;
+                                    }
+                                    final msg = (server.lastErrorMessage ??
+                                            widget.appState.error ??
+                                            '')
+                                        .trim();
+                                    if (msg.isNotEmpty) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text(msg)),
+                                      );
+                                    }
                                   },
                             onLongPress: () => isTv
                                 ? unawaited(_showTvServerMenu(server))
@@ -305,6 +337,25 @@ class _ServerPageState extends State<ServerPage> {
                         onTap: loading
                             ? null
                             : () async {
+                                final hasError =
+                                    server.lastErrorCode != null ||
+                                        (server.lastErrorMessage ?? '')
+                                            .trim()
+                                            .isNotEmpty;
+                                if (hasError) {
+                                  final msg =
+                                      (server.lastErrorMessage ?? '').trim();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        msg.isNotEmpty
+                                            ? msg
+                                            : '服务器不可用（${server.lastErrorCode}）',
+                                      ),
+                                    ),
+                                  );
+                                  return;
+                                }
                                 if (server.serverType == MediaServerType.plex) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
@@ -319,9 +370,22 @@ class _ServerPageState extends State<ServerPage> {
                                   await Navigator.of(context).maybePop();
                                   return;
                                 }
-                                await widget.appState.enterServer(server.id);
+                                final ok =
+                                    await widget.appState.enterServer(server.id);
                                 if (!context.mounted) return;
-                                await Navigator.of(context).maybePop();
+                                if (ok) {
+                                  await Navigator.of(context).maybePop();
+                                  return;
+                                }
+                                final msg = (server.lastErrorMessage ??
+                                        widget.appState.error ??
+                                        '')
+                                    .trim();
+                                if (msg.isNotEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text(msg)),
+                                  );
+                                }
                               },
                         onLongPress: () => isTv
                             ? unawaited(_showTvServerMenu(server))

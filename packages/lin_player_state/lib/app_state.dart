@@ -2493,21 +2493,26 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<void> enterServer(String serverId) async {
+  Future<bool> enterServer(String serverId) async {
     final server = _servers.firstWhereOrNull((s) => s.id == serverId);
-    if (server == null) return;
+    if (server == null) return false;
 
     if (server.serverType == MediaServerType.plex) {
       _error =
           '${server.serverType.label} is currently not supported for browsing/playback (saved for login info only).';
       notifyListeners();
-      return;
+      return false;
     }
 
-    if (_activeServerId != serverId) {
+    if (_activeServerId == serverId) return true;
+
+    Future<void> activate({
+      List<DomainInfo> domains = const <DomainInfo>[],
+      List<LibraryInfo> libraries = const <LibraryInfo>[],
+    }) async {
       _activeServerId = serverId;
-      _domains = [];
-      _libraries = [];
+      _domains = domains;
+      _libraries = libraries;
       _itemsCache.clear();
       _itemsTotal.clear();
       _homeSections.clear();
@@ -2522,15 +2527,149 @@ class AppState extends ChangeNotifier {
       await prefs.setString(_kActiveServerIdKey, serverId);
       if (activeServer?.serverType.isEmbyLike == true) {
         _restoreServerCaches(prefs, serverId);
+        // Prefer freshly validated libraries (cache is best-effort).
+        if (libraries.isNotEmpty) {
+          _libraries = libraries;
+          await _persistLibrariesCache();
+        }
       }
-      notifyListeners();
     }
 
-    if (!server.serverType.isEmbyLike) return;
+    // Non-Emby-like server types don't participate in the browsing workspace,
+    // so we only persist selection here.
+    if (!server.serverType.isEmbyLike) {
+      await activate();
+      notifyListeners();
+      return true;
+    }
 
-    await refreshDomains();
-    await refreshLibraries();
-    unawaited(loadHome(forceRefresh: true));
+    final normalizedBaseUrl = server.baseUrl.trim();
+    final normalizedToken = server.token.trim();
+    final normalizedUserId = server.userId.trim();
+
+    // Allow selecting the profile even if it's not fully logged in yet
+    // (will stay on the server page; no workspace navigation).
+    if (normalizedBaseUrl.isEmpty ||
+        normalizedToken.isEmpty ||
+        normalizedUserId.isEmpty) {
+      await activate();
+      notifyListeners();
+      return true;
+    }
+
+    if (_loading) return false;
+    _loading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final parsedScheme = Uri.tryParse(normalizedBaseUrl)?.scheme;
+      final scheme = (parsedScheme ?? '').trim().toLowerCase();
+      final preferredScheme =
+          (scheme == 'http' || scheme == 'https') ? scheme : 'https';
+      final auth = ServerAuthSession(
+        token: normalizedToken,
+        baseUrl: normalizedBaseUrl,
+        userId: normalizedUserId,
+        apiPrefix: server.apiPrefix,
+        preferredScheme: preferredScheme,
+      );
+      final adapter = ServerAdapterFactory.forLogin(
+        serverType: server.serverType,
+        deviceId: _deviceId,
+      );
+
+      final libs = await adapter
+          .fetchLibraries(auth)
+          .timeout(const Duration(seconds: 12));
+
+      List<DomainInfo> lines = const <DomainInfo>[];
+      try {
+        lines = await adapter.fetchDomains(auth, allowFailure: true).timeout(
+              const Duration(seconds: 8),
+              onTimeout: () => const <DomainInfo>[],
+            );
+      } catch (_) {
+        // best-effort
+      }
+
+      server.lastErrorCode = null;
+      server.lastErrorMessage = null;
+
+      final prefs = await SharedPreferences.getInstance();
+      await _persistServers(prefs);
+
+      await activate(domains: lines, libraries: libs);
+      notifyListeners();
+
+      unawaited(loadHome(forceRefresh: true));
+      return true;
+    } catch (e) {
+      final msg = e.toString();
+      server.lastErrorCode = _extractHttpStatusCode(msg);
+      server.lastErrorMessage = msg;
+      _error = msg;
+
+      final prefs = await SharedPreferences.getInstance();
+      await _persistServers(prefs);
+      notifyListeners();
+      return false;
+    } finally {
+      _loading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> validateActiveServerForDesktop() async {
+    if (_loading) return;
+    final serverId = _activeServerId;
+    final server = activeServer;
+    if (serverId == null || server == null) return;
+    if (!server.serverType.isEmbyLike) return;
+    if (!hasActiveServer) return;
+
+    _loading = true;
+    notifyListeners();
+    try {
+      final baseUrl = server.baseUrl.trim();
+      final token = server.token.trim();
+      final userId = server.userId.trim();
+      if (baseUrl.isEmpty || token.isEmpty || userId.isEmpty) return;
+
+      final parsedScheme = Uri.tryParse(baseUrl)?.scheme;
+      final scheme = (parsedScheme ?? '').trim().toLowerCase();
+      final preferredScheme =
+          (scheme == 'http' || scheme == 'https') ? scheme : 'https';
+      final auth = ServerAuthSession(
+        token: token,
+        baseUrl: baseUrl,
+        userId: userId,
+        apiPrefix: server.apiPrefix,
+        preferredScheme: preferredScheme,
+      );
+      final adapter = ServerAdapterFactory.forLogin(
+        serverType: server.serverType,
+        deviceId: _deviceId,
+      );
+
+      await adapter.fetchLibraries(auth).timeout(const Duration(seconds: 8));
+
+      server.lastErrorCode = null;
+      server.lastErrorMessage = null;
+      final prefs = await SharedPreferences.getInstance();
+      await _persistServers(prefs);
+    } catch (e) {
+      final msg = e.toString();
+      server.lastErrorCode = _extractHttpStatusCode(msg);
+      server.lastErrorMessage = msg;
+      _error = msg;
+      final prefs = await SharedPreferences.getInstance();
+      await _persistServers(prefs);
+      await leaveServer();
+    } finally {
+      _loading = false;
+      notifyListeners();
+    }
   }
 
   Future<void> removeServer(String serverId) async {

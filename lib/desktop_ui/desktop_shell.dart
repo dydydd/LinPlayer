@@ -216,6 +216,21 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
   }
 
   void _handleServerSelected(String serverId) {
+    unawaited(_handleServerSelectedInternal(serverId));
+  }
+
+  Future<void> _handleServerSelectedInternal(String serverId) async {
+    final server = _serverById(serverId);
+    if (server == null) return;
+
+    final hasError = server.lastErrorCode != null ||
+        (server.lastErrorMessage ?? '').trim().isNotEmpty;
+    if (hasError) {
+      final msg = (server.lastErrorMessage ?? '').trim();
+      _showInfo(msg.isNotEmpty ? msg : '服务器不可用（${server.lastErrorCode}）');
+      return;
+    }
+
     _hideSidebar();
     if (_section != _DesktopSection.library || _topBarVisibility < 1.0) {
       setState(() {
@@ -232,19 +247,32 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     _detailViewModel?.dispose();
     _detailViewModel = null;
     if (serverId == widget.appState.activeServerId) return;
-    unawaited(widget.appState.enterServer(serverId));
+
+    final ok = await widget.appState.enterServer(serverId);
+    if (!mounted || ok) return;
+
+    final msg =
+        (server.lastErrorMessage ?? widget.appState.error ?? '').trim();
+    if (msg.isNotEmpty) {
+      _showInfo(msg);
+    }
   }
 
   List<DesktopSidebarServer> _buildSidebarServers() {
     return widget.appState.servers
         .map(
-          (server) => DesktopSidebarServer(
-            id: server.id,
-            name: server.name.trim().isEmpty ? server.baseUrl : server.name,
-            subtitle: _buildServerSubtitleText(server),
-            serverType: server.serverType,
-            iconUrl: server.iconUrl,
-          ),
+          (server) {
+            final hasError = server.lastErrorCode != null ||
+                (server.lastErrorMessage ?? '').trim().isNotEmpty;
+            return DesktopSidebarServer(
+              id: server.id,
+              name: server.name.trim().isEmpty ? server.baseUrl : server.name,
+              subtitle: _buildServerSubtitleText(server),
+              serverType: server.serverType,
+              iconUrl: server.iconUrl,
+              enabled: !hasError,
+            );
+          },
         )
         .toList(growable: false);
   }

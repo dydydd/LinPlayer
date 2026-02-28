@@ -126,6 +126,7 @@ void main() async {
       systemBrightness:
           WidgetsBinding.instance.platformDispatcher.platformBrightness,
     );
+    unawaited(appState.validateActiveServerForDesktop());
   }
 
   TvRemoteCommandDispatcher.instance.bindNavigatorKey(_rootNavigatorKey);
