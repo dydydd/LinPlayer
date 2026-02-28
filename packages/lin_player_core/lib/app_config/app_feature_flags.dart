@@ -40,6 +40,7 @@ class AppFeatureFlags {
             MediaServerType.emby,
             MediaServerType.jellyfin,
             MediaServerType.uhd,
+            MediaServerType.ass,
             MediaServerType.plex,
             MediaServerType.webdav,
           },

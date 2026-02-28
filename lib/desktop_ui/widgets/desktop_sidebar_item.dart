@@ -40,6 +40,8 @@ class DesktopSidebarItem extends StatelessWidget {
         return Icons.sports_esports_rounded;
       case MediaServerType.uhd:
         return Icons.hd_outlined;
+      case MediaServerType.ass:
+        return Icons.subtitles_outlined;
       case MediaServerType.plex:
         return Icons.play_circle_outline_rounded;
       case MediaServerType.webdav:

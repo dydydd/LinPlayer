@@ -692,6 +692,12 @@ class AppState extends ChangeNotifier {
       baseUrl != null &&
       token != null &&
       userId != null;
+
+  bool get hasActiveAssServer =>
+      activeServer != null &&
+      activeServer!.serverType == MediaServerType.ass &&
+      baseUrl != null &&
+      token != null;
   bool get hasCachedContinueWatching =>
       (_continueWatching ?? const <MediaItem>[]).isNotEmpty;
   List<MediaItem> get continueWatching =>
@@ -2136,9 +2142,8 @@ class AppState extends ChangeNotifier {
     final fixedDisplayName = (displayName ?? '').trim();
 
     try {
-      if (!serverType.isEmbyLike) {
-        _error =
-            'Current version only supports Emby/Jellyfin login. Use Plex login to add Plex.';
+      if (!serverType.isEmbyLike && serverType != MediaServerType.ass) {
+        _error = 'Use the dedicated login flow for ${serverType.label}.';
         return null;
       }
       final adapter = ServerAdapterFactory.forLogin(
@@ -2274,7 +2279,10 @@ class AppState extends ChangeNotifier {
           baseUrl: inferredBaseUrl,
           token: '',
           userId: '',
-          apiPrefix: serverType == MediaServerType.jellyfin ? '' : 'emby',
+          apiPrefix: (serverType == MediaServerType.jellyfin ||
+                  serverType == MediaServerType.ass)
+              ? ''
+              : 'emby',
           lastErrorCode: code,
           lastErrorMessage: msg,
         );
@@ -2676,6 +2684,7 @@ class AppState extends ChangeNotifier {
         case MediaServerType.emby:
         case MediaServerType.jellyfin:
         case MediaServerType.uhd:
+        case MediaServerType.ass:
           if (fixedUsername.isEmpty) {
             throw const FormatException('Missing username');
           }

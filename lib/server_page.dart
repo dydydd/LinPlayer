@@ -1837,11 +1837,14 @@ class _AddServerSheetState extends State<_AddServerSheet> {
         .toList(growable: false);
     final loading = widget.appState.isLoading;
     final showHostFields = _serverType.isEmbyLike ||
+        _serverType == MediaServerType.ass ||
         _serverType == MediaServerType.webdav ||
         (_serverType == MediaServerType.plex &&
             _plexMode == _PlexAddMode.manual);
     final showUserPass =
-        _serverType.isEmbyLike || _serverType == MediaServerType.webdav;
+        _serverType.isEmbyLike ||
+        _serverType == MediaServerType.ass ||
+        _serverType == MediaServerType.webdav;
     final showPlexToken =
         _serverType == MediaServerType.plex && _plexMode == _PlexAddMode.manual;
 
