@@ -62,8 +62,13 @@ public final class ShowDetailActivity extends AppCompatActivity {
                         return;
                     }
                     Intent i = new Intent(this, PlayerActivity.class);
-                    i.putExtra(PlayerActivity.EXTRA_TITLE, (show != null ? show.title : "Show") + " · " + first.title);
                     i.putExtra(PlayerActivity.EXTRA_URL, first.mediaUrl);
+                    i.putExtra(PlayerActivity.EXTRA_TITLE, first.title);
+                    i.putExtra(PlayerActivity.EXTRA_SHOW_ID, showId != null ? showId : "");
+                    i.putExtra(PlayerActivity.EXTRA_EPISODE_INDEX, first.index);
+                    i.putExtra(PlayerActivity.EXTRA_SHOW_TITLE, show != null ? show.title : "Show");
+                    i.putExtra(PlayerActivity.EXTRA_SEASON_NUMBER, first.seasonNumber);
+                    i.putExtra(PlayerActivity.EXTRA_EPISODE_NUMBER, first.episodeNumber);
                     startActivity(i);
                 });
 

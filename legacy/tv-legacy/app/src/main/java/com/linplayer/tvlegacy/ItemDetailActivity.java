@@ -394,6 +394,10 @@ public final class ItemDetailActivity extends AppCompatActivity {
         String targetId = d.id;
         long posMs = Math.max(0L, d.playbackPositionMs);
         String title = d.displayTitle();
+        String showId = "";
+        String showTitle = "";
+        int seasonNumber = 0;
+        int episodeNumber = 0;
 
         if (d.isType("Series")) {
             EmbyEpisode ep = selectedEpisodePos >= 0 && selectedEpisodePos < episodes.size()
@@ -405,10 +409,23 @@ public final class ItemDetailActivity extends AppCompatActivity {
             }
             targetId = ep.id;
             posMs = Math.max(0L, ep.playbackPositionMs);
-            title = d.name + " " + formatSeasonEpisode(ep.seasonNumber, ep.episodeNumber);
+            title = !safe(ep.name).isEmpty() ? ep.name : (d.name + " " + formatSeasonEpisode(ep.seasonNumber, ep.episodeNumber));
+            showId = d.id;
+            showTitle = d.name;
+            seasonNumber = ep.seasonNumber;
+            episodeNumber = ep.episodeNumber;
         } else if (d.isType("Movie") || d.isType("Episode")) {
             if (initialPositionMs > 0L && posMs <= 0L) {
                 posMs = initialPositionMs;
+            }
+            if (d.isType("Episode")) {
+                showId = d.seriesId;
+                showTitle = d.seriesName;
+                seasonNumber = d.seasonNumber;
+                episodeNumber = d.episodeNumber;
+                if (!safe(d.name).isEmpty()) title = d.name;
+            } else {
+                if (!safe(d.name).isEmpty()) title = d.name;
             }
         }
 
@@ -421,6 +438,10 @@ public final class ItemDetailActivity extends AppCompatActivity {
         Intent i = new Intent(this, PlayerActivity.class);
         i.putExtra(PlayerActivity.EXTRA_TITLE, title);
         i.putExtra(PlayerActivity.EXTRA_URL, url);
+        if (!safe(showId).isEmpty()) i.putExtra(PlayerActivity.EXTRA_SHOW_ID, showId);
+        if (!safe(showTitle).isEmpty()) i.putExtra(PlayerActivity.EXTRA_SHOW_TITLE, showTitle);
+        if (seasonNumber > 0) i.putExtra(PlayerActivity.EXTRA_SEASON_NUMBER, seasonNumber);
+        if (episodeNumber > 0) i.putExtra(PlayerActivity.EXTRA_EPISODE_NUMBER, episodeNumber);
         if (posMs > 0L) {
             i.putExtra(PlayerActivity.EXTRA_POSITION_MS, posMs);
         }

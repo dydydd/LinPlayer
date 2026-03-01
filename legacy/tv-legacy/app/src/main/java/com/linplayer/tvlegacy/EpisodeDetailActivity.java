@@ -2,6 +2,7 @@ package com.linplayer.tvlegacy;
 
 import android.content.Intent;
 import android.os.Bundle;
+import android.view.View;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -15,74 +16,72 @@ public final class EpisodeDetailActivity extends AppCompatActivity {
     static final String EXTRA_SHOW_ID = "show_id";
     static final String EXTRA_EPISODE_INDEX = "episode_index";
 
-    private String showId;
-    private int episodeIndex;
+    private String showId = "";
+    private int episodeIndex = 1;
+
     private String showTitle = "Unknown show";
-    private Show show;
-    private Episode episode;
+    @Nullable private Show show;
+    @Nullable private Episode episode;
+
+    @Nullable private ImageView backdropView;
+    @Nullable private ImageView posterView;
+    @Nullable private TextView titleText;
+    @Nullable private TextView metaText;
+    @Nullable private TextView overviewText;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_episode_detail);
 
-        showId = getIntent().getStringExtra(EXTRA_SHOW_ID);
+        showId = safe(getIntent().getStringExtra(EXTRA_SHOW_ID));
         episodeIndex = getIntent().getIntExtra(EXTRA_EPISODE_INDEX, 1);
 
-        if (showId == null || showId.trim().isEmpty()) {
+        if (showId.isEmpty()) {
             Toast.makeText(this, "Missing show id", Toast.LENGTH_LONG).show();
             finish();
             return;
         }
 
-        TextView titleText = findViewById(R.id.episode_title);
-        TextView metaText = findViewById(R.id.episode_meta);
-        TextView descText = findViewById(R.id.episode_desc);
-        ImageView thumbView = findViewById(R.id.episode_thumb);
+        backdropView = findViewById(R.id.detail_backdrop);
+        posterView = findViewById(R.id.detail_poster);
+        titleText = findViewById(R.id.detail_title);
+        metaText = findViewById(R.id.detail_meta);
+        overviewText = findViewById(R.id.detail_overview);
 
-        titleText.setText("Loading...");
-        metaText.setText("EP " + episodeIndex);
-        descText.setText("");
+        TextView title = titleText;
+        if (title != null) title.setText("Loading...");
+        TextView meta = metaText;
+        if (meta != null) meta.setText("EP " + episodeIndex);
+        TextView ov = overviewText;
+        if (ov != null) ov.setText("");
 
-        Button backBtn = findViewById(R.id.btn_back);
-        backBtn.setOnClickListener(v -> finish());
+        View seasonSection = findViewById(R.id.season_section);
+        if (seasonSection != null) seasonSection.setVisibility(View.GONE);
+        View episodeSection = findViewById(R.id.episode_section);
+        if (episodeSection != null) episodeSection.setVisibility(View.GONE);
 
         Button playBtn = findViewById(R.id.btn_play);
-        playBtn.setOnClickListener(
-                v -> {
-                    Episode current = episode;
-                    if (current == null
-                            || current.mediaUrl == null
-                            || current.mediaUrl.trim().isEmpty()) {
-                        Toast.makeText(this, "Missing media url", Toast.LENGTH_LONG).show();
-                        return;
-                    }
-                    Intent i = new Intent(this, PlayerActivity.class);
-                    i.putExtra(PlayerActivity.EXTRA_TITLE, showTitle + " · " + current.title);
-                    i.putExtra(PlayerActivity.EXTRA_URL, current.mediaUrl);
-                    startActivity(i);
-                });
+        playBtn.setOnClickListener(v -> openPlayer());
 
         Backends.media(this)
                 .getShow(
                         showId,
                         new Callback<Show>() {
                             @Override
-                            public void onSuccess(Show show) {
+                            public void onSuccess(Show v) {
                                 if (isFinishing() || isDestroyed()) return;
-                                EpisodeDetailActivity.this.show = show;
-                                showTitle = show != null ? show.title : "Unknown show";
-                                metaText.setText(showTitle + " · EP " + episodeIndex);
-                                if (episode == null && show != null) {
-                                    ImageLoader.load(thumbView, show.backdropUrl, dpToPx(1280));
-                                }
+                                show = v;
+                                showTitle = v != null ? safe(v.title) : "Unknown show";
+                                applyUi();
                             }
 
                             @Override
                             public void onError(Throwable error) {
                                 if (isFinishing() || isDestroyed()) return;
+                                show = null;
                                 showTitle = "Unknown show";
-                                metaText.setText(showTitle + " · EP " + episodeIndex);
+                                applyUi();
                             }
                         });
 
@@ -95,34 +94,72 @@ public final class EpisodeDetailActivity extends AppCompatActivity {
                             public void onSuccess(Episode v) {
                                 if (isFinishing() || isDestroyed()) return;
                                 episode = v;
-                                if (v != null && v.title != null && !v.title.trim().isEmpty()) {
-                                    titleText.setText(v.title);
-                                } else {
-                                    titleText.setText("Episode " + episodeIndex);
-                                }
-
-                                metaText.setText(buildEpisodeMeta(showTitle, v, episodeIndex));
-
-                                String desc = v != null ? v.overview : "";
-                                if (desc == null || desc.trim().isEmpty()) desc = "No overview";
-                                descText.setText(desc);
-
-                                String thumb = v != null ? v.thumbUrl : "";
-                                if ((thumb == null || thumb.trim().isEmpty()) && show != null) {
-                                    thumb = show.backdropUrl;
-                                }
-                                ImageLoader.load(thumbView, thumb, dpToPx(1280));
+                                applyUi();
                             }
 
                             @Override
                             public void onError(Throwable error) {
                                 if (isFinishing() || isDestroyed()) return;
                                 episode = null;
-                                titleText.setText("Episode " + episodeIndex);
-                                descText.setText(
-                                        "Load episode failed: " + String.valueOf(error.getMessage()));
+                                TextView title = titleText;
+                                if (title != null) title.setText("Episode " + episodeIndex);
+                                TextView ov = overviewText;
+                                if (ov != null) {
+                                    ov.setText(
+                                            "Load episode failed: "
+                                                    + String.valueOf(error.getMessage()));
+                                }
                             }
                         });
+    }
+
+    private void openPlayer() {
+        Episode current = episode;
+        if (current == null || safe(current.mediaUrl).isEmpty()) {
+            Toast.makeText(this, "Missing media url", Toast.LENGTH_LONG).show();
+            return;
+        }
+        Intent i = new Intent(this, PlayerActivity.class);
+        i.putExtra(PlayerActivity.EXTRA_URL, safe(current.mediaUrl));
+        i.putExtra(PlayerActivity.EXTRA_TITLE, safe(current.title));
+        i.putExtra(PlayerActivity.EXTRA_SHOW_ID, showId);
+        i.putExtra(PlayerActivity.EXTRA_EPISODE_INDEX, episodeIndex);
+        i.putExtra(PlayerActivity.EXTRA_SHOW_TITLE, showTitle);
+        i.putExtra(PlayerActivity.EXTRA_SEASON_NUMBER, current.seasonNumber);
+        i.putExtra(PlayerActivity.EXTRA_EPISODE_NUMBER, current.episodeNumber);
+        startActivity(i);
+    }
+
+    private void applyUi() {
+        Episode ep = episode;
+        Show s = show;
+
+        TextView title = titleText;
+        if (title != null) {
+            String t = ep != null ? safe(ep.title) : "";
+            title.setText(t.isEmpty() ? ("Episode " + episodeIndex) : t);
+        }
+
+        TextView meta = metaText;
+        if (meta != null) meta.setText(buildEpisodeMeta(showTitle, ep, episodeIndex));
+
+        TextView ov = overviewText;
+        if (ov != null) {
+            String text = ep != null ? safe(ep.overview) : "";
+            if (text.isEmpty()) text = "No overview";
+            ov.setText(text);
+        }
+
+        String poster = s != null ? safe(s.posterUrl) : "";
+        String backdrop = s != null ? safe(s.backdropUrl) : "";
+        String thumb = ep != null ? safe(ep.thumbUrl) : "";
+        if (poster.isEmpty()) poster = thumb;
+        if (backdrop.isEmpty()) backdrop = thumb;
+
+        ImageView posterIv = posterView;
+        if (posterIv != null) ImageLoader.load(posterIv, poster, dpToPx(520));
+        ImageView backdropIv = backdropView;
+        if (backdropIv != null) ImageLoader.load(backdropIv, backdrop, dpToPx(1280));
     }
 
     private int dpToPx(int dp) {
@@ -146,4 +183,9 @@ public final class EpisodeDetailActivity extends AppCompatActivity {
         }
         return sb.toString();
     }
+
+    private static String safe(String s) {
+        return s != null ? s.trim() : "";
+    }
 }
+

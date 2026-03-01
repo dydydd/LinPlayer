@@ -11,33 +11,153 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:keepScreenOn="true"
-        app:use_controller="true" />
+        app:use_controller="false" />
 
     <LinearLayout
+        android:id="@+id/top_status_bar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="#66000000"
         android:orientation="horizontal"
         android:padding="12dp">
-
-        <Button
-            android:id="@+id/btn_back"
-            android:layout_width="120dp"
-            android:layout_height="wrap_content"
-            android:background="@drawable/tv_focusable_bg"
-            android:text="@string/back" />
 
         <TextView
             android:id="@+id/player_title"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginStart="12dp"
             android:layout_weight="1"
+            android:background="@drawable/tv_hud_text_bg"
             android:ellipsize="end"
             android:maxLines="1"
+            android:paddingStart="12dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="8dp"
             android:text="@string/player_title"
             android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/player_net_speed"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:background="@drawable/tv_hud_text_bg"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:paddingStart="12dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="8dp"
+            android:text="-- MB/s"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/player_time"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:background="@drawable/tv_hud_text_bg"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:paddingStart="12dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="8dp"
+            android:text="00:00"
+            android:textSize="14sp" />
     </LinearLayout>
 
-</FrameLayout>
+    <ViewAnimator
+        android:id="@+id/bottom_panel_animator"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:animateFirstView="false"
+        android:padding="12dp">
 
+        <!-- 0: Playback -->
+        <LinearLayout
+            android:id="@+id/panel_playback"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/tv_hud_panel_bg"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:padding="12dp">
+
+            <TextView
+                android:id="@+id/player_position"
+                android:layout_width="72dp"
+                android:layout_height="wrap_content"
+                android:alpha="0.9"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="1"
+                android:text="00:00"
+                android:textSize="12sp" />
+
+            <SeekBar
+                android:id="@+id/player_seek"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:layout_marginEnd="10dp"
+                android:layout_weight="1"
+                android:max="1000"
+                android:progressDrawable="@drawable/tv_seekbar_progress"
+                android:splitTrack="false"
+                android:thumb="@drawable/tv_seekbar_thumb" />
+
+            <TextView
+                android:id="@+id/player_duration"
+                android:layout_width="72dp"
+                android:layout_height="wrap_content"
+                android:alpha="0.9"
+                android:ellipsize="end"
+                android:gravity="center"
+                android:maxLines="1"
+                android:text="00:00"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- 1: Episodes -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/panel_episodes"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/tv_hud_panel_bg"
+            android:clipToPadding="false"
+            android:padding="12dp"
+            android:scrollbars="none" />
+
+        <!-- 2: Subtitles -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/panel_subtitles"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/tv_hud_panel_bg"
+            android:clipToPadding="false"
+            android:padding="12dp"
+            android:scrollbars="none" />
+
+        <!-- 3: Audio -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/panel_audio"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/tv_hud_panel_bg"
+            android:clipToPadding="false"
+            android:padding="12dp"
+            android:scrollbars="none" />
+
+        <!-- 4: Core -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/panel_core"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/tv_hud_panel_bg"
+            android:clipToPadding="false"
+            android:padding="12dp"
+            android:scrollbars="none" />
+    </ViewAnimator>
+
+</FrameLayout>

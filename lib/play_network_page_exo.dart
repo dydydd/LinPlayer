@@ -143,8 +143,12 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       FocusNode(debugLabel: 'network_exo_player_tv_audio_selected');
   final FocusNode _tvAudioFallbackFocusNode =
       FocusNode(debugLabel: 'network_exo_player_tv_audio_fallback');
+  final FocusNode _tvCoreMpvFocusNode =
+      FocusNode(debugLabel: 'network_exo_player_tv_core_mpv');
+  final FocusNode _tvCoreExoFocusNode =
+      FocusNode(debugLabel: 'network_exo_player_tv_core_exo');
 
-  int _tvBottomPanelIndex = 0; // 0=playback, 1=episodes, 2=subtitles, 3=audio
+  int _tvBottomPanelIndex = 0; // 0=playback, 1=episodes, 2=subtitles, 3=audio, 4=core
   int? _tvPendingBottomPanelFocus;
   DateTime? _tvNetSpeedLastPollAt;
 
@@ -333,6 +337,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _tvSubtitleFallbackFocusNode.dispose();
     _tvAudioSelectedFocusNode.dispose();
     _tvAudioFallbackFocusNode.dispose();
+    _tvCoreMpvFocusNode.dispose();
+    _tvCoreExoFocusNode.dispose();
     super.dispose();
   }
 
@@ -1972,7 +1978,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     });
   }
 
-  static const int _tvBottomPanelCount = 4;
+  static const int _tvBottomPanelCount = 5;
 
   void _setTvBottomPanel(int index) {
     final next = index.clamp(0, _tvBottomPanelCount - 1);
@@ -2036,8 +2042,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       return widget.title;
     }
 
-    String two(int v) => v.toString().padLeft(2, '0');
-    return 'S${two(seasonNo)}E${two(epNo)} ${widget.title}'.trim();
+    return '第$seasonNo季 第$epNo集 ${widget.title}'.trim();
   }
 
   static String _tvFmtTime(DateTime t) {
@@ -2241,12 +2246,27 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     final scheme = theme.colorScheme;
     final uiScale = context.uiScale;
 
-    final bg = _tvHudBg(scheme);
+    final pillBg = scheme.brightness == Brightness.dark
+        ? Colors.black.withValues(alpha: 0.34)
+        : Colors.white.withValues(alpha: 0.70);
     final fg = _tvHudFg(scheme);
 
     final radius = (18 * uiScale).clamp(14.0, 26.0);
-    final padH = (16 * uiScale).clamp(12.0, 20.0);
+    final padH = (14 * uiScale).clamp(10.0, 18.0);
     final padV = (10 * uiScale).clamp(8.0, 14.0);
+
+    Widget pill(Widget child) {
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          color: pillBg,
+          borderRadius: BorderRadius.circular(radius),
+        ),
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: padH, vertical: padV),
+          child: child,
+        ),
+      );
+    }
 
     final now = DateTime.now();
     final title = _tvTitleText();
@@ -2262,29 +2282,26 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       fontWeight: FontWeight.w800,
     );
 
-    return Material(
-      color: bg,
-      borderRadius: BorderRadius.circular(radius),
-      clipBehavior: Clip.antiAlias,
-      child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: padH, vertical: padV),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
+    return Row(
+      children: [
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: pill(
+              Text(
                 title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: titleStyle,
               ),
             ),
-            const SizedBox(width: 14),
-            Text(speed, style: rightStyle),
-            const SizedBox(width: 14),
-            Text(time, style: rightStyle),
-          ],
+          ),
         ),
-      ),
+        SizedBox(width: (12 * uiScale).clamp(8.0, 16.0)),
+        pill(Text(speed, style: rightStyle)),
+        SizedBox(width: (10 * uiScale).clamp(8.0, 16.0)),
+        pill(Text(time, style: rightStyle)),
+      ],
     );
   }
 
@@ -2574,6 +2591,49 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     );
   }
 
+  Widget _buildTvCorePanel({required bool enabled}) {
+    final canUseExo =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+    final selectedCore = widget.appState.playerCore;
+    final mpvSelected = selectedCore == PlayerCore.mpv || !canUseExo;
+    final exoSelected = selectedCore == PlayerCore.exo && canUseExo;
+
+    final focusNode = mpvSelected ? _tvCoreExoFocusNode : _tvCoreMpvFocusNode;
+    _requestTvBottomPanelFocusIfNeeded(4, focusNode);
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          _buildTvChip(
+            autofocus: !mpvSelected,
+            selected: mpvSelected,
+            label: 'mpv',
+            icon: Icons.movie_outlined,
+            focusNode: _tvCoreMpvFocusNode,
+            onPressed:
+                !enabled || mpvSelected ? null : () => unawaited(_switchCore()),
+          ),
+          const SizedBox(width: 10),
+          _buildTvChip(
+            autofocus: mpvSelected,
+            selected: exoSelected,
+            label: canUseExo ? 'Exo' : 'Exo（仅 Android）',
+            icon: Icons.flash_on_outlined,
+            focusNode: _tvCoreExoFocusNode,
+            onPressed: !enabled || !canUseExo || exoSelected
+                ? null
+                : () {
+                    unawaited(widget.appState.setPlayerCore(PlayerCore.exo));
+                    setState(() {});
+                  },
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTvBottomStatusBar({
     required bool enabled,
     required Duration position,
@@ -2599,7 +2659,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         durationMs <= 0 ? 0.0 : buffered.inMilliseconds / durationMs;
 
     final progressColor = scheme.primary;
-    final bufferedColor = scheme.secondary; // strong contrast with progress
+    final bufferedColor = scheme.brightness == Brightness.dark
+        ? Colors.white.withValues(alpha: 0.28)
+        : Colors.black.withValues(alpha: 0.14);
     final trackColor = scheme.brightness == Brightness.dark
         ? Colors.white.withValues(alpha: 0.18)
         : Colors.black.withValues(alpha: 0.10);
@@ -2648,6 +2710,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         ),
       1 => _buildTvEpisodesPanel(enabled: enabled),
       2 => _buildTvSubtitlePanel(enabled: enabled),
+      3 => _buildTvAudioPanel(enabled: enabled),
+      4 => _buildTvCorePanel(enabled: enabled),
       _ => _buildTvAudioPanel(enabled: enabled),
     };
 
@@ -2663,7 +2727,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       child: Padding(
         padding: EdgeInsets.symmetric(horizontal: padH, vertical: padV),
         child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 260),
+          duration: const Duration(milliseconds: 220),
           switchInCurve: Curves.easeOutCubic,
           switchOutCurve: Curves.easeInCubic,
           transitionBuilder: (child, animation) {
@@ -2672,18 +2736,14 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
               curve: Curves.easeOut,
             );
             final slide = Tween<Offset>(
-              begin: const Offset(0, 0.12),
+              begin: const Offset(0, 0.10),
               end: Offset.zero,
-            ).animate(animation);
-            final rotate = Tween<double>(
-              begin: -0.015,
-              end: 0.0,
             ).animate(animation);
             return FadeTransition(
               opacity: fade,
               child: SlideTransition(
                 position: slide,
-                child: RotationTransition(turns: rotate, child: child),
+                child: child,
               ),
             );
           },
@@ -4873,6 +4933,19 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         final key = event.logicalKey;
 
         if (widget.isTv && event is KeyDownEvent) {
+          final isBackKey = key == LogicalKeyboardKey.goBack ||
+              key == LogicalKeyboardKey.escape ||
+              key == LogicalKeyboardKey.browserBack;
+          if (isBackKey) {
+            if (_tvBottomPanelIndex != 0) {
+              _showControls(scheduleHide: false);
+              _setTvBottomPanel(0);
+              _focusTvPlayPause();
+              return KeyEventResult.handled;
+            }
+            return KeyEventResult.ignored;
+          }
+
           if (key == LogicalKeyboardKey.arrowDown) {
             _showControls(scheduleHide: false);
             final before = _tvBottomPanelIndex;

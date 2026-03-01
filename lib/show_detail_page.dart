@@ -4499,6 +4499,31 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     }
   }
 
+  Future<void> _togglePlayerCore() async {
+    final next = widget.appState.playerCore == PlayerCore.exo
+        ? PlayerCore.mpv
+        : PlayerCore.exo;
+    if (next == PlayerCore.exo &&
+        (kIsWeb || defaultTargetPlatform != TargetPlatform.android)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Exo 内核仅支持 Android')),
+      );
+      return;
+    }
+
+    try {
+      await widget.appState.setPlayerCore(next);
+    } catch (_) {}
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(next == PlayerCore.exo ? '已切换到 ExoPlayer' : '已切换到 mpv'),
+      ),
+    );
+  }
+
   Future<void> _refreshProgressAfterReturn(
       {Duration delay = const Duration(milliseconds: 350)}) async {
     final access =
@@ -5497,8 +5522,14 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     final runtimeText = fmtRuntime(runtime);
     final dateLine = dateText.isEmpty ? '' : '播出日期：$dateText';
 
-    final coverWidth = (520 * uiScale).clamp(360.0, 760.0);
-    final coverRadius = (20 * uiScale).clamp(14.0, 26.0);
+    final canSwitchCore =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    final coreLabel = widget.appState.playerCore == PlayerCore.exo
+        ? '内核：Exo'
+        : '内核：mpv';
+
+    final posterWidth = (320 * uiScale).clamp(220.0, 420.0);
+    final posterRadius = (20 * uiScale).clamp(14.0, 26.0);
     final contentPadding = EdgeInsets.fromLTRB(
       (32 * uiScale).clamp(18.0, 44.0),
       (22 * uiScale).clamp(14.0, 32.0),
@@ -5659,6 +5690,20 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     final playInfo = _playInfo;
     final currentMs = _currentMediaSource();
 
+    String posterUrl = coverUrl;
+    final sid = (_seriesId ?? ep.seriesId ?? '').trim();
+    if (access != null && sid.isNotEmpty) {
+      final seriesPosterUrl = access.adapter.imageUrl(
+        access.auth,
+        itemId: sid,
+        imageType: 'Primary',
+        maxWidth: 520,
+      );
+      if (seriesPosterUrl.trim().isNotEmpty) {
+        posterUrl = seriesPosterUrl;
+      }
+    }
+
     return Scaffold(
       body: Stack(
         fit: StackFit.expand,
@@ -5680,15 +5725,21 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           SizedBox(
-                            width: coverWidth,
+                            width: posterWidth,
                             child: AspectRatio(
-                              aspectRatio: 16 / 9,
+                              aspectRatio: 2 / 3,
                               child: ClipRRect(
-                                borderRadius: BorderRadius.circular(coverRadius),
-                                child: coverUrl.isEmpty
-                                    ? const ColoredBox(color: Colors.black26)
+                                borderRadius:
+                                    BorderRadius.circular(posterRadius),
+                                child: posterUrl.isEmpty
+                                    ? const ColoredBox(
+                                        color: Colors.black26,
+                                        child: Center(
+                                          child: Icon(Icons.image),
+                                        ),
+                                      )
                                     : Image.network(
-                                        coverUrl,
+                                        posterUrl,
                                         fit: BoxFit.cover,
                                         headers: {
                                           'User-Agent': LinHttpClientFactory.userAgent
@@ -5773,6 +5824,12 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                       icon: Icons.format_list_numbered_rounded,
                                       label: '选集',
                                       onPressed: () => _pickEpisode(context),
+                                    ),
+                                    pillButton(
+                                      icon: Icons.memory_rounded,
+                                      label: coreLabel,
+                                      onPressed:
+                                          canSwitchCore ? _togglePlayerCore : null,
                                     ),
                                   ],
                                 ),
