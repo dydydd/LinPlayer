@@ -61,8 +61,8 @@ dependencies {
     implementation("tv.danmaku.ijk.media:ijkplayer-armv7a:0.8.8")
     implementation("tv.danmaku.ijk.media:ijkplayer-arm64:0.8.8")
 
-    // libVLC Android SDK (3.0.x)
-    implementation("org.videolan.android:libvlc-all:3.0.18")
+    // libVLC Android SDK (3.x)
+    implementation("org.videolan.android:libvlc-all:3.6.5")
 
     // QR code (Android 4.4 compatible)
     implementation("com.google.zxing:core:3.5.3")
