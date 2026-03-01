@@ -97,6 +97,8 @@ final class HomeSectionAdapter extends RecyclerView.Adapter<HomeSectionAdapter.V
             list.setRecycledViewPool(pool);
             list.setNestedScrollingEnabled(false);
             list.setItemAnimator(null);
+            list.addItemDecoration(
+                    new HorizontalSpacingItemDecoration(dpToPx(itemView, 12), true));
 
             itemAdapter =
                     new EmbyCardAdapter(
@@ -108,6 +110,11 @@ final class HomeSectionAdapter extends RecyclerView.Adapter<HomeSectionAdapter.V
                             view -> {
                                 if (listener != null) listener.onViewClicked(view);
                             });
+        }
+
+        private static int dpToPx(View view, int dp) {
+            float density = view.getResources().getDisplayMetrics().density;
+            return Math.round(dp * density);
         }
     }
 
