@@ -227,17 +227,8 @@ final class IjkPlayerCore implements PlayerCore {
 
     @Override
     public long getBufferedPositionMs() {
-        IjkMediaPlayer p = player;
-        if (p == null) return 0L;
-        try {
-            long d = getDurationMs();
-            int percent = p.getBufferedPercentage();
-            if (d <= 0L || percent <= 0) return 0L;
-            if (percent >= 100) return d;
-            return (d * percent) / 100L;
-        } catch (Exception ignored) {
-            return 0L;
-        }
+        // ijkplayer buffering APIs vary across builds/artifacts; keep it simple.
+        return getPositionMs();
     }
 
     @Override
@@ -320,4 +311,3 @@ final class IjkPlayerCore implements PlayerCore {
         }
     }
 }
-
