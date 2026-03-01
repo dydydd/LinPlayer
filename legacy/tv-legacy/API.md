@@ -303,3 +303,46 @@ TV Legacy 的首页/详情页目前通过一个“媒体数据后端”抽象拿
 - `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/backend/Backends.java`
 - `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/backend/DemoMediaBackend.java`
 - `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/NetworkClients.java`
+
+---
+
+## 11. (UI) Emby Home / Favorites / Search (v0.1.0+)
+
+The legacy TV Home (and its Favorites/Search pages) fetch data directly from Emby APIs
+using `EmbyClient`.
+
+Implementation:
+- `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/emby/EmbyClient.java`
+- `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/MainActivity.java`
+- `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/SearchActivity.java`
+- `legacy/tv-legacy/app/src/main/java/com/linplayer/tvlegacy/LibraryDetailActivity.java`
+
+Base URL:
+- Accepts both `http(s)://host:port` and `http(s)://host:port/emby`
+- Requests are made under `/emby/...`
+
+Used endpoints (token passed as `api_key` query param):
+- `GET /emby/Users/Me`
+- `GET /emby/Users/{userId}/Items/Resume?Limit=...`
+- `GET /emby/Users/{userId}/Views`
+- `GET /emby/Users/{userId}/Items?ParentId={viewId}&IncludeItemTypes=Series,Movie&Recursive=true&Limit=...`
+- Favorites:
+  - `GET /emby/Users/{userId}/Items?Filters=IsFavorite&IncludeItemTypes=Series|Movie|Episode&Recursive=true&Limit=...`
+- Search:
+  - `GET /emby/Users/{userId}/Items?SearchTerm=...&IncludeItemTypes=Series,Movie,Episode&Recursive=true&Limit=...`
+- Images:
+  - `GET /emby/Items/{id}/Images/Primary?maxWidth=...`
+- Stream:
+  - `GET /emby/Videos/{id}/stream?static=true`
+
+UI mapping:
+- Home:
+  - Resume row -> `/Items/Resume`
+  - Libraries row -> `/Views`
+  - Per-library preview rows -> `/Users/{userId}/Items?ParentId=...`
+- Favorites tab -> `Filters=IsFavorite`
+- Search page -> `SearchTerm=...`
+
+Style preferences (SharedPreferences):
+- `ui_panel_alpha` (5~90, percent)
+- `ui_bg_blur` (0~24, blur radius)
