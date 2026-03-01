@@ -681,7 +681,11 @@ public final class PlayerActivity extends AppCompatActivity {
 
         List<ChipItem> items = new ArrayList<>();
         if (subtitleTracks.isEmpty()) {
-            items.add(new ChipItem("No subtitles", false, false));
+            if (coreType == PlayerCoreType.IJK) {
+                items.add(new ChipItem("IjkPlayer: use libVLC for subtitles", false, false));
+            } else {
+                items.add(new ChipItem("No subtitles", false, false));
+            }
         } else {
             items.add(new ChipItem("Off", true, subtitlesOff));
             items.add(new ChipItem("Auto", true, !subtitlesOff && selectedSubtitleId == null));
@@ -699,7 +703,11 @@ public final class PlayerActivity extends AppCompatActivity {
 
         List<ChipItem> items = new ArrayList<>();
         if (audioTracks.isEmpty()) {
-            items.add(new ChipItem("No audio tracks", false, false));
+            if (coreType == PlayerCoreType.IJK) {
+                items.add(new ChipItem("IjkPlayer: use libVLC for tracks", false, false));
+            } else {
+                items.add(new ChipItem("No audio tracks", false, false));
+            }
         } else {
             items.add(new ChipItem("Auto", true, selectedAudioId == null));
             for (PlayerTrack t : audioTracks) {
