@@ -81,6 +81,14 @@
 
     <string name="open_episodes">Episodes</string>
     <string name="play">Play</string>
+    <string name="favorite">Favorite</string>
+    <string name="unfavorite">Unfavorite</string>
+    <string name="mark_played">Mark Played</string>
+    <string name="mark_unplayed">Mark Unplayed</string>
+    <string name="season_select">Season</string>
+    <string name="episode_select">Episode</string>
+    <string name="season_input_hint">Season #</string>
+    <string name="episode_input_hint">Episode #</string>
     <string name="episode_list_title">Episode List</string>
     <string name="player_title">Player</string>
     <string name="back">Back</string>

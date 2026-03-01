@@ -12,6 +12,7 @@ import java.util.Locale;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 import org.json.JSONArray;
@@ -55,6 +56,85 @@ public final class EmbyClient {
         HttpUrl.Builder b = apiUrl("Items/" + id + "/Images/Primary");
         if (maxWidth > 0) b.addQueryParameter("maxWidth", String.valueOf(maxWidth));
         return b.build().toString();
+    }
+
+    public String backdropImageUrl(String itemId, int maxWidth) {
+        if (baseUrl == null) return "";
+        String id = safeTrim(itemId);
+        if (id.isEmpty()) return "";
+        HttpUrl.Builder b = apiUrl("Items/" + id + "/Images/Backdrop/0");
+        if (maxWidth > 0) b.addQueryParameter("maxWidth", String.valueOf(maxWidth));
+        return b.build().toString();
+    }
+
+    public EmbyItemDetails getItemDetails(String itemId) throws IOException, JSONException {
+        String uid = requireUserId();
+        String id = safeTrim(itemId);
+        if (id.isEmpty()) return null;
+
+        HttpUrl url =
+                apiUrl("Users/" + uid + "/Items/" + id)
+                        .addQueryParameter(
+                                "Fields",
+                                "Overview,PremiereDate,ProductionYear,RunTimeTicks,UserData,SeriesName,ParentIndexNumber,IndexNumber,SeriesId")
+                        .build();
+        JSONObject it = getJsonObject(url);
+        return parseItemDetails(it);
+    }
+
+    public List<EmbySeason> listSeasons(String seriesId) throws IOException, JSONException {
+        String uid = requireUserId();
+        String id = safeTrim(seriesId);
+        if (id.isEmpty()) return Collections.emptyList();
+
+        HttpUrl url =
+                apiUrl("Shows/" + id + "/Seasons")
+                        .addQueryParameter("UserId", uid)
+                        .addQueryParameter("Fields", "IndexNumber")
+                        .build();
+        JSONObject root = getJsonObject(url);
+        JSONArray items = root.optJSONArray("Items");
+        return parseSeasons(items);
+    }
+
+    public List<EmbyEpisode> listEpisodes(String seriesId, @Nullable String seasonId, int limit)
+            throws IOException, JSONException {
+        String uid = requireUserId();
+        String showId = safeTrim(seriesId);
+        if (showId.isEmpty()) return Collections.emptyList();
+
+        HttpUrl.Builder b =
+                apiUrl("Shows/" + showId + "/Episodes")
+                        .addQueryParameter("UserId", uid)
+                        .addQueryParameter("SortBy", "IndexNumber")
+                        .addQueryParameter("SortOrder", "Ascending")
+                        .addQueryParameter("Limit", String.valueOf(Math.max(1, limit)))
+                        .addQueryParameter("Fields", "PremiereDate,RunTimeTicks,UserData");
+        String sid = safeTrim(seasonId);
+        if (!sid.isEmpty()) b.addQueryParameter("SeasonId", sid);
+        HttpUrl url = b.build();
+
+        JSONObject root = getJsonObject(url);
+        JSONArray items = root.optJSONArray("Items");
+        return parseEpisodes(items);
+    }
+
+    public boolean setFavorite(String itemId, boolean favorite) throws IOException, JSONException {
+        String uid = requireUserId();
+        String id = safeTrim(itemId);
+        if (id.isEmpty()) return false;
+        HttpUrl url = apiUrl("Users/" + uid + "/FavoriteItems/" + id).build();
+
+        return favorite ? postEmpty(url) : delete(url);
+    }
+
+    public boolean setPlayed(String itemId, boolean played) throws IOException, JSONException {
+        String uid = requireUserId();
+        String id = safeTrim(itemId);
+        if (id.isEmpty()) return false;
+        HttpUrl url = apiUrl("Users/" + uid + "/PlayedItems/" + id).build();
+
+        return played ? postEmpty(url) : delete(url);
     }
 
     public List<EmbyItem> listResume(int limit) throws IOException, JSONException {
@@ -198,6 +278,37 @@ public final class EmbyClient {
         }
     }
 
+    private boolean postEmpty(HttpUrl url) throws IOException {
+        OkHttpClient client = NetworkClients.okHttp(appContext);
+        RequestBody body = RequestBody.create(null, new byte[0]);
+        Request.Builder rb = new Request.Builder().url(url).post(body);
+        if (!apiKey.isEmpty()) {
+            rb.header("X-Emby-Token", apiKey);
+        }
+        Request req = rb.build();
+        try (Response resp = client.newCall(req).execute()) {
+            if (!resp.isSuccessful()) {
+                throw new IOException("HTTP " + resp.code() + " " + resp.message());
+            }
+            return true;
+        }
+    }
+
+    private boolean delete(HttpUrl url) throws IOException {
+        OkHttpClient client = NetworkClients.okHttp(appContext);
+        Request.Builder rb = new Request.Builder().url(url).delete();
+        if (!apiKey.isEmpty()) {
+            rb.header("X-Emby-Token", apiKey);
+        }
+        Request req = rb.build();
+        try (Response resp = client.newCall(req).execute()) {
+            if (!resp.isSuccessful()) {
+                throw new IOException("HTTP " + resp.code() + " " + resp.message());
+            }
+            return true;
+        }
+    }
+
     private List<EmbyItem> parseItems(@Nullable JSONArray items, boolean preferSeriesPosterForEpisode) {
         if (items == null || items.length() == 0) return Collections.emptyList();
         List<EmbyItem> out = new ArrayList<>(items.length());
@@ -205,6 +316,116 @@ public final class EmbyClient {
             JSONObject it = items.optJSONObject(i);
             EmbyItem item = parseItem(it, preferSeriesPosterForEpisode);
             if (item != null) out.add(item);
+        }
+        return Collections.unmodifiableList(out);
+    }
+
+    @Nullable
+    private EmbyItemDetails parseItemDetails(@Nullable JSONObject it) {
+        if (it == null) return null;
+        String id = safeTrim(it.optString("Id", ""));
+        if (id.isEmpty()) return null;
+
+        String type = safeTrim(it.optString("Type", ""));
+        String name = safeTrim(it.optString("Name", ""));
+        if (name.isEmpty()) name = id;
+        String overview = it.optString("Overview", "");
+
+        String seriesId = safeTrim(it.optString("SeriesId", ""));
+        String seriesName = safeTrim(it.optString("SeriesName", ""));
+        int season = it.optInt("ParentIndexNumber", 0);
+        int ep = it.optInt("IndexNumber", 0);
+
+        String premiereDate = "";
+        String pd = safeTrim(it.optString("PremiereDate", ""));
+        if (pd.length() >= 10) premiereDate = pd.substring(0, 10);
+        else if (pd.length() >= 4) premiereDate = pd.substring(0, 4);
+        if (premiereDate.isEmpty()) {
+            int yearInt = it.optInt("ProductionYear", 0);
+            if (yearInt > 0) premiereDate = String.valueOf(yearInt);
+        }
+
+        long runtimeTicks = it.optLong("RunTimeTicks", 0L);
+
+        boolean isFavorite = false;
+        boolean played = false;
+        long positionMs = 0L;
+        JSONObject userData = it.optJSONObject("UserData");
+        if (userData != null) {
+            isFavorite = userData.optBoolean("IsFavorite", false);
+            played = userData.optBoolean("Played", false);
+            long ticks = userData.optLong("PlaybackPositionTicks", 0L);
+            if (ticks > 0L) positionMs = ticks / 10000L;
+        }
+
+        return new EmbyItemDetails(
+                id,
+                type,
+                name,
+                overview,
+                seriesId,
+                seriesName,
+                season,
+                ep,
+                premiereDate,
+                runtimeTicks,
+                isFavorite,
+                played,
+                positionMs);
+    }
+
+    private List<EmbySeason> parseSeasons(@Nullable JSONArray items) {
+        if (items == null || items.length() == 0) return Collections.emptyList();
+        List<EmbySeason> out = new ArrayList<>(items.length());
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject it = items.optJSONObject(i);
+            if (it == null) continue;
+            String id = safeTrim(it.optString("Id", ""));
+            if (id.isEmpty()) continue;
+            int index = it.optInt("IndexNumber", 0);
+            String name = safeTrim(it.optString("Name", ""));
+            out.add(new EmbySeason(id, index, name));
+        }
+        Collections.sort(
+                out,
+                (a, b) -> {
+                    int an = a != null ? a.seasonNumber : 0;
+                    int bn = b != null ? b.seasonNumber : 0;
+                    return an - bn;
+                });
+        return Collections.unmodifiableList(out);
+    }
+
+    private List<EmbyEpisode> parseEpisodes(@Nullable JSONArray items) {
+        if (items == null || items.length() == 0) return Collections.emptyList();
+        List<EmbyEpisode> out = new ArrayList<>(items.length());
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject it = items.optJSONObject(i);
+            if (it == null) continue;
+            String id = safeTrim(it.optString("Id", ""));
+            if (id.isEmpty()) continue;
+
+            String name = safeTrim(it.optString("Name", ""));
+            int season = it.optInt("ParentIndexNumber", 0);
+            int ep = it.optInt("IndexNumber", 0);
+
+            String premiereDate = "";
+            String pd = safeTrim(it.optString("PremiereDate", ""));
+            if (pd.length() >= 10) premiereDate = pd.substring(0, 10);
+            else if (pd.length() >= 4) premiereDate = pd.substring(0, 4);
+
+            long runtimeTicks = it.optLong("RunTimeTicks", 0L);
+
+            boolean played = false;
+            long positionMs = 0L;
+            JSONObject userData = it.optJSONObject("UserData");
+            if (userData != null) {
+                played = userData.optBoolean("Played", false);
+                long ticks = userData.optLong("PlaybackPositionTicks", 0L);
+                if (ticks > 0L) positionMs = ticks / 10000L;
+            }
+
+            out.add(new EmbyEpisode(id, name, season, ep, premiereDate, runtimeTicks, played, positionMs));
         }
         return Collections.unmodifiableList(out);
     }

@@ -81,6 +81,14 @@
 
     <string name="open_episodes">剧集</string>
     <string name="play">播放</string>
+    <string name="favorite">喜欢</string>
+    <string name="unfavorite">取消喜欢</string>
+    <string name="mark_played">标记已播放</string>
+    <string name="mark_unplayed">标记未播放</string>
+    <string name="season_select">季度选择</string>
+    <string name="episode_select">集数选择</string>
+    <string name="season_input_hint">季</string>
+    <string name="episode_input_hint">集</string>
     <string name="episode_list_title">剧集列表</string>
     <string name="player_title">播放器</string>
     <string name="back">返回</string>
