@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import 'danmaku.dart';
 
@@ -45,20 +46,31 @@ class DanmakuStageState extends State<DanmakuStage>
   static const double _scrollMinDurationSec = 1.2;
   static const double _scrollMaxDurationSec = 20.0;
 
-  final List<_FlyingDanmaku> _scrolling = [];
-  final List<_StaticDanmaku> _static = [];
-  double _width = 0;
-  double _height = 0;
+  final List<_ScrollingDanmaku> _scrolling = <_ScrollingDanmaku>[];
+  final List<_StaticDanmaku> _static = <_StaticDanmaku>[];
+
+  final ValueNotifier<int> _repaint = ValueNotifier<int>(0);
+
+  Ticker? _ticker;
+  Duration _lastTickerElapsed = Duration.zero;
+  double _clockMs = 0.0;
+
+  double _width = 0.0;
+  double _height = 0.0;
   bool _paused = false;
 
   int _scrollRowCursor = 0;
-  List<_FlyingDanmaku?> _scrollRowLast = const [];
+  List<_ScrollingDanmaku?> _scrollRowLast = const [];
 
   int _topRowCursor = 0;
   List<_StaticDanmaku?> _topRowLast = const [];
 
   int _bottomRowCursor = 0;
   List<_StaticDanmaku?> _bottomRowLast = const [];
+
+  TextStyle? _paintStyle;
+  TextScaler _textScaler = TextScaler.noScaling;
+  TextDirection _textDirection = TextDirection.ltr;
 
   static double _clampSpeed(double v) => v.clamp(0.1, 3.0).toDouble();
   static double _clampTimeScale(double v) => v.clamp(0.25, 4.0).toDouble();
@@ -79,6 +91,18 @@ class DanmakuStageState extends State<DanmakuStage>
     final scaled = _staticBaseDuration.inMilliseconds / _effectiveTimeScale;
     final ms = scaled.round().clamp(800, 20000).toInt();
     return Duration(milliseconds: ms);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = createTicker(_onTick);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _updatePainterConfig();
   }
 
   @override
@@ -105,15 +129,138 @@ class DanmakuStageState extends State<DanmakuStage>
     if (widget.enabled && (speedChanged || timeScaleChanged)) {
       _rescaleActiveDanmaku();
     }
+
+    final scaleChanged = (widget.scale - oldWidget.scale).abs() > 0.0001;
+    final boldChanged = widget.bold != oldWidget.bold;
+    if (widget.enabled && (scaleChanged || boldChanged)) {
+      _updatePainterConfig();
+    }
+  }
+
+  void _updatePainterConfig() {
+    if (!mounted) return;
+    final textScaler = MediaQuery.textScalerOf(context);
+    final direction = Directionality.of(context);
+
+    final textScale = widget.scale.clamp(0.1, 3.0);
+    final fontSize = _baseFontSize * textScale;
+
+    final textTheme = Theme.of(context).textTheme;
+    final baseStyle = textTheme.bodyMedium ?? const TextStyle();
+    final fontWeight = widget.bold ? FontWeight.w600 : FontWeight.w400;
+    final style = baseStyle.copyWith(
+      fontSize: fontSize,
+      color: Colors.white,
+      fontWeight: fontWeight,
+      shadows: const [
+        Shadow(
+          blurRadius: 4,
+          offset: Offset(1, 1),
+          color: Colors.black87,
+        ),
+      ],
+    );
+
+    if (_paintStyle == style &&
+        _textScaler == textScaler &&
+        _textDirection == direction) {
+      return;
+    }
+
+    _paintStyle = style;
+    _textScaler = textScaler;
+    _textDirection = direction;
+
+    for (final a in _scrolling) {
+      a.painter
+        ..text = TextSpan(text: a.text, style: style)
+        ..textDirection = direction
+        ..textScaler = textScaler
+        ..layout();
+    }
+    for (final a in _static) {
+      a.painter
+        ..text = TextSpan(text: a.text, style: style)
+        ..textDirection = direction
+        ..textScaler = textScaler
+        ..layout();
+    }
+
+    _repaint.value++;
+  }
+
+  void _onTick(Duration elapsed) {
+    final delta = elapsed - _lastTickerElapsed;
+    _lastTickerElapsed = elapsed;
+    if (delta.isNegative) return;
+
+    _clockMs += delta.inMicroseconds / 1000.0;
+
+    var changed = false;
+    final nowMs = _clockMs;
+
+    for (var i = _scrolling.length - 1; i >= 0; i--) {
+      final a = _scrolling[i];
+      if (!a.isCompleted(nowMs)) continue;
+      _scrolling.removeAt(i);
+      if (_scrollRowLast.length > a.row && _scrollRowLast[a.row] == a) {
+        _scrollRowLast[a.row] = null;
+      }
+      changed = true;
+    }
+
+    for (var i = _static.length - 1; i >= 0; i--) {
+      final a = _static[i];
+      if (!a.isCompleted(nowMs)) continue;
+      _static.removeAt(i);
+      if (a.isBottom) {
+        if (_bottomRowLast.length > a.row && _bottomRowLast[a.row] == a) {
+          _bottomRowLast[a.row] = null;
+        }
+      } else {
+        if (_topRowLast.length > a.row && _topRowLast[a.row] == a) {
+          _topRowLast[a.row] = null;
+        }
+      }
+      changed = true;
+    }
+
+    if (_scrolling.isEmpty && _static.isEmpty) {
+      _stopTicker();
+    }
+
+    if (changed || (_ticker?.isActive ?? false)) {
+      _repaint.value++;
+    }
+  }
+
+  void _ensureTickerRunning() {
+    final ticker = _ticker;
+    if (ticker == null) return;
+    if (!widget.enabled) return;
+    if (_paused) return;
+    if (_scrolling.isEmpty && _static.isEmpty) return;
+    if (ticker.isActive) return;
+    _lastTickerElapsed = Duration.zero;
+    ticker.start();
+  }
+
+  void _stopTicker() {
+    final ticker = _ticker;
+    if (ticker == null) return;
+    if (!ticker.isActive) return;
+    ticker.stop();
+    _lastTickerElapsed = Duration.zero;
+  }
+
+  @override
+  void dispose() {
+    _ticker?.dispose();
+    _repaint.dispose();
+    super.dispose();
   }
 
   void clear() {
-    for (final a in _scrolling) {
-      a.controller.dispose();
-    }
-    for (final a in _static) {
-      a.controller.dispose();
-    }
     _scrolling.clear();
     _static.clear();
     _scrollRowLast = const [];
@@ -123,42 +270,33 @@ class DanmakuStageState extends State<DanmakuStage>
     _topRowCursor = 0;
     _bottomRowCursor = 0;
     _paused = false;
-    if (mounted) setState(() {});
+    _stopTicker();
+    _repaint.value++;
   }
 
   void pause() {
     if (_paused) return;
     _paused = true;
-    for (final a in _scrolling) {
-      a.controller.stop(canceled: false);
-    }
-    for (final a in _static) {
-      a.controller.stop(canceled: false);
-    }
+    _stopTicker();
   }
 
   void resume() {
     if (!_paused) return;
     _paused = false;
-    for (final a in _scrolling) {
-      if (a.controller.isAnimating) continue;
-      if (a.controller.status == AnimationStatus.completed) continue;
-      a.controller.forward();
-    }
-    for (final a in _static) {
-      if (a.controller.isAnimating) continue;
-      if (a.controller.status == AnimationStatus.completed) continue;
-      a.controller.forward();
-    }
+    _ensureTickerRunning();
   }
 
   void emit(DanmakuItem item) {
     if (!widget.enabled) return;
     if (_width <= 0 || _height <= 0) return;
 
-    final scale = widget.scale.clamp(0.1, 3.0);
-    final fontSize = _baseFontSize * scale;
-    final lineHeight = fontSize + _lineGap;
+    _updatePainterConfig();
+    final style = _paintStyle;
+    if (style == null) return;
+
+    final textScale = widget.scale.clamp(0.1, 3.0);
+    final fontSize = _baseFontSize * textScale;
+    final lineHeight = _textScaler.scale(fontSize) + _lineGap;
 
     final totalRows =
         math.min(math.max(1, (_height / lineHeight).floor()), 200);
@@ -167,7 +305,9 @@ class DanmakuStageState extends State<DanmakuStage>
     final desiredBottomRows = widget.bottomMaxLines.clamp(0, 200);
     final desiredScrollRows = widget.scrollMaxLines.clamp(0, 200);
 
-    if (desiredScrollRows <= 0 && desiredTopRows <= 0 && desiredBottomRows <= 0) {
+    if (desiredScrollRows <= 0 &&
+        desiredTopRows <= 0 &&
+        desiredBottomRows <= 0) {
       return;
     }
 
@@ -232,7 +372,7 @@ class DanmakuStageState extends State<DanmakuStage>
         if (scrollRows <= 0) return;
         _emitScrolling(
           item,
-          fontSize: fontSize,
+          style: style,
           lineHeight: lineHeight,
           rowStart: topRows,
           rows: scrollRows,
@@ -242,7 +382,7 @@ class DanmakuStageState extends State<DanmakuStage>
         if (topRows <= 0) return;
         _emitStatic(
           item,
-          fontSize: fontSize,
+          style: style,
           lineHeight: lineHeight,
           rowStart: 0,
           rows: topRows,
@@ -253,7 +393,7 @@ class DanmakuStageState extends State<DanmakuStage>
         if (bottomRows <= 0) return;
         _emitStatic(
           item,
-          fontSize: fontSize,
+          style: style,
           lineHeight: lineHeight,
           rowStart: totalRows - bottomRows,
           rows: bottomRows,
@@ -265,24 +405,24 @@ class DanmakuStageState extends State<DanmakuStage>
 
   void _emitScrolling(
     DanmakuItem item, {
-    required double fontSize,
+    required TextStyle style,
     required double lineHeight,
     required int rowStart,
     required int rows,
   }) {
-    final textTheme = Theme.of(context).textTheme;
-    final baseStyle = textTheme.bodyMedium ?? const TextStyle();
-    final fontWeight = widget.bold ? FontWeight.w600 : FontWeight.w400;
-    final style = baseStyle.copyWith(fontSize: fontSize, fontWeight: fontWeight);
     final painter = TextPainter(
       text: TextSpan(text: item.text, style: style),
       maxLines: 1,
-      textDirection: TextDirection.ltr,
+      textDirection: _textDirection,
+      textScaler: _textScaler,
     )..layout();
     final textWidth = painter.width;
+
     final duration = _effectiveScrollDuration;
-    final durationSec = duration.inMilliseconds / 1000.0;
+    final durationMs = duration.inMilliseconds.clamp(1, 1 << 31);
+    final durationSec = durationMs / 1000.0;
     if (durationSec <= 0) return;
+
     final startX = _width + 12;
     final distance = _width + textWidth + 24;
     final speedNew = distance / durationSec;
@@ -290,34 +430,32 @@ class DanmakuStageState extends State<DanmakuStage>
     int pickedRow;
     if (widget.preventOverlap) {
       if (_scrollRowLast.length != rows) {
-        _scrollRowLast = List<_FlyingDanmaku?>.filled(
-          rows,
-          null,
-          growable: false,
-        );
+        _scrollRowLast =
+            List<_ScrollingDanmaku?>.filled(rows, null, growable: false);
         _scrollRowCursor = 0;
       }
 
+      final nowMs = _clockMs;
       var found = -1;
       for (var i = 0; i < rows; i++) {
         final row = (_scrollRowCursor + i) % rows;
         final last = _scrollRowLast[row];
-        if (last == null ||
-            last.controller.status == AnimationStatus.completed) {
+        if (last == null || last.isCompleted(nowMs)) {
           found = row;
           break;
         }
-        final lastRightEdge = last.left.value + last.textWidth;
+
+        final lastLeft = last.leftAt(nowMs);
+        final lastRightEdge = lastLeft + last.motionTextWidth;
         final gapNow = startX - lastRightEdge;
         if (gapNow < _scrollGapPx) continue;
 
-        final lastDuration = last.controller.duration;
-        if (lastDuration == null || lastDuration.inMilliseconds <= 0) {
+        final lastDurationSec = last.durationMs / 1000.0;
+        if (lastDurationSec <= 0) {
           found = row;
           break;
         }
-        final lastDistance = last.canvasWidth + last.textWidth + 24;
-        final lastDurationSec = lastDuration.inMilliseconds / 1000.0;
+        final lastDistance = last.canvasWidth + last.motionTextWidth + 24;
         final speedLast = lastDistance / lastDurationSec;
 
         if (speedNew <= speedLast) {
@@ -325,7 +463,7 @@ class DanmakuStageState extends State<DanmakuStage>
           break;
         }
 
-        final progress = last.controller.value.clamp(0.0, 1.0);
+        final progress = last.progressAt(nowMs);
         final lastRemainingSec = (1.0 - progress) * lastDurationSec;
         final gapEnd = gapNow - (speedNew - speedLast) * lastRemainingSec;
         if (gapEnd >= _scrollGapPx) {
@@ -341,35 +479,19 @@ class DanmakuStageState extends State<DanmakuStage>
     }
 
     final top = (rowStart + pickedRow) * lineHeight + _topPadding;
-    final controller = AnimationController(
-      vsync: this,
-      duration: duration,
-    );
-    final animation = Tween<double>(
-      begin: startX,
-      end: -textWidth - 12,
-    ).animate(CurvedAnimation(parent: controller, curve: Curves.linear));
 
-    final flying = _FlyingDanmaku(
-      item: item,
-      controller: controller,
-      left: animation,
+    final flying = _ScrollingDanmaku(
+      text: item.text,
+      painter: painter,
+      startClockMs: _clockMs,
+      durationMs: durationMs,
+      startX: startX,
+      endX: -textWidth - 12,
       top: top,
       row: pickedRow,
       canvasWidth: _width,
-      textWidth: textWidth,
+      motionTextWidth: textWidth,
     );
-
-    controller.addStatusListener((s) {
-      if (s != AnimationStatus.completed) return;
-      _scrolling.remove(flying);
-      if (_scrollRowLast.length > flying.row &&
-          _scrollRowLast[flying.row] == flying) {
-        _scrollRowLast[flying.row] = null;
-      }
-      controller.dispose();
-      if (mounted) setState(() {});
-    });
 
     _scrolling.add(flying);
     if (widget.preventOverlap &&
@@ -377,19 +499,21 @@ class DanmakuStageState extends State<DanmakuStage>
         pickedRow < _scrollRowLast.length) {
       _scrollRowLast[pickedRow] = flying;
     }
-    if (!_paused) controller.forward();
-    if (mounted) setState(() {});
+
+    _ensureTickerRunning();
+    _repaint.value++;
   }
 
   void _emitStatic(
     DanmakuItem item, {
-    required double fontSize,
+    required TextStyle style,
     required double lineHeight,
     required int rowStart,
     required int rows,
     required bool isBottom,
   }) {
     final duration = _effectiveStaticDuration;
+    final durationMs = duration.inMilliseconds.clamp(1, 1 << 31);
 
     int pickedRow;
     if (widget.preventOverlap) {
@@ -399,12 +523,12 @@ class DanmakuStageState extends State<DanmakuStage>
               List<_StaticDanmaku?>.filled(rows, null, growable: false);
           _bottomRowCursor = 0;
         }
+        final nowMs = _clockMs;
         var found = -1;
         for (var i = 0; i < rows; i++) {
           final row = (_bottomRowCursor + i) % rows;
           final last = _bottomRowLast[row];
-          if (last == null ||
-              last.controller.status == AnimationStatus.completed) {
+          if (last == null || last.isCompleted(nowMs)) {
             found = row;
             break;
           }
@@ -418,12 +542,12 @@ class DanmakuStageState extends State<DanmakuStage>
               List<_StaticDanmaku?>.filled(rows, null, growable: false);
           _topRowCursor = 0;
         }
+        final nowMs = _clockMs;
         var found = -1;
         for (var i = 0; i < rows; i++) {
           final row = (_topRowCursor + i) % rows;
           final last = _topRowLast[row];
-          if (last == null ||
-              last.controller.status == AnimationStatus.completed) {
+          if (last == null || last.isCompleted(nowMs)) {
             found = row;
             break;
           }
@@ -442,38 +566,22 @@ class DanmakuStageState extends State<DanmakuStage>
 
     final top = (rowStart + pickedRow) * lineHeight + _topPadding;
 
-    final controller = AnimationController(
-      vsync: this,
-      duration: duration,
-    );
-    final opacity = ConstantTween<double>(1).animate(controller);
+    final painter = TextPainter(
+      text: TextSpan(text: item.text, style: style),
+      maxLines: 1,
+      textDirection: _textDirection,
+      textScaler: _textScaler,
+    )..layout();
 
     final floating = _StaticDanmaku(
-      item: item,
-      controller: controller,
-      opacity: opacity,
+      text: item.text,
+      painter: painter,
+      startClockMs: _clockMs,
+      durationMs: durationMs,
       top: top,
       row: pickedRow,
       isBottom: isBottom,
     );
-
-    controller.addStatusListener((s) {
-      if (s != AnimationStatus.completed) return;
-      _static.remove(floating);
-      if (floating.isBottom) {
-        if (_bottomRowLast.length > floating.row &&
-            _bottomRowLast[floating.row] == floating) {
-          _bottomRowLast[floating.row] = null;
-        }
-      } else {
-        if (_topRowLast.length > floating.row &&
-            _topRowLast[floating.row] == floating) {
-          _topRowLast[floating.row] = null;
-        }
-      }
-      controller.dispose();
-      if (mounted) setState(() {});
-    });
 
     _static.add(floating);
     if (widget.preventOverlap) {
@@ -487,67 +595,37 @@ class DanmakuStageState extends State<DanmakuStage>
         }
       }
     }
-    if (!_paused) controller.forward();
-    if (mounted) setState(() {});
+
+    _ensureTickerRunning();
+    _repaint.value++;
   }
 
   void _rescaleActiveDanmaku() {
-    final scrollDuration = _effectiveScrollDuration;
-    final staticDuration = _effectiveStaticDuration;
+    final nowMs = _clockMs;
     final scrollTotalMs =
-        scrollDuration.inMilliseconds.clamp(1, 1 << 31).toInt();
+        _effectiveScrollDuration.inMilliseconds.clamp(1, 1 << 31).toInt();
+    final staticTotalMs =
+        _effectiveStaticDuration.inMilliseconds.clamp(1, 1 << 31).toInt();
 
-    for (final a in List<_FlyingDanmaku>.from(_scrolling)) {
-      final controller = a.controller;
-      if (controller.status == AnimationStatus.completed) continue;
-      final newTotalMs = scrollTotalMs;
-
-      final progress = controller.value.clamp(0.0, 1.0);
-      controller.duration = Duration(milliseconds: newTotalMs);
-      if (_paused || !controller.isAnimating) continue;
-
-      final remainingMs = ((1.0 - progress) * newTotalMs)
-          .round()
-          .clamp(1, newTotalMs)
-          .toInt();
-      controller
-        ..stop(canceled: false)
-        ..animateTo(
-          1.0,
-          duration: Duration(milliseconds: remainingMs),
-          curve: Curves.linear,
-        );
+    for (final a in _scrolling) {
+      final progress = a.progressAt(nowMs);
+      a.durationMs = scrollTotalMs;
+      a.startClockMs = nowMs - progress * scrollTotalMs;
     }
 
-    for (final a in List<_StaticDanmaku>.from(_static)) {
-      final controller = a.controller;
-      if (controller.status == AnimationStatus.completed) continue;
-      final newTotalMs =
-          staticDuration.inMilliseconds.clamp(1, 1 << 31).toInt();
-      final progress = controller.value.clamp(0.0, 1.0);
-      controller.duration = Duration(milliseconds: newTotalMs);
-      if (_paused || !controller.isAnimating) continue;
-
-      final remainingMs = ((1.0 - progress) * newTotalMs)
-          .round()
-          .clamp(1, newTotalMs)
-          .toInt();
-      controller
-        ..stop(canceled: false)
-        ..animateTo(
-          1.0,
-          duration: Duration(milliseconds: remainingMs),
-          curve: Curves.linear,
-        );
+    for (final a in _static) {
+      final progress = a.progressAt(nowMs);
+      a.durationMs = staticTotalMs;
+      a.startClockMs = nowMs - progress * staticTotalMs;
     }
+
+    _ensureTickerRunning();
+    _repaint.value++;
   }
 
   @override
   Widget build(BuildContext context) {
     if (!widget.enabled) return const SizedBox.shrink();
-
-    final textScale = widget.scale.clamp(0.1, 3.0);
-
     return IgnorePointer(
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -556,40 +634,15 @@ class DanmakuStageState extends State<DanmakuStage>
 
           return Opacity(
             opacity: widget.opacity.clamp(0, 1),
-            child: Stack(
-              children: [
-                for (final a in List<_FlyingDanmaku>.from(_scrolling))
-                  AnimatedBuilder(
-                    animation: a.left,
-                    builder: (context, _) {
-                      return Positioned(
-                        left: a.left.value,
-                        top: a.top,
-                        child: _DanmakuText(
-                          a.item.text,
-                          fontSize: _baseFontSize * textScale,
-                          bold: widget.bold,
-                        ),
-                      );
-                    },
-                  ),
-                for (final a in List<_StaticDanmaku>.from(_static))
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    top: a.top,
-                    child: FadeTransition(
-                      opacity: a.opacity,
-                      child: Center(
-                        child: _DanmakuText(
-                          a.item.text,
-                          fontSize: _baseFontSize * textScale,
-                          bold: widget.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
+            child: CustomPaint(
+              painter: _DanmakuPainter(
+                repaint: _repaint,
+                scrolling: _scrolling,
+                staticItems: _static,
+                clockMs: () => _clockMs,
+              ),
+              isComplex: true,
+              willChange: true,
             ),
           );
         },
@@ -598,75 +651,112 @@ class DanmakuStageState extends State<DanmakuStage>
   }
 }
 
-class _DanmakuText extends StatelessWidget {
-  const _DanmakuText(
-    this.text, {
-    required this.fontSize,
-    required this.bold,
-  });
+final class _DanmakuPainter extends CustomPainter {
+  _DanmakuPainter({
+    required Listenable repaint,
+    required this.scrolling,
+    required this.staticItems,
+    required this.clockMs,
+  }) : super(repaint: repaint);
 
-  final String text;
-  final double fontSize;
-  final bool bold;
+  final List<_ScrollingDanmaku> scrolling;
+  final List<_StaticDanmaku> staticItems;
+  final double Function() clockMs;
 
   @override
-  Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
-    final baseStyle = textTheme.bodyMedium ?? const TextStyle();
-    return Text(
-      text,
-      maxLines: 1,
-      overflow: TextOverflow.clip,
-      style: baseStyle.copyWith(
-        fontSize: fontSize,
-        color: Colors.white,
-        fontWeight: bold ? FontWeight.w600 : FontWeight.w400,
-        shadows: const [
-          Shadow(
-            blurRadius: 4,
-            offset: Offset(1, 1),
-            color: Colors.black87,
-          ),
-        ],
-      ),
-    );
+  void paint(Canvas canvas, Size size) {
+    final nowMs = clockMs();
+
+    for (final a in scrolling) {
+      final progress = a.progressAt(nowMs);
+      if (progress >= 1.0) continue;
+      final x = a.startX + (a.endX - a.startX) * progress;
+      a.painter.paint(canvas, Offset(x, a.top));
+    }
+
+    for (final a in staticItems) {
+      if (a.isCompleted(nowMs)) continue;
+      final w = a.painter.width;
+      final x = (size.width - w) / 2.0;
+      a.painter.paint(canvas, Offset(x, a.top));
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DanmakuPainter oldDelegate) {
+    return oldDelegate.scrolling != scrolling ||
+        oldDelegate.staticItems != staticItems ||
+        oldDelegate.clockMs != clockMs;
   }
 }
 
-class _FlyingDanmaku {
-  _FlyingDanmaku({
-    required this.item,
-    required this.controller,
-    required this.left,
+class _ScrollingDanmaku {
+  _ScrollingDanmaku({
+    required this.text,
+    required this.painter,
+    required this.startClockMs,
+    required this.durationMs,
+    required this.startX,
+    required this.endX,
     required this.top,
     required this.row,
     required this.canvasWidth,
-    required this.textWidth,
+    required this.motionTextWidth,
   });
 
-  final DanmakuItem item;
-  final AnimationController controller;
-  final Animation<double> left;
+  final String text;
+  final TextPainter painter;
+
+  double startClockMs;
+  int durationMs;
+
+  final double startX;
+  final double endX;
   final double top;
   final int row;
   final double canvasWidth;
-  final double textWidth;
+  final double motionTextWidth;
+
+  double progressAt(double nowMs) {
+    final d = durationMs;
+    if (d <= 0) return 1.0;
+    return ((nowMs - startClockMs) / d).clamp(0.0, 1.0);
+  }
+
+  double leftAt(double nowMs) {
+    final t = progressAt(nowMs);
+    return startX + (endX - startX) * t;
+  }
+
+  bool isCompleted(double nowMs) => nowMs - startClockMs >= durationMs;
 }
 
 class _StaticDanmaku {
   _StaticDanmaku({
-    required this.item,
-    required this.controller,
-    required this.opacity,
+    required this.text,
+    required this.painter,
+    required this.startClockMs,
+    required this.durationMs,
     required this.top,
     required this.row,
     required this.isBottom,
   });
 
-  final DanmakuItem item;
-  final AnimationController controller;
-  final Animation<double> opacity;
+  final String text;
+  final TextPainter painter;
+
+  double startClockMs;
+  int durationMs;
+
   final double top;
   final int row;
   final bool isBottom;
+
+  double progressAt(double nowMs) {
+    final d = durationMs;
+    if (d <= 0) return 1.0;
+    return ((nowMs - startClockMs) / d).clamp(0.0, 1.0);
+  }
+
+  bool isCompleted(double nowMs) => nowMs - startClockMs >= durationMs;
 }
