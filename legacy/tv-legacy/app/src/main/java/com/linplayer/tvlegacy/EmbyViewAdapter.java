@@ -44,6 +44,15 @@ final class EmbyViewAdapter extends RecyclerView.Adapter<EmbyViewAdapter.Vh> {
             RecyclerView.LayoutParams lp = (RecyclerView.LayoutParams) v.getLayoutParams();
             lp.width = px;
             v.setLayoutParams(lp);
+
+            ImageView img = v.findViewById(R.id.card_image);
+            if (img != null) {
+                ViewGroup.LayoutParams ilp = img.getLayoutParams();
+                if (ilp != null) {
+                    ilp.height = Math.round(px * 9f / 16f);
+                    img.setLayoutParams(ilp);
+                }
+            }
         }
         return new Vh(v);
     }
@@ -85,4 +94,3 @@ final class EmbyViewAdapter extends RecyclerView.Adapter<EmbyViewAdapter.Vh> {
         return v < min ? min : (v > max ? max : v);
     }
 }
-
