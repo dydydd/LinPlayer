@@ -1,5 +1,6 @@
 package com.linplayer.tvlegacy;
 
+import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.os.Bundle;
@@ -25,10 +26,20 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import org.json.JSONException;
 
 public final class ServersActivity extends AppCompatActivity {
     static final String EXTRA_REQUIRE_ONE = "require_one";
+
+    private static final ExecutorService REMOTE_IO =
+            Executors.newSingleThreadExecutor(
+                    r -> {
+                        Thread t = new Thread(r, "tv-legacy-remote-qr");
+                        t.setDaemon(true);
+                        return t;
+                    });
 
     private boolean requireOne;
 
@@ -39,6 +50,9 @@ public final class ServersActivity extends AppCompatActivity {
     private TextView qrUrlText;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private volatile int remoteQrSeq = 0;
+    @Nullable private volatile String remoteUrlCache;
+    @Nullable private volatile Bitmap remoteQrCache;
     private final Runnable pollRunnable =
             new Runnable() {
                 @Override
@@ -125,15 +139,68 @@ public final class ServersActivity extends AppCompatActivity {
     }
 
     private void refreshRemoteQr() {
-        RemoteInfo info = RemoteControl.ensureStarted(this);
-        String url = info != null ? info.firstRemoteUrl() : "";
-        if (qrUrlText != null) {
-            qrUrlText.setText(url.isEmpty() ? getString(R.string.no_lan_ip) : url);
-        }
-        if (qrImage != null) {
-            Bitmap bmp = url.isEmpty() ? null : QrCodeUtil.render(url, dpToPx(280));
-            qrImage.setImageBitmap(bmp);
-        }
+        final int seq = ++remoteQrSeq;
+        final int sizePx = dpToPx(280);
+        final Context appContext = getApplicationContext();
+
+        REMOTE_IO.execute(
+                () -> {
+                    String url = "";
+                    try {
+                        RemoteInfo info = RemoteControl.ensureStarted(appContext);
+                        url = info != null ? info.firstRemoteUrl() : "";
+                        if (url == null) url = "";
+                    } catch (Throwable ignored) {
+                        url = "";
+                    }
+
+                    if (seq != remoteQrSeq) return;
+
+                    final String u = url;
+
+                    Bitmap bmp = null;
+                    try {
+                        String cachedUrl = remoteUrlCache;
+                        Bitmap cachedBmp = remoteQrCache;
+                        boolean sameUrl = cachedUrl != null && cachedUrl.equals(u);
+                        if (!u.isEmpty() && (!sameUrl || cachedBmp == null)) {
+                            bmp = QrCodeUtil.render(u, sizePx);
+                        }
+                    } catch (Throwable ignored) {
+                        bmp = null;
+                    }
+
+                    final Bitmap rendered = bmp;
+                    mainHandler.post(
+                            () -> {
+                                if (seq != remoteQrSeq) return;
+                                if (isFinishing() || isDestroyed()) return;
+
+                                if (qrUrlText != null) {
+                                    qrUrlText.setText(
+                                            u.isEmpty() ? getString(R.string.no_lan_ip) : u);
+                                }
+
+                                if (qrImage != null) {
+                                    if (u.isEmpty()) {
+                                        remoteUrlCache = null;
+                                        remoteQrCache = null;
+                                        qrImage.setImageBitmap(null);
+                                        return;
+                                    }
+
+                                    if (rendered != null) {
+                                        remoteUrlCache = u;
+                                        remoteQrCache = rendered;
+                                        qrImage.setImageBitmap(rendered);
+                                        return;
+                                    }
+
+                                    Bitmap cached = remoteQrCache;
+                                    qrImage.setImageBitmap(cached);
+                                }
+                            });
+                });
     }
 
     private int dpToPx(int dp) {

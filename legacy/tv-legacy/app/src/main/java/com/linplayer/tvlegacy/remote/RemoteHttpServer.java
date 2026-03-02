@@ -87,7 +87,10 @@ final class RemoteHttpServer {
         acceptThread =
                 new Thread(
                         () -> {
-                            acceptLoop();
+                            try {
+                                acceptLoop();
+                            } catch (Throwable ignored) {
+                            }
                         },
                         "tv-legacy-remote-http");
         acceptThread.setDaemon(true);
@@ -122,7 +125,10 @@ final class RemoteHttpServer {
                 Thread t =
                         new Thread(
                                 () -> {
-                                    handleConnection(s);
+                                    try {
+                                        handleConnection(s);
+                                    } catch (Throwable ignored) {
+                                    }
                                 },
                                 "tv-legacy-remote-http-conn");
                 t.setDaemon(true);

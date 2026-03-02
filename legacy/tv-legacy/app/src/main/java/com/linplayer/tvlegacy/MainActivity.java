@@ -484,15 +484,16 @@ public final class MainActivity extends AppCompatActivity {
                         () -> {
                             try {
                                 String url = "https://bing.img.run/rand_uhd.php?t=" + System.currentTimeMillis();
-                                int max =
+                                int screenMax =
                                         Math.max(
                                                 getResources().getDisplayMetrics().widthPixels,
                                                 getResources().getDisplayMetrics().heightPixels);
+                                int max = Math.min(screenMax, 1920);
                                 Bitmap bmp = BitmapFetcher.fetch(getApplicationContext(), url, max);
                                 if (bmp == null) return;
                                 bgOriginal = bmp;
                                 applyBackgroundBlur();
-                            } catch (Exception ignored) {
+                            } catch (Throwable ignored) {
                                 // ignore
                             }
                         },
@@ -506,13 +507,19 @@ public final class MainActivity extends AppCompatActivity {
         int radius = TvStyle.backgroundBlurRadius(this);
         new Thread(
                         () -> {
-                            Bitmap blurred = blurForBackground(original, radius);
+                            Bitmap blurred = null;
+                            try {
+                                blurred = blurForBackground(original, radius);
+                            } catch (Throwable ignored) {
+                                blurred = null;
+                            }
+                            Bitmap result = blurred;
                             runOnUiThread(
                                     () -> {
                                         if (isFinishing() || isDestroyed()) return;
                                         if (bgImage != null) {
                                             bgImage.setImageBitmap(
-                                                    blurred != null ? blurred : original);
+                                                    result != null ? result : original);
                                         }
                                     });
                         },
@@ -526,12 +533,17 @@ public final class MainActivity extends AppCompatActivity {
         int r = Math.max(0, radius);
         if (r <= 0) return original;
 
-        int w = Math.max(1, original.getWidth() / 4);
-        int h = Math.max(1, original.getHeight() / 4);
-        Bitmap small = Bitmap.createScaledBitmap(original, w, h, true);
-        Bitmap blurredSmall = BitmapBlur.blur(small, r);
-        if (blurredSmall == null) return original;
-        return Bitmap.createScaledBitmap(blurredSmall, original.getWidth(), original.getHeight(), true);
+        try {
+            int w = Math.max(1, original.getWidth() / 4);
+            int h = Math.max(1, original.getHeight() / 4);
+            Bitmap small = Bitmap.createScaledBitmap(original, w, h, true);
+            Bitmap blurredSmall = BitmapBlur.blur(small, r);
+            if (blurredSmall == null) return original;
+            return Bitmap.createScaledBitmap(
+                    blurredSmall, original.getWidth(), original.getHeight(), true);
+        } catch (Throwable ignored) {
+            return original;
+        }
     }
 
     private int dpToPx(int dp) {
