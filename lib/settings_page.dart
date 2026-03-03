@@ -1568,9 +1568,10 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _editTmdbApiKey(BuildContext context) async {
     final controller =
-        TextEditingController(text: widget.appState.tmdbApiKey.trim());
+        TextEditingController(text: widget.appState.tmdbApiKeyOverride.trim());
 
     bool obscure = true;
+    final hasEnv = widget.appState.hasTmdbApiKeyFromEnv;
     final next = await showDialog<String>(
       context: context,
       builder: (dctx) => StatefulBuilder(
@@ -1583,7 +1584,9 @@ class _SettingsPageState extends State<SettingsPage> {
             textInputAction: TextInputAction.done,
             decoration: InputDecoration(
               hintText: 'v3 API Key / v4 Read Access Token',
-              helperText: '用于 TMDB 榜单（高分/热门）。',
+              helperText: hasEnv
+                  ? '用于 TMDB 榜单（高分/热门）。留空则使用构建参数 TMDB_API_KEY。'
+                  : '用于 TMDB 榜单（高分/热门）。',
               suffixIcon: IconButton(
                 tooltip: obscure ? '显示' : '隐藏',
                 icon: Icon(obscure ? Icons.visibility : Icons.visibility_off),
@@ -1613,7 +1616,9 @@ class _SettingsPageState extends State<SettingsPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          next.trim().isEmpty ? '已清除 TMDB API Key' : '已保存 TMDB API Key',
+          next.trim().isEmpty
+              ? (hasEnv ? '已清除自定义 TMDB API Key（仍使用构建参数）' : '已清除 TMDB API Key')
+              : '已保存自定义 TMDB API Key',
         ),
       ),
     );
@@ -1976,16 +1981,20 @@ class _SettingsPageState extends State<SettingsPage> {
                               subtitle: Text(
                                 appState.tmdbApiKey.trim().isEmpty
                                     ? '未设置（用于 TMDB 高分/热门栏目）'
-                                    : '已设置：${_maskApiKeyForDisplay(appState.tmdbApiKey)}',
+                                    : (appState.hasTmdbApiKeyOverride
+                                        ? '已设置：${_maskApiKeyForDisplay(appState.tmdbApiKey)}'
+                                        : '已通过构建参数设置：${_maskApiKeyForDisplay(appState.tmdbApiKey)}'),
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                               ),
                               trailing: FilledButton(
                                 onPressed: () => _editTmdbApiKey(context),
                                 child: Text(
-                                  appState.tmdbApiKey.trim().isEmpty
-                                      ? '设置'
-                                      : '编辑',
+                                  appState.hasTmdbApiKeyOverride
+                                      ? '编辑'
+                                      : (appState.hasTmdbApiKeyFromEnv
+                                          ? '覆盖'
+                                          : '设置'),
                                 ),
                               ),
                               onTap: () => _editTmdbApiKey(context),

@@ -237,6 +237,8 @@ class AppState extends ChangeNotifier {
   static const _kTvBackgroundBlurSigmaKey = 'tvBackgroundBlurSigma_v1';
   static const _kEpisodePickerShowTitleKey = 'episodePickerShowTitle_v1';
   static const _kTmdbApiKeyKey = 'tmdbApiKey_v1';
+  static const String _kTmdbApiKeyFromEnv =
+      String.fromEnvironment('TMDB_API_KEY', defaultValue: '');
   // Legacy: migrated to [_kEpisodePickerShowTitleKey].
   static const _kEpisodePickerShowCoverKey = 'episodePickerShowCover_v1';
 
@@ -827,7 +829,15 @@ class AppState extends ChangeNotifier {
   double get tvBackgroundOpacity => _tvBackgroundOpacity;
   double get tvBackgroundBlurSigma => _tvBackgroundBlurSigma;
   bool get episodePickerShowTitle => _episodePickerShowTitle;
-  String get tmdbApiKey => _tmdbApiKey;
+  String get tmdbApiKey {
+    final override = _tmdbApiKey.trim();
+    if (override.isNotEmpty) return override;
+    return _kTmdbApiKeyFromEnv.trim();
+  }
+
+  String get tmdbApiKeyOverride => _tmdbApiKey;
+  bool get hasTmdbApiKeyOverride => _tmdbApiKey.trim().isNotEmpty;
+  bool get hasTmdbApiKeyFromEnv => _kTmdbApiKeyFromEnv.trim().isNotEmpty;
 
   SeriesPlaybackOverride? seriesPlaybackOverride({
     required String serverId,
