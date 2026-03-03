@@ -334,7 +334,7 @@ class BangumiApiClient {
     }
     if (lastError != null) {
       // ignore: only_throw_errors
-      throw lastError!;
+      throw lastError;
     }
     return const [];
   }

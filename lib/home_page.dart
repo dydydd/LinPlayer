@@ -533,7 +533,7 @@ class _HomePageState extends State<HomePage> {
               showSearchBar: false,
             ),
             const _TvPlaceholderPage(title: 'TMDB'),
-            const TvBangumiPage(),
+            TvBangumiPage(appState: widget.appState),
             const _TvPlaceholderPage(title: 'Imdb'),
             const _TvPlaceholderPage(title: 'Bilibili'),
           ];

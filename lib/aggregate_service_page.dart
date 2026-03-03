@@ -10,9 +10,16 @@ import 'server_adapters/server_access.dart';
 import 'show_detail_page.dart';
 
 class AggregateServicePage extends StatefulWidget {
-  const AggregateServicePage({super.key, required this.appState});
+  const AggregateServicePage({
+    super.key,
+    required this.appState,
+    this.initialTabIndex,
+    this.initialQuery = '',
+  });
 
   final AppState appState;
+  final int? initialTabIndex;
+  final String initialQuery;
 
   @override
   State<AggregateServicePage> createState() => _AggregateServicePageState();
@@ -23,9 +30,14 @@ class _AggregateServicePageState extends State<AggregateServicePage> {
   Widget build(BuildContext context) {
     final isTv = DeviceType.isTv;
     final enableBlur = !isTv && widget.appState.enableBlurEffects;
+    final effectiveInitialIndex =
+        (widget.initialTabIndex ?? (widget.initialQuery.trim().isEmpty ? 0 : 1))
+            .clamp(0, 1)
+            .toInt();
 
     return DefaultTabController(
       length: 2,
+      initialIndex: effectiveInitialIndex,
       child: Scaffold(
         appBar: GlassAppBar(
           enableBlur: enableBlur,
@@ -42,7 +54,10 @@ class _AggregateServicePageState extends State<AggregateServicePage> {
         body: TabBarView(
           children: [
             _AggregateWatchHistoryTab(appState: widget.appState),
-            _AggregateSearchTab(appState: widget.appState),
+            _AggregateSearchTab(
+              appState: widget.appState,
+              initialQuery: widget.initialQuery,
+            ),
           ],
         ),
       ),
@@ -392,13 +407,19 @@ class _AggregateWatchHistoryTabState extends State<_AggregateWatchHistoryTab> {
 }
 
 class _AggregateSearchTab extends StatelessWidget {
-  const _AggregateSearchTab({required this.appState});
+  const _AggregateSearchTab({
+    required this.appState,
+    this.initialQuery = '',
+  });
 
   final AppState appState;
+  final String initialQuery;
 
   @override
-  Widget build(BuildContext context) =>
-      _AggregateSearchTabStateful(appState: appState);
+  Widget build(BuildContext context) => _AggregateSearchTabStateful(
+        appState: appState,
+        initialQuery: initialQuery,
+      );
 }
 
 class _ServerSearchHit {
@@ -439,9 +460,13 @@ typedef _LatestEpisodeResolver = Future<_LatestEpisodeResult?> Function(
 );
 
 class _AggregateSearchTabStateful extends StatefulWidget {
-  const _AggregateSearchTabStateful({required this.appState});
+  const _AggregateSearchTabStateful({
+    required this.appState,
+    this.initialQuery = '',
+  });
 
   final AppState appState;
+  final String initialQuery;
 
   @override
   State<_AggregateSearchTabStateful> createState() =>
@@ -464,6 +489,20 @@ class _AggregateSearchTabStatefulState
 
   final Map<String, Future<_LatestEpisodeResult?>> _latestEpisodeFutures = {};
   final Map<String, _LatestEpisodeResult?> _latestEpisodeCache = {};
+
+  @override
+  void initState() {
+    super.initState();
+
+    final initial = widget.initialQuery.trim();
+    if (initial.isNotEmpty) {
+      _controller.value = TextEditingValue(
+        text: initial,
+        selection: TextSelection.collapsed(offset: initial.length),
+      );
+      _scheduleSearch(initial, immediate: true);
+    }
+  }
 
   @override
   void dispose() {

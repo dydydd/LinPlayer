@@ -3,14 +3,35 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:lin_player_server_api/network/lin_http_client.dart';
+import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
-import 'package:url_launcher/url_launcher_string.dart';
 
+import '../aggregate_service_page.dart';
 import '../services/bangumi/bangumi_api.dart';
 import 'tv_focusable.dart';
 
+void _pushAggregateSearch(
+  BuildContext context, {
+  required AppState appState,
+  required String query,
+}) {
+  final q = query.trim();
+  if (q.isEmpty) return;
+  Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => AggregateServicePage(
+        appState: appState,
+        initialTabIndex: 1,
+        initialQuery: q,
+      ),
+    ),
+  );
+}
+
 class TvBangumiPage extends StatefulWidget {
-  const TvBangumiPage({super.key});
+  const TvBangumiPage({super.key, required this.appState});
+
+  final AppState appState;
 
   @override
   State<TvBangumiPage> createState() => _TvBangumiPageState();
@@ -131,8 +152,15 @@ class _TvBangumiPageState extends State<TvBangumiPage> {
           subtitle: todayLabel,
           future: _todayAiringFuture,
           onRetry: _reload,
+          onTapSubject: (s) => _pushAggregateSearch(
+            context,
+            appState: widget.appState,
+            query: s.displayName,
+          ),
           onOpen: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const TvBangumiCalendarPage()),
+            MaterialPageRoute(
+              builder: (_) => TvBangumiCalendarPage(appState: widget.appState),
+            ),
           ),
         ),
         const SizedBox(height: 20),
@@ -141,9 +169,14 @@ class _TvBangumiPageState extends State<TvBangumiPage> {
           subtitle: '按评分从高到低',
           future: _topScoreFuture,
           onRetry: _reload,
+          onTapSubject: (s) => _pushAggregateSearch(
+            context,
+            appState: widget.appState,
+            query: s.displayName,
+          ),
           onOpen: () => Navigator.of(context).push(
             MaterialPageRoute(
-              builder: (_) => const TvBangumiRankingPage(
+              builder: (_) => TvBangumiRankingPage(appState: widget.appState,
                 title: '评分排行榜',
                 sort: BangumiSubjectSort.score,
               ),
@@ -156,9 +189,14 @@ class _TvBangumiPageState extends State<TvBangumiPage> {
           subtitle: '按排名从 1 往下',
           future: _topRankFuture,
           onRetry: _reload,
+          onTapSubject: (s) => _pushAggregateSearch(
+            context,
+            appState: widget.appState,
+            query: s.displayName,
+          ),
           onOpen: () => Navigator.of(context).push(
             MaterialPageRoute(
-              builder: (_) => const TvBangumiRankingPage(
+              builder: (_) => TvBangumiRankingPage(appState: widget.appState,
                 title: '排名排行榜',
                 sort: BangumiSubjectSort.rank,
               ),
@@ -176,6 +214,7 @@ class _BangumiSection extends StatelessWidget {
     required this.subtitle,
     required this.future,
     required this.onRetry,
+    required this.onTapSubject,
     this.onOpen,
   });
 
@@ -183,6 +222,7 @@ class _BangumiSection extends StatelessWidget {
   final String subtitle;
   final Future<List<BangumiSubject>> future;
   final VoidCallback onRetry;
+  final ValueChanged<BangumiSubject> onTapSubject;
   final VoidCallback? onOpen;
 
   @override
@@ -275,6 +315,7 @@ class _BangumiSection extends StatelessWidget {
                 separatorBuilder: (_, __) => const SizedBox(width: 12),
                 itemBuilder: (context, index) => _BangumiPosterCard(
                   subject: items[index],
+                  onPressed: () => onTapSubject(items[index]),
                   width: cardWidth,
                   autofocus: index == 0,
                 ),
@@ -346,26 +387,15 @@ class _BangumiErrorRow extends StatelessWidget {
 class _BangumiPosterCard extends StatelessWidget {
   const _BangumiPosterCard({
     required this.subject,
+    required this.onPressed,
     this.width,
     this.autofocus = false,
   });
 
   final BangumiSubject subject;
+  final VoidCallback onPressed;
   final double? width;
   final bool autofocus;
-
-  Future<void> _open(BuildContext context) async {
-    final id = subject.id;
-    if (id <= 0) return;
-    final rawUrl = (subject.url ?? '').trim();
-    final url = rawUrl.isNotEmpty ? rawUrl : 'https://bgm.tv/subject/$id';
-    final ok = await launchUrlString(url);
-    if (ok) return;
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('无法打开链接')),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -411,7 +441,7 @@ class _BangumiPosterCard extends StatelessWidget {
     final card = TvFocusable(
       autofocus: autofocus,
       borderRadius: BorderRadius.circular(radius + 2),
-      onPressed: () => unawaited(_open(context)),
+      onPressed: onPressed,
       child: Padding(
         padding: const EdgeInsets.all(8),
         child: Column(
@@ -463,7 +493,9 @@ class _BangumiPosterCard extends StatelessWidget {
 }
 
 class TvBangumiCalendarPage extends StatefulWidget {
-  const TvBangumiCalendarPage({super.key});
+  const TvBangumiCalendarPage({super.key, required this.appState});
+
+  final AppState appState;
 
   @override
   State<TvBangumiCalendarPage> createState() => _TvBangumiCalendarPageState();
@@ -565,6 +597,11 @@ class _TvBangumiCalendarPageState extends State<TvBangumiCalendarPage> {
                         subtitle: '',
                         future: Future.value(items),
                         onRetry: () => unawaited(_load()),
+                        onTapSubject: (s) => _pushAggregateSearch(
+                          context,
+                          appState: widget.appState,
+                          query: s.displayName,
+                        ),
                         onOpen: null,
                       );
                     },
@@ -577,10 +614,12 @@ class _TvBangumiCalendarPageState extends State<TvBangumiCalendarPage> {
 class TvBangumiRankingPage extends StatefulWidget {
   const TvBangumiRankingPage({
     super.key,
+    required this.appState,
     required this.title,
     required this.sort,
   });
 
+  final AppState appState;
   final String title;
   final BangumiSubjectSort sort;
 
@@ -740,6 +779,11 @@ class _TvBangumiRankingPageState extends State<TvBangumiRankingPage> {
                           Positioned.fill(
                             child: _BangumiPosterCard(
                               subject: subject,
+                              onPressed: () => _pushAggregateSearch(
+                                context,
+                                appState: widget.appState,
+                                query: subject.displayName,
+                              ),
                               autofocus: index == 0,
                             ),
                           ),
