@@ -100,6 +100,8 @@ class BangumiSubject {
     this.rating,
     this.rank,
     this.airDate,
+    this.tags = const [],
+    this.metaTags = const [],
   });
 
   final int id;
@@ -111,6 +113,8 @@ class BangumiSubject {
   final BangumiRating? rating;
   final int? rank;
   final String? airDate;
+  final List<String> tags;
+  final List<String> metaTags;
 
   String get displayName {
     final cn = nameCn.trim();
@@ -134,9 +138,58 @@ class BangumiSubject {
     return s;
   }
 
+  bool get isJapanAnime {
+    bool isJapanTag(String t) {
+      final v = t.trim();
+      if (v.isEmpty) return false;
+      if (v.contains('日本')) return true;
+      if (v.toLowerCase() == 'japan') return true;
+      return false;
+    }
+
+    for (final t in metaTags) {
+      if (isJapanTag(t)) return true;
+    }
+    for (final t in tags) {
+      if (isJapanTag(t)) return true;
+    }
+    return false;
+  }
+
   factory BangumiSubject.fromJson(Map<String, dynamic> json) {
     final imagesRaw = json['images'];
     final ratingRaw = json['rating'];
+
+    List<String> readStringList(Object? raw) {
+      if (raw is! List) return const [];
+      final out = <String>[];
+      for (final e in raw) {
+        if (e is! String) continue;
+        final v = e.trim();
+        if (v.isEmpty) continue;
+        out.add(v);
+      }
+      return out;
+    }
+
+    List<String> readTagNames(Object? raw) {
+      if (raw is! List) return const [];
+      final out = <String>[];
+      for (final e in raw) {
+        if (e is String) {
+          final v = e.trim();
+          if (v.isNotEmpty) out.add(v);
+          continue;
+        }
+        if (e is! Map) continue;
+        final name = e['name'];
+        if (name is! String) continue;
+        final v = name.trim();
+        if (v.isEmpty) continue;
+        out.add(v);
+      }
+      return out;
+    }
 
     return BangumiSubject(
       id: (json['id'] as num?)?.toInt() ?? 0,
@@ -152,6 +205,8 @@ class BangumiSubject {
           : null,
       rank: (json['rank'] as num?)?.toInt(),
       airDate: (json['air_date'] as String?)?.trim(),
+      tags: readTagNames(json['tags']),
+      metaTags: readStringList(json['meta_tags']),
     );
   }
 }
@@ -316,6 +371,44 @@ class BangumiApiClient {
     return BangumiSearchResponse.fromJson(decoded.cast<String, dynamic>());
   }
 
+  Future<BangumiSearchResponse> browseSubjects({
+    required int type,
+    String sort = 'rank',
+    int limit = 10,
+    int offset = 0,
+    int? cat,
+    bool? series,
+    String? platform,
+    int? year,
+    int? month,
+  }) async {
+    final uri = Uri.https(
+      _kBangumiHost,
+      '/v0/subjects',
+      <String, String>{
+        'type': type.toString(),
+        'sort': sort,
+        'limit': limit.toString(),
+        'offset': offset.toString(),
+        if (cat != null) 'cat': cat.toString(),
+        if (series != null) 'series': series.toString(),
+        if (platform != null && platform.trim().isNotEmpty)
+          'platform': platform.trim(),
+        if (year != null) 'year': year.toString(),
+        if (month != null) 'month': month.toString(),
+      },
+    );
+
+    final resp = await _client.get(uri, headers: _headers());
+    _ensureOk(resp);
+
+    final decoded = jsonDecode(resp.body);
+    if (decoded is! Map) {
+      throw BangumiApiException('Unexpected browse response');
+    }
+    return BangumiSearchResponse.fromJson(decoded.cast<String, dynamic>());
+  }
+
   Future<List<BangumiSubject>> topAnimeRanking({
     required BangumiSubjectSort sort,
     int limit = 10,
@@ -349,7 +442,15 @@ class BangumiApiClient {
         },
       if (japanOnly)
         {
+          'meta_tags': const ['日本动画']
+        },
+      if (japanOnly)
+        {
           'tag': const ['日本']
+        },
+      if (japanOnly)
+        {
+          'tag': const ['日本动画']
         },
       if (!japanOnly) const <String, dynamic>{},
     ];

@@ -76,10 +76,7 @@ class _TvBangumiPageState extends State<TvBangumiPage> {
         sort: BangumiSubjectSort.score,
         limit: 10,
       );
-      _topRankFuture = _api.topAnimeRanking(
-        sort: BangumiSubjectSort.rank,
-        limit: 10,
-      );
+      _topRankFuture = _loadTopRank();
     });
   }
 
@@ -99,6 +96,53 @@ class _TvBangumiPageState extends State<TvBangumiPage> {
     final items = picked?.items ?? const [];
     if (items.length <= 10) return items;
     return items.take(10).toList(growable: false);
+  }
+
+  Future<List<BangumiSubject>> _loadTopRank() async {
+    final out = <BangumiSubject>[];
+    final seen = <int>{};
+    var offset = 0;
+    const chunkSize = 50;
+
+    while (out.length < 10) {
+      final resp = await _api.browseSubjects(
+        type: 2,
+        sort: 'rank',
+        limit: chunkSize,
+        offset: offset,
+      );
+      if (resp.data.isEmpty) break;
+
+      final canDetectJapan = resp.data.any(
+        (s) => s.tags.isNotEmpty || s.metaTags.isNotEmpty,
+      );
+
+      for (final s in resp.data) {
+        if (canDetectJapan && !s.isJapanAnime) continue;
+        if (!seen.add(s.id)) continue;
+        out.add(s);
+        if (out.length >= 10) break;
+      }
+
+      offset = resp.offset + resp.data.length;
+      if (offset >= resp.total) break;
+      if (resp.data.length < chunkSize) break;
+    }
+
+    out.sort((a, b) {
+      final ar = a.effectiveRank ?? (1 << 30);
+      final br = b.effectiveRank ?? (1 << 30);
+      final cmp = ar.compareTo(br);
+      if (cmp != 0) return cmp;
+      final as = a.effectiveScore ?? -1;
+      final bs = b.effectiveScore ?? -1;
+      final cmp2 = bs.compareTo(as);
+      if (cmp2 != 0) return cmp2;
+      return a.id.compareTo(b.id);
+    });
+
+    if (out.length <= 10) return out;
+    return out.take(10).toList(growable: false);
   }
 
   @override
@@ -634,6 +678,7 @@ class _TvBangumiRankingPageState extends State<TvBangumiRankingPage> {
   final ScrollController _scrollController = ScrollController();
 
   final List<BangumiSubject> _items = <BangumiSubject>[];
+  final List<BangumiSubject> _rankBuffer = <BangumiSubject>[];
   final Set<int> _seenIds = <int>{};
   bool _loading = true;
   bool _loadingMore = false;
@@ -718,6 +763,64 @@ class _TvBangumiRankingPageState extends State<TvBangumiRankingPage> {
     }
   }
 
+  Future<({
+    List<BangumiSubject> page,
+    List<BangumiSubject> buffer,
+    int total,
+    int nextOffset,
+  })> _fetchJapanRankPage() async {
+    final page = <BangumiSubject>[];
+    final buffer = List<BangumiSubject>.from(_rankBuffer);
+    while (page.length < _pageSize && buffer.isNotEmpty) {
+      page.add(buffer.removeAt(0));
+    }
+
+    var offset = _offset;
+    var total = _total;
+    var guard = 0;
+    const chunkSize = 50;
+
+    while (page.length < _pageSize && guard < 30) {
+      guard++;
+
+      final resp = await _api.browseSubjects(
+        type: 2,
+        sort: 'rank',
+        limit: chunkSize,
+        offset: offset,
+      );
+      total = resp.total;
+      if (resp.data.isEmpty) break;
+
+      final canDetectJapan = resp.data.any(
+        (s) => s.tags.isNotEmpty || s.metaTags.isNotEmpty,
+      );
+
+      final nextOffset = resp.offset + resp.data.length;
+      if (nextOffset <= offset) break;
+      offset = nextOffset;
+
+      for (final s in resp.data) {
+        if (canDetectJapan && !s.isJapanAnime) continue;
+        if (page.length < _pageSize) {
+          page.add(s);
+        } else {
+          buffer.add(s);
+        }
+      }
+
+      if (offset >= total) break;
+      if (resp.data.length < chunkSize) break;
+    }
+
+    return (
+      page: page,
+      buffer: buffer,
+      total: total,
+      nextOffset: offset,
+    );
+  }
+
   Future<void> _load({required bool reset}) async {
     if (_loadingMore) return;
     if (!reset && _noMore) return;
@@ -730,6 +833,7 @@ class _TvBangumiRankingPageState extends State<TvBangumiRankingPage> {
         _offset = 0;
         _total = 0;
         _items.clear();
+        _rankBuffer.clear();
         _seenIds.clear();
       } else {
         _loadingMore = true;
@@ -737,34 +841,62 @@ class _TvBangumiRankingPageState extends State<TvBangumiRankingPage> {
     });
 
     try {
-      final resp = await _api.topAnimeRankingResponse(
-        sort: widget.sort,
-        limit: _pageSize,
-        offset: _offset,
-      );
-      final page = resp.data;
-      if (!mounted) return;
-      setState(() {
-        _total = resp.total;
+      if (widget.sort == BangumiSubjectSort.rank) {
+        final resp = await _fetchJapanRankPage();
+        final page = resp.page;
+        if (!mounted) return;
+        setState(() {
+          _total = resp.total;
+          _offset = resp.nextOffset;
+          _rankBuffer
+            ..clear()
+            ..addAll(resp.buffer);
 
-        var added = 0;
-        for (final s in page) {
-          if (!_seenIds.add(s.id)) continue;
-          _items.add(s);
-          added++;
-        }
+          var added = 0;
+          for (final s in page) {
+            if (!_seenIds.add(s.id)) continue;
+            _items.add(s);
+            added++;
+          }
 
-        final nextOffset = resp.offset + page.length;
-        if (nextOffset <= _offset) {
-          _noMore = true;
-        } else {
-          _offset = nextOffset;
+          if (_total > 0 && _offset >= _total && _rankBuffer.isEmpty) {
+            _noMore = true;
+          }
+          if (page.isEmpty || added == 0) _noMore = true;
+
+          _sortItems();
+        });
+      } else {
+        final resp = await _api.topAnimeRankingResponse(
+          sort: widget.sort,
+          limit: _pageSize,
+          offset: _offset,
+        );
+        final page = resp.data;
+        if (!mounted) return;
+        setState(() {
+          _total = resp.total;
+
+          var added = 0;
+          for (final s in page) {
+            if (!_seenIds.add(s.id)) continue;
+            _items.add(s);
+            added++;
+          }
+
+          final nextOffset = resp.offset + page.length;
+          if (nextOffset <= _offset) {
+            _noMore = true;
+          } else {
+            _offset = nextOffset;
+          }
+
           if (_total > 0 && _offset >= _total) _noMore = true;
           if (page.isEmpty || added == 0) _noMore = true;
-        }
 
-        _sortItems();
-      });
+          _sortItems();
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e);
