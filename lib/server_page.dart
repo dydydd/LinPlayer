@@ -41,7 +41,7 @@ class _ServerPageState extends State<ServerPage> {
   @override
   void initState() {
     super.initState();
-    if (DeviceType.isTv) {
+    if (DeviceType.isTv && widget.appState.tvRemoteEnabled) {
       // Make pairing available out-of-box on Android TV.
       unawaited(TvRemoteService.instance.start(appState: widget.appState));
     }

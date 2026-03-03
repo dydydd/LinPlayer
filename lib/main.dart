@@ -120,6 +120,14 @@ void main() async {
 
   final appState = AppState();
   await appState.loadFromStorage();
+  if (DeviceType.isTv && !appState.hasTvRemoteEnabledPreference) {
+    // Make phone scan/pairing available out-of-box on Android TV.
+    try {
+      await appState.setTvRemoteEnabled(true);
+    } catch (_) {
+      // Best-effort; ignore storage errors.
+    }
+  }
   if (DesktopShell.isDesktopTarget) {
     await appState.applyDesktopThemeFromSystemIfNeeded(
       systemBrightness:

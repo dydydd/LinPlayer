@@ -53,6 +53,7 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _tvRemoteBusy = false;
   bool _tvProxyBusy = false;
   String _tvProxySubscriptionUrl = '';
+  bool _tvProxyExcludeHighMultiplierNodes = true;
   List<String> _tvProxyMediaServerLines = const [];
   String _tvProxyPrimaryAbi = '';
   final ScrollController _scrollController = ScrollController();
@@ -69,6 +70,7 @@ class _SettingsPageState extends State<SettingsPage> {
       unawaited(BuiltInProxyService.instance.refresh());
       unawaited(_loadTvProxyPrimaryAbi());
       unawaited(_loadTvProxySubscriptionUrl());
+      unawaited(_loadTvProxyExcludeHighMultiplierNodes());
       unawaited(_loadTvProxyMediaServerLines());
     }
   }
@@ -146,6 +148,15 @@ class _SettingsPageState extends State<SettingsPage> {
       final url = await BuiltInProxyService.instance.getSubscriptionUrl();
       if (!mounted) return;
       setState(() => _tvProxySubscriptionUrl = url);
+    } catch (_) {}
+  }
+
+  Future<void> _loadTvProxyExcludeHighMultiplierNodes() async {
+    try {
+      final enabled = await BuiltInProxyService.instance
+          .getExcludeHighMultiplierNodesEnabled();
+      if (!mounted) return;
+      setState(() => _tvProxyExcludeHighMultiplierNodes = enabled);
     } catch (_) {}
   }
 
@@ -1606,6 +1617,39 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  Future<void> _setTvProxyExcludeHighMultiplierNodes(
+    BuildContext context,
+    bool enabled,
+  ) async {
+    if (_tvProxyBusy) return;
+    setState(() => _tvProxyBusy = true);
+
+    final wasRunning =
+        BuiltInProxyService.instance.status.state == BuiltInProxyState.running;
+
+    try {
+      await BuiltInProxyService.instance
+          .setExcludeHighMultiplierNodesEnabled(enabled);
+      await BuiltInProxyService.instance.applyConfig(restartIfRunning: true);
+      if (!context.mounted) return;
+      setState(() => _tvProxyExcludeHighMultiplierNodes = enabled);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            wasRunning ? '已更新节点筛选，并重启内置代理生效' : '已更新节点筛选',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('保存失败：$e')),
+      );
+    } finally {
+      if (mounted) setState(() => _tvProxyBusy = false);
+    }
+  }
+
   Future<void> _editTvProxyMediaServerLines(BuildContext context) async {
     if (_tvProxyBusy) return;
 
@@ -1621,7 +1665,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final result = await showDialog<String>(
       context: context,
       builder: (dctx) => AlertDialog(
-        title: const Text('添加线路'),
+        title: const Text('自定义域名/IP'),
         content: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 520),
           child: Column(
@@ -1637,7 +1681,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 decoration: const InputDecoration(
                   hintText: 'https://example.com:8920\nexample.com\n1.2.3.4/32',
                   helperText:
-                      '支持 URL / 域名 / IP / CIDR（每行一个）\n保存后写入 mihomo 规则，并在内置代理运行中时自动重启生效',
+                      '支持 URL / 域名 / IP / CIDR（每行一个）\n命中的域名/IP 将走 Proxy 组\n保存后写入 mihomo 规则，并在内置代理运行中时自动重启生效',
                 ),
               ),
               const SizedBox(height: 12),
@@ -1806,14 +1850,14 @@ class _SettingsPageState extends State<SettingsPage> {
                           ? proxyStatus.message
                           : '仅 Android TV 支持';
 
-                      final mediaLines = _tvProxyMediaServerLines;
-                      final mediaPreview = mediaLines
+                      final ruleLines = _tvProxyMediaServerLines;
+                      final rulePreview = ruleLines
                           .take(2)
                           .map(BuiltInProxyService.mediaServerLineForDisplay)
                           .join('、');
-                      final mediaSubtitle = mediaLines.isEmpty
-                          ? '未添加（可强制媒体服务器走代理）'
-                          : '已添加 ${mediaLines.length} 条：$mediaPreview${mediaLines.length > 2 ? '…' : ''}';
+                      final ruleSubtitle = ruleLines.isEmpty
+                          ? '未添加（命中的域名/IP 将走代理）'
+                          : '已添加 ${ruleLines.length} 条：$rulePreview${ruleLines.length > 2 ? '…' : ''}';
 
                         return Column(
                           children: [
@@ -1895,12 +1939,34 @@ class _SettingsPageState extends State<SettingsPage> {
                           ),
                           const Divider(height: 1),
                           tvFocusRow(
+                            SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              secondary: const Icon(Icons.filter_alt_outlined),
+                              title: const Text('过滤高倍率节点'),
+                              subtitle: Text(
+                                _tvProxySubscriptionUrl.trim().isEmpty
+                                    ? '未设置订阅时无效'
+                                    : (_tvProxyExcludeHighMultiplierNodes
+                                        ? '已开启：隐藏 2x/3x/倍率2… 节点'
+                                        : '已关闭：显示全部订阅节点'),
+                              ),
+                              value: _tvProxyExcludeHighMultiplierNodes,
+                              onChanged: _tvProxyBusy
+                                  ? null
+                                  : (v) => _setTvProxyExcludeHighMultiplierNodes(
+                                        context,
+                                        v,
+                                      ),
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          tvFocusRow(
                             ListTile(
                               contentPadding: EdgeInsets.zero,
                               leading: const Icon(Icons.alt_route_outlined),
-                              title: const Text('添加线路'),
+                              title: const Text('自定义域名/IP'),
                               subtitle: Text(
-                                mediaSubtitle,
+                                ruleSubtitle,
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -1909,7 +1975,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                     ? null
                                     : () =>
                                         _editTvProxyMediaServerLines(context),
-                                child: Text(mediaLines.isEmpty ? '添加' : '管理'),
+                                child: Text(ruleLines.isEmpty ? '添加' : '管理'),
                               ),
                               onTap: _tvProxyBusy
                                   ? null
@@ -2545,27 +2611,29 @@ class _SettingsPageState extends State<SettingsPage> {
                         contentPadding: EdgeInsets.zero,
                       ),
                     ),
-                    const Divider(height: 1),
-                    tvFocusRow(
-                      SwitchListTile(
-                        value: appState.libraryFilterPanelPinned,
-                        onChanged: (v) =>
-                            appState.setLibraryFilterPanelPinned(v),
-                        title: const Text('常驻筛选面板'),
-                        subtitle: const Text('在媒体库详情页常驻显示筛选面板'),
-                        contentPadding: EdgeInsets.zero,
+                    if (isDesktop) ...[
+                      const Divider(height: 1),
+                      tvFocusRow(
+                        SwitchListTile(
+                          value: appState.libraryFilterPanelPinned,
+                          onChanged: (v) =>
+                              appState.setLibraryFilterPanelPinned(v),
+                          title: const Text('常驻筛选面板'),
+                          subtitle: const Text('在媒体库详情页常驻显示筛选面板'),
+                          contentPadding: EdgeInsets.zero,
+                        ),
                       ),
-                    ),
-                    const Divider(height: 1),
-                    tvFocusRow(
-                      SwitchListTile(
-                        value: appState.libraryCustomPrefixFiltersEnabled,
-                        onChanged: (v) =>
-                            appState.setLibraryCustomPrefixFiltersEnabled(v),
-                        title: const Text('自定义 Tag/Genre 前缀筛选'),
-                        contentPadding: EdgeInsets.zero,
+                      const Divider(height: 1),
+                      tvFocusRow(
+                        SwitchListTile(
+                          value: appState.libraryCustomPrefixFiltersEnabled,
+                          onChanged: (v) => appState
+                              .setLibraryCustomPrefixFiltersEnabled(v),
+                          title: const Text('自定义 Tag/Genre 前缀筛选'),
+                          contentPadding: EdgeInsets.zero,
+                        ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
               ),

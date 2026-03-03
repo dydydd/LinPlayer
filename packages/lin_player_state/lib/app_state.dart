@@ -334,6 +334,7 @@ class AppState extends ChangeNotifier {
   DesktopShortcutBindings _desktopShortcutBindings =
       DesktopShortcutBindings.defaults;
   bool _tvRemoteEnabled = false;
+  bool _tvRemoteEnabledPreferenceSet = false;
   bool _tvBuiltInProxyEnabled = false;
   TvBackgroundMode _tvBackgroundMode = TvBackgroundMode.none;
   int _tvBackgroundColor = 0xFF0B0B0B;
@@ -814,6 +815,7 @@ class AppState extends ChangeNotifier {
   bool get forceRemoteControlKeys => _forceRemoteControlKeys;
   DesktopShortcutBindings get desktopShortcutBindings => _desktopShortcutBindings;
   bool get tvRemoteEnabled => _tvRemoteEnabled;
+  bool get hasTvRemoteEnabledPreference => _tvRemoteEnabledPreferenceSet;
   bool get tvBuiltInProxyEnabled => _tvBuiltInProxyEnabled;
   TvBackgroundMode get tvBackgroundMode => _tvBackgroundMode;
   int get tvBackgroundColor => _tvBackgroundColor;
@@ -1106,6 +1108,7 @@ class AppState extends ChangeNotifier {
     } else {
       _desktopShortcutBindings = DesktopShortcutBindings.defaults;
     }
+    _tvRemoteEnabledPreferenceSet = prefs.containsKey(_kTvRemoteEnabledKey);
     _tvRemoteEnabled = prefs.getBool(_kTvRemoteEnabledKey) ?? false;
     _tvBuiltInProxyEnabled = prefs.getBool(_kTvBuiltInProxyEnabledKey) ?? false;
     _tvBackgroundMode =
@@ -1886,6 +1889,7 @@ class AppState extends ChangeNotifier {
     _forceRemoteControlKeys = nextForceRemoteControlKeys;
     _desktopShortcutBindings = nextDesktopShortcutBindings;
     _tvRemoteEnabled = nextTvRemoteEnabled;
+    _tvRemoteEnabledPreferenceSet = true;
     _tvBuiltInProxyEnabled = nextTvBuiltInProxyEnabled;
     _tvBackgroundMode = nextTvBackgroundMode;
     _tvBackgroundColor = nextTvBackgroundColor;
@@ -4884,6 +4888,7 @@ class AppState extends ChangeNotifier {
   Future<void> setTvRemoteEnabled(bool enabled) async {
     if (_tvRemoteEnabled == enabled) return;
     _tvRemoteEnabled = enabled;
+    _tvRemoteEnabledPreferenceSet = true;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kTvRemoteEnabledKey, enabled);
     notifyListeners();

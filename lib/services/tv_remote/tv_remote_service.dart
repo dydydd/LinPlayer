@@ -11,6 +11,7 @@ import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_server_api/services/server_share_text_parser.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../built_in_proxy/built_in_proxy_service.dart';
 import 'tv_remote_command_dispatcher.dart';
@@ -20,7 +21,12 @@ class TvRemoteService extends ChangeNotifier {
 
   static final TvRemoteService instance = TvRemoteService._();
 
+  static const String _kRemoteTokenKey = 'tvRemoteToken_v1';
+  static const String _kRemotePortKey = 'tvRemotePort_v1';
+  static const int _defaultPort = 17890;
+
   HttpServer? _server;
+  Future<void>? _starting;
   final Set<WebSocket> _wsClients = <WebSocket>{};
   String? _token;
   List<InternetAddress> _ipv4 = const [];
@@ -44,17 +50,61 @@ class TvRemoteService extends ChangeNotifier {
 
   Future<void> start({required AppState appState}) async {
     if (_server != null) return;
+    final inFlight = _starting;
+    if (inFlight != null) return inFlight;
+
+    final future = _startInternal(appState: appState);
+    _starting = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_starting, future)) {
+        _starting = null;
+      }
+    }
+  }
+
+  Future<void> _startInternal({required AppState appState}) async {
+    if (_server != null) return;
     _appState = appState;
 
-    _token = _randomToken();
+    final prefs = await SharedPreferences.getInstance();
+
+    final storedToken = (prefs.getString(_kRemoteTokenKey) ?? '').trim();
+    final token = storedToken.isEmpty ? _randomToken() : storedToken;
+    if (token != storedToken) {
+      await prefs.setString(_kRemoteTokenKey, token);
+    }
+
+    final storedPort = prefs.getInt(_kRemotePortKey);
+    var preferredPort = storedPort ?? _defaultPort;
+    if (preferredPort <= 0 || preferredPort > 65535) {
+      preferredPort = _defaultPort;
+    }
+
+    HttpServer server;
+    try {
+      server = await HttpServer.bind(
+        InternetAddress.anyIPv4,
+        preferredPort,
+        shared: true,
+      );
+    } catch (_) {
+      server = await HttpServer.bind(
+        InternetAddress.anyIPv4,
+        0,
+        shared: true,
+      );
+    }
+
+    if (server.port > 0 && server.port != storedPort) {
+      await prefs.setInt(_kRemotePortKey, server.port);
+    }
+
+    _token = token;
     _ipv4 = await _listIPv4();
     _appVersion = await _readAppVersion();
 
-    final server = await HttpServer.bind(
-      InternetAddress.anyIPv4,
-      0,
-      shared: true,
-    );
     _server = server;
     unawaited(_serve(server));
     notifyListeners();
