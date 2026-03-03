@@ -128,6 +128,23 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       FocusNode(debugLabel: 'network_player_tv_surface');
   final FocusNode _tvPlayPauseFocusNode =
       FocusNode(debugLabel: 'network_player_tv_play_pause');
+  int? _tvPendingBottomPanelFocus;
+  final FocusNode _tvEpisodeSelectedFocusNode =
+      FocusNode(debugLabel: 'network_player_tv_episode_selected');
+  final FocusNode _tvEpisodeFallbackFocusNode =
+      FocusNode(debugLabel: 'network_player_tv_episode_fallback');
+  final FocusNode _tvSubtitleSelectedFocusNode =
+      FocusNode(debugLabel: 'network_player_tv_subtitle_selected');
+  final FocusNode _tvSubtitleFallbackFocusNode =
+      FocusNode(debugLabel: 'network_player_tv_subtitle_fallback');
+  final FocusNode _tvAudioSelectedFocusNode =
+      FocusNode(debugLabel: 'network_player_tv_audio_selected');
+  final FocusNode _tvAudioFallbackFocusNode =
+      FocusNode(debugLabel: 'network_player_tv_audio_fallback');
+  final FocusNode _tvCoreMpvFocusNode =
+      FocusNode(debugLabel: 'network_player_tv_core_mpv');
+  final FocusNode _tvCoreExoFocusNode =
+      FocusNode(debugLabel: 'network_player_tv_core_exo');
 
   int _tvBottomPanelIndex = 0; // 0=playback, 1=episodes, 2=subtitles, 3=audio, 4=core
   Duration? _resumeHintPosition;
@@ -293,6 +310,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _init();
     // ignore: unawaited_futures
     _loadEpisodePickerItem();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (widget.isTv) _scheduleControlsHide();
+    });
   }
 
   @override
@@ -3327,6 +3349,14 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     }
     _tvSurfaceFocusNode.dispose();
     _tvPlayPauseFocusNode.dispose();
+    _tvEpisodeSelectedFocusNode.dispose();
+    _tvEpisodeFallbackFocusNode.dispose();
+    _tvSubtitleSelectedFocusNode.dispose();
+    _tvSubtitleFallbackFocusNode.dispose();
+    _tvAudioSelectedFocusNode.dispose();
+    _tvAudioFallbackFocusNode.dispose();
+    _tvCoreMpvFocusNode.dispose();
+    _tvCoreExoFocusNode.dispose();
     _playerService.dispose();
     super.dispose();
   }
@@ -3631,7 +3661,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     // ignore: unawaited_futures
     _exitImmersiveMode();
     final canScheduleHide = scheduleHide &&
-        !_remoteEnabled &&
+        (!_remoteEnabled || widget.isTv) &&
         _desktopSidePanel == _DesktopSidePanel.none &&
         !_desktopSpeedPanelVisible;
     if (canScheduleHide) {
@@ -3653,6 +3683,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       _controlsVisible = false;
       _desktopSidePanel = _DesktopSidePanel.none;
       _desktopSpeedPanelVisible = false;
+      _tvBottomPanelIndex = 0;
+      _tvPendingBottomPanelFocus = null;
     });
     // ignore: unawaited_futures
     _enterImmersiveMode();
@@ -3680,6 +3712,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     final next = index.clamp(0, _tvBottomPanelCount - 1);
     if (_tvBottomPanelIndex == next) return;
     setState(() => _tvBottomPanelIndex = next);
+    _tvPendingBottomPanelFocus = next;
+    if (next == 0) {
+      _focusTvPlayPause();
+    }
     if (next == 1) {
       // ignore: unawaited_futures
       _ensureEpisodePickerLoaded();
@@ -3693,6 +3729,20 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     }
     if (_tvBottomPanelIndex <= 0) return;
     _setTvBottomPanel(_tvBottomPanelIndex - 1);
+  }
+
+  void _requestTvBottomPanelFocusIfNeeded(int panelIndex, FocusNode node) {
+    if (!widget.isTv) return;
+    if (_tvPendingBottomPanelFocus != panelIndex) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!_controlsVisible) return;
+      if (_tvBottomPanelIndex != panelIndex) return;
+      if (_tvPendingBottomPanelFocus != panelIndex) return;
+      FocusScope.of(context).requestFocus(node);
+      _tvPendingBottomPanelFocus = null;
+    });
   }
 
   String _tvTitleText() {
@@ -3837,6 +3887,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     bool autofocus = false,
     bool selected = false,
     IconData? icon,
+    FocusNode? focusNode,
   }) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
@@ -3854,10 +3905,18 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     final focusedSurface =
         scheme.primary.withValues(alpha: isDark ? 0.38 : 0.22);
 
+    final effectiveOnPressed = onPressed == null
+        ? null
+        : () {
+            _showControls();
+            onPressed();
+          };
+
     return TvFocusable(
+      focusNode: focusNode,
       autofocus: autofocus,
-      enabled: onPressed != null,
-      onPressed: onPressed,
+      enabled: effectiveOnPressed != null,
+      onPressed: effectiveOnPressed,
       borderRadius: BorderRadius.circular(999),
       surfaceColor: surface,
       focusedSurfaceColor: focusedSurface,
@@ -3999,6 +4058,13 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                 return const Center(child: Text('暂无剧集'));
               }
 
+              final selectedIndex = eps.indexWhere((e) => e.id == widget.itemId);
+              final focusNode = selectedIndex >= 0
+                  ? _tvEpisodeSelectedFocusNode
+                  : _tvEpisodeFallbackFocusNode;
+              final autofocusIndex = selectedIndex >= 0 ? selectedIndex : 0;
+              _requestTvBottomPanelFocusIfNeeded(1, focusNode);
+
               return SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
@@ -4006,7 +4072,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                     for (final entry in eps.asMap().entries) ...[
                       if (entry.key > 0) const SizedBox(width: 10),
                       _buildTvChip(
-                        autofocus: entry.key == 0,
+                        autofocus: entry.key == autofocusIndex,
+                        focusNode: entry.key == autofocusIndex ? focusNode : null,
                         selected: entry.value.id == widget.itemId,
                         label: (entry.value.episodeNumber ?? (entry.key + 1))
                             .toString(),
@@ -4041,16 +4108,23 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     final subs = List<SubtitleTrack>.from(_tracks.subtitle);
     final current = _playerService.player.state.track.subtitle;
     final offSelected = current.id == 'no';
+    final selectedIndex = subs.indexWhere((t) => t == current);
+    final hasSelected = !offSelected && selectedIndex >= 0;
+    final focusNode = hasSelected
+        ? _tvSubtitleSelectedFocusNode
+        : _tvSubtitleFallbackFocusNode;
+    _requestTvBottomPanelFocusIfNeeded(2, focusNode);
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
         children: [
           _buildTvChip(
-            autofocus: true,
+            autofocus: !hasSelected,
             selected: offSelected,
             label: '关闭',
             icon: Icons.subtitles_off_outlined,
+            focusNode: _tvSubtitleFallbackFocusNode,
             onPressed: !enabled
                 ? null
                 : () {
@@ -4062,6 +4136,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
           for (final entry in subs.asMap().entries) ...[
             const SizedBox(width: 10),
             _buildTvChip(
+              autofocus: hasSelected && entry.key == selectedIndex,
+              focusNode: hasSelected && entry.key == selectedIndex
+                  ? _tvSubtitleSelectedFocusNode
+                  : null,
               selected: current == entry.value,
               label: _subtitleTrackTitle(entry.value),
               icon: Icons.subtitles_outlined,
@@ -4098,6 +4176,13 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       return const Center(child: Text('暂无音轨'));
     }
 
+    final selectedIndex = audios.indexWhere((t) => t == current);
+    final focusNode = selectedIndex >= 0
+        ? _tvAudioSelectedFocusNode
+        : _tvAudioFallbackFocusNode;
+    final autofocusIndex = selectedIndex >= 0 ? selectedIndex : 0;
+    _requestTvBottomPanelFocusIfNeeded(3, focusNode);
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
@@ -4105,7 +4190,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
           for (final entry in audios.asMap().entries) ...[
             if (entry.key > 0) const SizedBox(width: 10),
             _buildTvChip(
-              autofocus: entry.key == 0,
+              autofocus: entry.key == autofocusIndex,
+              focusNode: entry.key == autofocusIndex ? focusNode : null,
               selected: current == entry.value,
               label: _tvAudioTrackTitle(entry.value),
               icon: Icons.audiotrack_outlined,
@@ -4131,6 +4217,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     final mpvSelected = selectedCore == PlayerCore.mpv || !canUseExo;
     final exoSelected = selectedCore == PlayerCore.exo && canUseExo;
 
+    final focusNode = mpvSelected ? _tvCoreMpvFocusNode : _tvCoreExoFocusNode;
+    _requestTvBottomPanelFocusIfNeeded(4, focusNode);
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
@@ -4140,6 +4229,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
             selected: mpvSelected,
             label: 'mpv',
             icon: Icons.movie_outlined,
+            focusNode: _tvCoreMpvFocusNode,
             onPressed: !enabled
                 ? null
                 : () {
@@ -4154,6 +4244,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
             selected: exoSelected,
             label: canUseExo ? 'Exo' : 'Exo（仅 Android）',
             icon: Icons.flash_on_outlined,
+            focusNode: _tvCoreExoFocusNode,
             onPressed: !enabled || !canUseExo || exoSelected
                 ? null
                 : () => unawaited(_switchCore()),
@@ -4194,6 +4285,17 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     final trackColor = scheme.brightness == Brightness.dark
         ? Colors.white.withValues(alpha: 0.18)
         : Colors.black.withValues(alpha: 0.10);
+    final timeText = '当前观看时长（${_fmtClock(position)}） / 总时长（${_fmtClock(duration)}）';
+    final timeStyle = theme.textTheme.labelLarge?.copyWith(
+          color: fg,
+          fontWeight: FontWeight.w800,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        ) ??
+        TextStyle(
+          color: fg,
+          fontWeight: FontWeight.w800,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        );
 
     Widget panel = switch (_tvBottomPanelIndex) {
       0 => Row(
@@ -4226,6 +4328,18 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
               ),
             ),
             const SizedBox(width: 14),
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: (360 * uiScale).clamp(260.0, 520.0),
+              ),
+              child: Text(
+                timeText,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: timeStyle,
+              ),
+            ),
+            const SizedBox(width: 12),
             Expanded(
               child: _buildTvProgressBar(
                 progress: progress,
@@ -4290,6 +4404,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         _controlsVisible = false;
         _desktopSidePanel = _DesktopSidePanel.none;
         _desktopSpeedPanelVisible = false;
+        _tvBottomPanelIndex = 0;
+        _tvPendingBottomPanelFocus = null;
       });
     }
     // ignore: unawaited_futures
@@ -4300,7 +4416,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   void _scheduleControlsHide() {
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
-    if (_remoteEnabled) return;
+    if (_remoteEnabled && !widget.isTv) return;
     if (_useDesktopPlaybackUi && _desktopBarsHovered) return;
     if (_desktopSidePanel != _DesktopSidePanel.none ||
         _desktopSpeedPanelVisible) {
@@ -4308,15 +4424,18 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     }
     if (!_controlsVisible || _isScrubbing) return;
     _controlsHideTimer = Timer(_activeControlsAutoHideDelay, () {
-      if (!mounted || _isScrubbing || _remoteEnabled) return;
+      if (!mounted || _isScrubbing || (_remoteEnabled && !widget.isTv)) return;
       if (_useDesktopPlaybackUi && _desktopBarsHovered) return;
       setState(() {
         _controlsVisible = false;
         _desktopSidePanel = _DesktopSidePanel.none;
         _desktopSpeedPanelVisible = false;
+        _tvBottomPanelIndex = 0;
+        _tvPendingBottomPanelFocus = null;
       });
       // ignore: unawaited_futures
       _enterImmersiveMode();
+      if (widget.isTv) _focusTvSurface();
     });
   }
 
@@ -4936,12 +5055,17 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         final key = event.logicalKey;
 
         if (widget.isTv && event is KeyDownEvent) {
+          if (key == LogicalKeyboardKey.arrowLeft ||
+              key == LogicalKeyboardKey.arrowRight) {
+            _showControls();
+          }
+
           final isBackKey = key == LogicalKeyboardKey.goBack ||
               key == LogicalKeyboardKey.escape ||
               key == LogicalKeyboardKey.browserBack;
           if (isBackKey) {
             if (_tvBottomPanelIndex != 0) {
-              _showControls(scheduleHide: false);
+              _showControls();
               _setTvBottomPanel(0);
               _focusTvPlayPause();
               return KeyEventResult.handled;
@@ -4950,7 +5074,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
           }
 
           if (key == LogicalKeyboardKey.arrowDown) {
-            _showControls(scheduleHide: false);
+            _showControls();
             final before = _tvBottomPanelIndex;
             _cycleTvBottomPanel(forward: true);
             if (before == _tvBottomPanelCount - 1) {
@@ -4959,7 +5083,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
             return KeyEventResult.handled;
           }
           if (key == LogicalKeyboardKey.arrowUp) {
-            _showControls(scheduleHide: false);
+            _showControls();
             final before = _tvBottomPanelIndex;
             _cycleTvBottomPanel(forward: false);
             if (before == 1) {
@@ -4970,11 +5094,13 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
           if (controlsEnabled && _tvBottomPanelIndex == 0) {
             if (key == LogicalKeyboardKey.arrowLeft) {
+              _showControls();
               // ignore: unawaited_futures
               _seekRelative(Duration(seconds: -_seekBackSeconds));
               return KeyEventResult.handled;
             }
             if (key == LogicalKeyboardKey.arrowRight) {
+              _showControls();
               // ignore: unawaited_futures
               _seekRelative(Duration(seconds: _seekForwardSeconds));
               return KeyEventResult.handled;
@@ -5067,12 +5193,14 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
         if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
-        if (key == LogicalKeyboardKey.arrowLeft) {
+        final allowSeek = !widget.isTv || !_controlsVisible || _tvBottomPanelIndex == 0;
+
+        if (allowSeek && key == LogicalKeyboardKey.arrowLeft) {
           // ignore: unawaited_futures
           _seekRelative(Duration(seconds: -_seekBackSeconds));
           return KeyEventResult.handled;
         }
-        if (key == LogicalKeyboardKey.arrowRight) {
+        if (allowSeek && key == LogicalKeyboardKey.arrowRight) {
           // ignore: unawaited_futures
           _seekRelative(Duration(seconds: _seekForwardSeconds));
           return KeyEventResult.handled;
@@ -5721,34 +5849,66 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                 if (widget.isTv)
                                   Align(
                                     alignment: Alignment.topCenter,
-                                    child: SafeArea(
-                                      bottom: false,
-                                      minimum: const EdgeInsets.fromLTRB(
+                                    child: Padding(
+                                      padding: const EdgeInsets.fromLTRB(
                                           12, 12, 12, 0),
-                                      child: _buildTvTopStatusBar(),
+                                      child: AnimatedSlide(
+                                        offset: _controlsVisible
+                                            ? Offset.zero
+                                            : const Offset(0, -0.20),
+                                        duration:
+                                            const Duration(milliseconds: 200),
+                                        curve: Curves.easeOutCubic,
+                                        child: AnimatedOpacity(
+                                          opacity: _controlsVisible ? 1 : 0,
+                                          duration: const Duration(
+                                              milliseconds: 160),
+                                          curve: Curves.easeOut,
+                                          child: IgnorePointer(
+                                            ignoring: !_controlsVisible,
+                                            child: _buildTvTopStatusBar(),
+                                          ),
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 if (widget.isTv)
                                   Align(
                                     alignment: Alignment.bottomCenter,
-                                    child: SafeArea(
-                                      top: false,
-                                      minimum: const EdgeInsets.fromLTRB(
+                                    child: Padding(
+                                      padding: const EdgeInsets.fromLTRB(
                                           12, 0, 12, 12),
-                                      child: _buildTvBottomStatusBar(
-                                        enabled: controlsEnabled,
-                                        position: _lastPosition,
-                                        buffered: _lastBuffer,
-                                        duration: duration,
-                                        isPlaying: isPlaying,
-                                        onPlay: () {
-                                          _showControls();
-                                          return _playerService.play();
-                                        },
-                                        onPause: () {
-                                          _showControls();
-                                          return _playerService.pause();
-                                        },
+                                      child: AnimatedSlide(
+                                        offset: _controlsVisible
+                                            ? Offset.zero
+                                            : const Offset(0, 0.20),
+                                        duration:
+                                            const Duration(milliseconds: 200),
+                                        curve: Curves.easeOutCubic,
+                                        child: AnimatedOpacity(
+                                          opacity: _controlsVisible ? 1 : 0,
+                                          duration: const Duration(
+                                              milliseconds: 160),
+                                          curve: Curves.easeOut,
+                                          child: IgnorePointer(
+                                            ignoring: !_controlsVisible,
+                                            child: _buildTvBottomStatusBar(
+                                              enabled: controlsEnabled,
+                                              position: _lastPosition,
+                                              buffered: _lastBuffer,
+                                              duration: duration,
+                                              isPlaying: isPlaying,
+                                              onPlay: () {
+                                                _showControls();
+                                                return _playerService.play();
+                                              },
+                                              onPause: () {
+                                                _showControls();
+                                                return _playerService.pause();
+                                              },
+                                            ),
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ),

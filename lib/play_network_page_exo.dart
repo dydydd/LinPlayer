@@ -275,6 +275,11 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _init();
     // ignore: unawaited_futures
     _loadEpisodePickerItem();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (widget.isTv) _scheduleControlsHide();
+    });
   }
 
   @override
@@ -1942,7 +1947,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     }
     // ignore: unawaited_futures
     _exitImmersiveMode();
-    if (scheduleHide && !_remoteEnabled) {
+    if (scheduleHide && (!_remoteEnabled || widget.isTv)) {
       _scheduleControlsHide();
     } else {
       _controlsHideTimer?.cancel();
@@ -1957,7 +1962,11 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     }
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
-    setState(() => _controlsVisible = false);
+    setState(() {
+      _controlsVisible = false;
+      _tvBottomPanelIndex = 0;
+      _tvPendingBottomPanelFocus = null;
+    });
     // ignore: unawaited_futures
     _enterImmersiveMode();
     if (_remoteEnabled) _focusTvSurface();
@@ -2364,11 +2373,18 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     final focusedSurface =
         scheme.primary.withValues(alpha: isDark ? 0.38 : 0.22);
 
+    final effectiveOnPressed = onPressed == null
+        ? null
+        : () {
+            _showControls();
+            onPressed();
+          };
+
     return TvFocusable(
       focusNode: focusNode,
       autofocus: autofocus,
-      enabled: onPressed != null,
-      onPressed: onPressed,
+      enabled: effectiveOnPressed != null,
+      onPressed: effectiveOnPressed,
       borderRadius: BorderRadius.circular(999),
       surfaceColor: surface,
       focusedSurfaceColor: focusedSurface,
@@ -2665,6 +2681,18 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     final trackColor = scheme.brightness == Brightness.dark
         ? Colors.white.withValues(alpha: 0.18)
         : Colors.black.withValues(alpha: 0.10);
+    final timeText =
+        '当前观看时长（${_fmtClock(position)}） / 总时长（${_fmtClock(duration)}）';
+    final timeStyle = theme.textTheme.labelLarge?.copyWith(
+          color: fg,
+          fontWeight: FontWeight.w800,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        ) ??
+        TextStyle(
+          color: fg,
+          fontWeight: FontWeight.w800,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        );
 
     Widget panel = switch (_tvBottomPanelIndex) {
       0 => Row(
@@ -2696,6 +2724,18 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
               ),
             ),
             const SizedBox(width: 14),
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: (360 * uiScale).clamp(260.0, 520.0),
+              ),
+              child: Text(
+                timeText,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: timeStyle,
+              ),
+            ),
+            const SizedBox(width: 12),
             Expanded(
               child: _buildTvProgressBar(
                 progress: progress,
@@ -2757,7 +2797,11 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
     if (_controlsVisible) {
-      setState(() => _controlsVisible = false);
+      setState(() {
+        _controlsVisible = false;
+        _tvBottomPanelIndex = 0;
+        _tvPendingBottomPanelFocus = null;
+      });
     }
     // ignore: unawaited_futures
     _enterImmersiveMode();
@@ -2767,13 +2811,18 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   void _scheduleControlsHide() {
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
-    if (_remoteEnabled) return;
+    if (_remoteEnabled && !widget.isTv) return;
     if (!_controlsVisible || _isScrubbing) return;
     _controlsHideTimer = Timer(_controlsAutoHideDelay, () {
-      if (!mounted || _isScrubbing || _remoteEnabled) return;
-      setState(() => _controlsVisible = false);
+      if (!mounted || _isScrubbing || (_remoteEnabled && !widget.isTv)) return;
+      setState(() {
+        _controlsVisible = false;
+        _tvBottomPanelIndex = 0;
+        _tvPendingBottomPanelFocus = null;
+      });
       // ignore: unawaited_futures
       _enterImmersiveMode();
+      if (widget.isTv) _focusTvSurface();
     });
   }
 
@@ -4933,12 +4982,17 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         final key = event.logicalKey;
 
         if (widget.isTv && event is KeyDownEvent) {
+          if (key == LogicalKeyboardKey.arrowLeft ||
+              key == LogicalKeyboardKey.arrowRight) {
+            _showControls();
+          }
+
           final isBackKey = key == LogicalKeyboardKey.goBack ||
               key == LogicalKeyboardKey.escape ||
               key == LogicalKeyboardKey.browserBack;
           if (isBackKey) {
             if (_tvBottomPanelIndex != 0) {
-              _showControls(scheduleHide: false);
+              _showControls();
               _setTvBottomPanel(0);
               _focusTvPlayPause();
               return KeyEventResult.handled;
@@ -4947,7 +5001,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           }
 
           if (key == LogicalKeyboardKey.arrowDown) {
-            _showControls(scheduleHide: false);
+            _showControls();
             final before = _tvBottomPanelIndex;
             _cycleTvBottomPanel(forward: true);
             if (before == _tvBottomPanelCount - 1) {
@@ -4956,7 +5010,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
             return KeyEventResult.handled;
           }
           if (key == LogicalKeyboardKey.arrowUp) {
-            _showControls(scheduleHide: false);
+            _showControls();
             final before = _tvBottomPanelIndex;
             _cycleTvBottomPanel(forward: false);
             if (before == 1) {
@@ -4967,11 +5021,13 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
           if (controlsEnabled && _tvBottomPanelIndex == 0) {
             if (key == LogicalKeyboardKey.arrowLeft) {
+              _showControls();
               // ignore: unawaited_futures
               _seekRelative(Duration(seconds: -_seekBackSeconds));
               return KeyEventResult.handled;
             }
             if (key == LogicalKeyboardKey.arrowRight) {
+              _showControls();
               // ignore: unawaited_futures
               _seekRelative(Duration(seconds: _seekForwardSeconds));
               return KeyEventResult.handled;
@@ -5678,46 +5734,76 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                           if (widget.isTv)
                             Align(
                               alignment: Alignment.topCenter,
-                              child: SafeArea(
-                                bottom: false,
-                                minimum:
+                              child: Padding(
+                                padding:
                                     const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                                child: _buildTvTopStatusBar(),
+                                child: AnimatedSlide(
+                                  offset: _controlsVisible
+                                      ? Offset.zero
+                                      : const Offset(0, -0.20),
+                                  duration: const Duration(milliseconds: 200),
+                                  curve: Curves.easeOutCubic,
+                                  child: AnimatedOpacity(
+                                    opacity: _controlsVisible ? 1 : 0,
+                                    duration:
+                                        const Duration(milliseconds: 160),
+                                    curve: Curves.easeOut,
+                                    child: IgnorePointer(
+                                      ignoring: !_controlsVisible,
+                                      child: _buildTvTopStatusBar(),
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
                           if (widget.isTv)
                             Align(
                               alignment: Alignment.bottomCenter,
-                              child: SafeArea(
-                                top: false,
-                                minimum:
+                              child: Padding(
+                                padding:
                                     const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                                child: _buildTvBottomStatusBar(
-                                  enabled: controlsEnabled,
-                                  position: _position,
-                                  buffered: _lastBufferedEnd,
-                                  duration: _duration,
-                                  isPlaying: _isPlaying,
-                                  onPlay: () async {
-                                    _showControls();
-                                    await controller.play();
-                                    _maybeReportPlaybackProgress(
-                                      controller.value.position,
-                                      force: true,
-                                    );
-                                    _applyDanmakuPauseState(false);
-                                    if (mounted) setState(() {});
-                                  },
-                                  onPause: () async {
-                                    _showControls();
-                                    await controller.pause();
-                                    _maybeReportPlaybackProgress(
-                                      controller.value.position,
-                                      force: true,
-                                    );
-                                    _applyDanmakuPauseState(true);
-                                    if (mounted) setState(() {});
-                                  },
+                                child: AnimatedSlide(
+                                  offset: _controlsVisible
+                                      ? Offset.zero
+                                      : const Offset(0, 0.20),
+                                  duration: const Duration(milliseconds: 200),
+                                  curve: Curves.easeOutCubic,
+                                  child: AnimatedOpacity(
+                                    opacity: _controlsVisible ? 1 : 0,
+                                    duration:
+                                        const Duration(milliseconds: 160),
+                                    curve: Curves.easeOut,
+                                    child: IgnorePointer(
+                                      ignoring: !_controlsVisible,
+                                      child: _buildTvBottomStatusBar(
+                                        enabled: controlsEnabled,
+                                        position: _position,
+                                        buffered: _lastBufferedEnd,
+                                        duration: _duration,
+                                        isPlaying: _isPlaying,
+                                        onPlay: () async {
+                                          _showControls();
+                                          await controller.play();
+                                          _maybeReportPlaybackProgress(
+                                            controller.value.position,
+                                            force: true,
+                                          );
+                                          _applyDanmakuPauseState(false);
+                                          if (mounted) setState(() {});
+                                        },
+                                        onPause: () async {
+                                          _showControls();
+                                          await controller.pause();
+                                          _maybeReportPlaybackProgress(
+                                            controller.value.position,
+                                            force: true,
+                                          );
+                                          _applyDanmakuPauseState(true);
+                                          if (mounted) setState(() {});
+                                        },
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
