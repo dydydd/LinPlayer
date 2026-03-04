@@ -435,7 +435,68 @@ jobs:
           cat > "$RUNNER_TEMP/ci-bin/curl" <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
-          exec /usr/bin/curl --retry-all-errors --http1.1 "$@"
+          
+          REAL_CURL="/usr/bin/curl"
+          
+          args=("$@")
+          out=""
+          has_continue="false"
+          
+          for ((i=0; i<${#args[@]}; i++)); do
+            case "${args[$i]}" in
+              -o|--output)
+                if (( i + 1 < ${#args[@]} )); then
+                  out="${args[$((i+1))]}"
+                  i=$((i+1))
+                fi
+                ;;
+              --output=*)
+                out="${args[$i]#--output=}"
+                ;;
+              -C|--continue-at)
+                has_continue="true"
+                i=$((i+1))
+                ;;
+              --continue-at=*)
+                has_continue="true"
+                ;;
+            esac
+          done
+          
+          filtered=()
+          for ((i=0; i<${#args[@]}; i++)); do
+            a="${args[$i]}"
+            case "$a" in
+              --retry|--retry-delay|--retry-max-time)
+                i=$((i+1))
+                ;;
+              --retry=*|--retry-delay=*|--retry-max-time=*|--retry-all-errors|--retry-connrefused)
+                ;;
+              *)
+                filtered+=("$a")
+                ;;
+            esac
+          done
+          
+          max_attempts="${CURL_WRAPPER_ATTEMPTS:-6}"
+          retry_delay="${CURL_WRAPPER_DELAY_SECS:-1}"
+          
+          status=0
+          for ((attempt=1; attempt<=max_attempts; attempt++)); do
+            if (( attempt > 1 )); then
+              if [[ "$has_continue" != "true" && -n "${out:-}" && "${out}" != "-" ]]; then
+                rm -f "${out}" || true
+              fi
+              sleep "$retry_delay"
+            fi
+          
+            if "$REAL_CURL" --http1.1 "${filtered[@]}"; then
+              exit 0
+            fi
+            status=$?
+          done
+          
+          exit "$status"
           EOF
           chmod +x "$RUNNER_TEMP/ci-bin/curl"
           echo "PATH=$RUNNER_TEMP/ci-bin:$PATH" >> "$GITHUB_ENV"
@@ -558,7 +619,68 @@ jobs:
           cat > "$RUNNER_TEMP/ci-bin/curl" <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
-          exec /usr/bin/curl --retry-all-errors --http1.1 "$@"
+          
+          REAL_CURL="/usr/bin/curl"
+          
+          args=("$@")
+          out=""
+          has_continue="false"
+          
+          for ((i=0; i<${#args[@]}; i++)); do
+            case "${args[$i]}" in
+              -o|--output)
+                if (( i + 1 < ${#args[@]} )); then
+                  out="${args[$((i+1))]}"
+                  i=$((i+1))
+                fi
+                ;;
+              --output=*)
+                out="${args[$i]#--output=}"
+                ;;
+              -C|--continue-at)
+                has_continue="true"
+                i=$((i+1))
+                ;;
+              --continue-at=*)
+                has_continue="true"
+                ;;
+            esac
+          done
+          
+          filtered=()
+          for ((i=0; i<${#args[@]}; i++)); do
+            a="${args[$i]}"
+            case "$a" in
+              --retry|--retry-delay|--retry-max-time)
+                i=$((i+1))
+                ;;
+              --retry=*|--retry-delay=*|--retry-max-time=*|--retry-all-errors|--retry-connrefused)
+                ;;
+              *)
+                filtered+=("$a")
+                ;;
+            esac
+          done
+          
+          max_attempts="${CURL_WRAPPER_ATTEMPTS:-6}"
+          retry_delay="${CURL_WRAPPER_DELAY_SECS:-1}"
+          
+          status=0
+          for ((attempt=1; attempt<=max_attempts; attempt++)); do
+            if (( attempt > 1 )); then
+              if [[ "$has_continue" != "true" && -n "${out:-}" && "${out}" != "-" ]]; then
+                rm -f "${out}" || true
+              fi
+              sleep "$retry_delay"
+            fi
+          
+            if "$REAL_CURL" --http1.1 "${filtered[@]}"; then
+              exit 0
+            fi
+            status=$?
+          done
+          
+          exit "$status"
           EOF
           chmod +x "$RUNNER_TEMP/ci-bin/curl"
           echo "PATH=$RUNNER_TEMP/ci-bin:$PATH" >> "$GITHUB_ENV"
