@@ -82,6 +82,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
   StreamSubscription<String>? _errorSub;
   int? _resolvedStreamSizeBytes;
+  bool _resolvedStreamIsExternal = false;
   StreamSubscription<bool>? _bufferingSub;
   StreamSubscription<double>? _bufferingPctSub;
   StreamSubscription<Duration>? _bufferSub;
@@ -433,7 +434,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         _playError = 'Unsupported server';
         return;
       }
-      final embyHeaders = access.adapter.buildStreamHeaders(access.auth);
+      final embyHeaders = _resolvedStreamIsExternal
+          ? const <String, String>{}
+          : access.adapter.buildStreamHeaders(access.auth);
       final proxyReady = builtInProxyEnabled &&
           builtInProxy.status.state == BuiltInProxyState.running;
       final httpProxy = streamUrl.isNotEmpty
@@ -2272,8 +2275,30 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _playSessionId = null;
     _mediaSourceId = null;
     _resolvedStreamSizeBytes = null;
+    _resolvedStreamIsExternal = false;
+
+    final baseUri = Uri.tryParse(base);
+
+    int effectivePort(Uri uri) {
+      if (uri.hasPort) return uri.port;
+      return uri.scheme.toLowerCase() == 'https' ? 443 : 80;
+    }
+
+    bool isSameOrigin(Uri a, Uri b) {
+      return a.scheme.toLowerCase() == b.scheme.toLowerCase() &&
+          a.host.toLowerCase() == b.host.toLowerCase() &&
+          effectivePort(a) == effectivePort(b);
+    }
+
+    bool shouldApplyServerParams(Uri uri) {
+      if (baseUri == null || baseUri.host.isEmpty) return true;
+      if (uri.host.isEmpty) return true;
+      return isSameOrigin(uri, baseUri);
+    }
+
     String applyQueryPrefs(String url) {
       final uri = Uri.parse(url);
+      if (!shouldApplyServerParams(uri)) return uri.toString();
       final params = Map<String, String>.from(uri.queryParameters);
       if (!params.containsKey('api_key')) params['api_key'] = token;
       if (_selectedAudioStreamIndex != null) {
@@ -2336,19 +2361,54 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       _playSessionId = info.playSessionId;
       _mediaSourceId = (ms?['Id'] as String?) ?? info.mediaSourceId;
       _resolvedStreamSizeBytes = _asInt(ms?['Size']);
-      final directStreamUrl = ms?['DirectStreamUrl'] as String?;
+      final directStreamUrl = (ms?['DirectStreamUrl'] as String?)?.trim();
+      final sourcePath = (ms?['Path'] as String?)?.trim();
+
+      bool isExternalFromUrl(String url) {
+        final uri = Uri.tryParse(url);
+        if (uri == null) return false;
+        return !shouldApplyServerParams(uri);
+      }
+
       if (directStreamUrl != null && directStreamUrl.isNotEmpty) {
-        return resolve(directStreamUrl);
+        final url = resolve(directStreamUrl);
+        _resolvedStreamIsExternal = isExternalFromUrl(url);
+        if (_resolvedStreamIsExternal) _resolvedStreamSizeBytes = null;
+        return url;
+      }
+
+      // STRM or other URL-based sources may expose an absolute playable URL via `Path`.
+      final pathUri = (sourcePath == null || sourcePath.isEmpty)
+          ? null
+          : Uri.tryParse(sourcePath);
+      if (pathUri != null && pathUri.scheme.isNotEmpty && pathUri.host.isNotEmpty) {
+        final isHttp = (pathUri.scheme == 'http' || pathUri.scheme == 'https') &&
+            pathUri.host.isNotEmpty;
+        if (isHttp) {
+          final url = shouldApplyServerParams(pathUri)
+              ? applyQueryPrefs(pathUri.toString())
+              : pathUri.toString();
+          _resolvedStreamIsExternal = !shouldApplyServerParams(pathUri);
+          if (_resolvedStreamIsExternal) _resolvedStreamSizeBytes = null;
+          return url;
+        }
+        // Non-http schemes: do not attach Emby/Jellyfin auth params/headers.
+        _resolvedStreamIsExternal = true;
+        _resolvedStreamSizeBytes = null;
+        return pathUri.toString();
       }
       // Prefer direct stream (no transcoding). Even if server reports unsupported direct play/stream,
       // the static stream endpoint may still work with mpv's broader codec/container support.
       final mediaSourceId = (ms?['Id'] as String?) ?? info.mediaSourceId;
-      return applyQueryPrefs(
+      final url = applyQueryPrefs(
         '$base/emby/Videos/${widget.itemId}/stream?static=true&MediaSourceId=$mediaSourceId'
         '&PlaySessionId=${info.playSessionId}&UserId=$userId&DeviceId=${widget.appState.deviceId}'
         '&api_key=$token',
       );
+      _resolvedStreamIsExternal = false;
+      return url;
     } catch (_) {
+      _resolvedStreamIsExternal = false;
       return applyQueryPrefs(
         '$base/emby/Videos/${widget.itemId}/stream?static=true&UserId=$userId'
         '&DeviceId=${widget.appState.deviceId}&api_key=$token',

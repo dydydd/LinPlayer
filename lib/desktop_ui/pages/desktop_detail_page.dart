@@ -575,10 +575,35 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
     ServerAuthSession auth,
     Map<String, dynamic>? mediaSource,
   ) {
-    final candidate = (mediaSource?['DirectStreamUrl'] as String?)?.trim();
+    final directCandidate = (mediaSource?['DirectStreamUrl'] as String?)?.trim();
+    final pathCandidate = (mediaSource?['Path'] as String?)?.trim();
+    final pathUri = (pathCandidate == null || pathCandidate.isEmpty)
+        ? null
+        : Uri.tryParse(pathCandidate);
+
+    final candidate = (directCandidate != null && directCandidate.isNotEmpty)
+        ? directCandidate
+        : ((pathUri != null && pathUri.scheme.isNotEmpty && pathUri.host.isNotEmpty)
+            ? pathCandidate
+            : null);
     if (candidate == null || candidate.isEmpty) return null;
 
     final resolved = Uri.parse(auth.baseUrl).resolve(candidate);
+
+    bool sameOrigin(Uri a, Uri b) {
+      int portOf(Uri u) => u.hasPort ? u.port : (u.scheme == 'https' ? 443 : 80);
+      return a.scheme == b.scheme && a.host == b.host && portOf(a) == portOf(b);
+    }
+
+    final baseUri = Uri.tryParse(auth.baseUrl);
+    if (baseUri != null &&
+        resolved.host.isNotEmpty &&
+        baseUri.host.isNotEmpty &&
+        !sameOrigin(resolved, baseUri)) {
+      // External URL (e.g. STRM): do not append server api_key.
+      return resolved.toString();
+    }
+
     final params = Map<String, String>.from(resolved.queryParameters);
     if (!params.containsKey('api_key')) params['api_key'] = auth.token;
     return resolved.replace(queryParameters: params).toString();
@@ -651,10 +676,26 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
       final directFromPlaybackInfo =
           _resolvePlaybackDirectStreamUrl(access.auth, selectedSource);
 
+      final source = directFromPlaybackInfo ?? streamUrl;
+
+      bool sameOrigin(Uri a, Uri b) {
+        int portOf(Uri u) => u.hasPort ? u.port : (u.scheme == 'https' ? 443 : 80);
+        return a.scheme == b.scheme && a.host == b.host && portOf(a) == portOf(b);
+      }
+
+      final sourceUri = Uri.tryParse(source);
+      final baseUri = Uri.tryParse(access.auth.baseUrl);
+      final needsAuthHeaders = sourceUri != null &&
+          baseUri != null &&
+          sourceUri.host.isNotEmpty &&
+          baseUri.host.isNotEmpty &&
+          sameOrigin(sourceUri, baseUri);
+
       final launched = await launchExternalMpv(
         executablePath: vm.appState.externalMpvPath,
-        source: directFromPlaybackInfo ?? streamUrl,
-        httpHeaders: access.adapter.buildStreamHeaders(access.auth),
+        source: source,
+        httpHeaders:
+            needsAuthHeaders ? access.adapter.buildStreamHeaders(access.auth) : null,
       );
       _showMessage(
         launched

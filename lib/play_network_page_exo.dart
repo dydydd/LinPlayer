@@ -69,6 +69,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   bool _loading = true;
   String? _playError;
   String? _resolvedStream;
+  bool _resolvedStreamIsExternal = false;
   bool _buffering = false;
   Duration _lastBufferedEnd = Duration.zero;
   DateTime? _lastBufferedAt;
@@ -1625,6 +1626,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   Map<String, String> _embyHeaders() {
     final access = _serverAccess;
     if (access == null) return const <String, String>{};
+    if (_resolvedStreamIsExternal) return const <String, String>{};
     return access.adapter.buildStreamHeaders(access.auth);
   }
 
@@ -3567,9 +3569,30 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     final userId = _userId!;
     _playSessionId = null;
     _mediaSourceId = null;
+    _resolvedStreamIsExternal = false;
+
+    final baseUri = Uri.tryParse(base);
+
+    int effectivePort(Uri uri) {
+      if (uri.hasPort) return uri.port;
+      return uri.scheme.toLowerCase() == 'https' ? 443 : 80;
+    }
+
+    bool isSameOrigin(Uri a, Uri b) {
+      return a.scheme.toLowerCase() == b.scheme.toLowerCase() &&
+          a.host.toLowerCase() == b.host.toLowerCase() &&
+          effectivePort(a) == effectivePort(b);
+    }
+
+    bool shouldApplyServerParams(Uri uri) {
+      if (baseUri == null || baseUri.host.isEmpty) return true;
+      if (uri.host.isEmpty) return true;
+      return isSameOrigin(uri, baseUri);
+    }
 
     String applyQueryPrefs(String url) {
       final uri = Uri.parse(url);
+      if (!shouldApplyServerParams(uri)) return uri.toString();
       final params = Map<String, String>.from(uri.queryParameters);
       if (!params.containsKey('api_key')) params['api_key'] = token;
       if (_selectedAudioStreamIndex != null) {
@@ -3636,20 +3659,52 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       _mediaSourceId = (ms?['Id'] as String?) ?? info.mediaSourceId;
       final directStreamUrl = (ms?['DirectStreamUrl'] as String?)?.trim();
       final transcodingUrl = (ms?['TranscodingUrl'] as String?)?.trim();
+      final sourcePath = (ms?['Path'] as String?)?.trim();
+
+      bool isExternalFromUrl(String url) {
+        final uri = Uri.tryParse(url);
+        if (uri == null) return false;
+        return !shouldApplyServerParams(uri);
+      }
 
       if (directStreamUrl != null && directStreamUrl.isNotEmpty) {
-        return resolve(directStreamUrl);
+        final url = resolve(directStreamUrl);
+        _resolvedStreamIsExternal = isExternalFromUrl(url);
+        return url;
       }
       if (transcodingUrl != null && transcodingUrl.isNotEmpty) {
-        return resolve(transcodingUrl);
+        final url = resolve(transcodingUrl);
+        _resolvedStreamIsExternal = isExternalFromUrl(url);
+        return url;
+      }
+
+      // STRM or other URL-based sources may expose an absolute playable URL via `Path`.
+      final pathUri = (sourcePath == null || sourcePath.isEmpty)
+          ? null
+          : Uri.tryParse(sourcePath);
+      if (pathUri != null && pathUri.scheme.isNotEmpty && pathUri.host.isNotEmpty) {
+        final isHttp = (pathUri.scheme == 'http' || pathUri.scheme == 'https') &&
+            pathUri.host.isNotEmpty;
+        if (isHttp) {
+          final url = shouldApplyServerParams(pathUri)
+              ? applyQueryPrefs(pathUri.toString())
+              : pathUri.toString();
+          _resolvedStreamIsExternal = !shouldApplyServerParams(pathUri);
+          return url;
+        }
+        _resolvedStreamIsExternal = true;
+        return pathUri.toString();
       }
       final mediaSourceId = (ms?['Id'] as String?) ?? info.mediaSourceId;
-      return applyQueryPrefs(
+      final url = applyQueryPrefs(
         '$base/emby/Videos/${widget.itemId}/stream?static=true&MediaSourceId=$mediaSourceId'
         '&PlaySessionId=${info.playSessionId}&UserId=$userId&DeviceId=${widget.appState.deviceId}'
         '&api_key=$token',
       );
+      _resolvedStreamIsExternal = false;
+      return url;
     } catch (_) {
+      _resolvedStreamIsExternal = false;
       return applyQueryPrefs(
         '$base/emby/Videos/${widget.itemId}/stream?static=true&UserId=$userId'
         '&DeviceId=${widget.appState.deviceId}&api_key=$token',

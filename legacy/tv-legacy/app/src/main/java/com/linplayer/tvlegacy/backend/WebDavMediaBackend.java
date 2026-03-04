@@ -368,7 +368,8 @@ final class WebDavMediaBackend implements MediaBackend {
                 || name.endsWith(".avi")
                 || name.endsWith(".mov")
                 || name.endsWith(".ts")
-                || name.endsWith(".m2ts");
+                || name.endsWith(".m2ts")
+                || name.endsWith(".strm");
     }
 
     private static String ensureSlash(String url) {

@@ -17,6 +17,7 @@ import 'package:video_player_platform_interface/video_player_platform_interface.
     as vp_platform;
 
 import 'services/app_route_observer.dart';
+import 'services/strm/strm_resolver.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
 import 'widgets/list_picker_dialog.dart';
 
@@ -36,6 +37,24 @@ class ExoPlayerScreen extends StatefulWidget {
 
 class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     with WidgetsBindingObserver, RouteAware {
+  static const List<String> _kPickableExtensions = <String>[
+    '3gp',
+    'avi',
+    'flv',
+    'm2ts',
+    'm4v',
+    'mkv',
+    'mov',
+    'mp4',
+    'mpeg',
+    'mpg',
+    'mts',
+    'strm',
+    'ts',
+    'webm',
+    'wmv',
+  ];
+
   final List<PlatformFile> _playlist = [];
   int _currentIndex = -1;
 
@@ -1983,7 +2002,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
 
   Future<void> _pickFiles() async {
     final result = await FilePicker.platform.pickFiles(
-      type: FileType.video,
+      type: FileType.custom,
+      allowedExtensions: _kPickableExtensions,
       allowMultiple: true,
       withData: false,
     );
@@ -2004,9 +2024,19 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     bool? autoPlay,
     bool resetDanmaku = true,
   }) async {
-    final path = (file.path ?? '').trim();
-    if (path.isEmpty) {
-      setState(() => _playError = '无法读取文件路径');
+    final rawPath = (file.path ?? '').trim();
+    final isStrm = StrmResolver.looksLikeStrmFileName(file.name) ||
+        StrmResolver.looksLikeStrmPathOrUrl(rawPath);
+    final resolved = isStrm
+        ? (await StrmResolver.resolveTarget(
+            sourcePathOrUrl: rawPath,
+            fileName: file.name,
+            bytes: file.bytes,
+          ))
+        : null;
+    final source = (resolved ?? rawPath).trim();
+    if (source.isEmpty) {
+      setState(() => _playError = isStrm ? 'STRM 解析失败' : '无法读取文件路径');
       return;
     }
 
@@ -2061,14 +2091,15 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     }
 
     try {
-      final uri = Uri.tryParse(path);
+      final uri = Uri.tryParse(source);
       // Use platform view on Android to avoid color issues with some HDR/Dolby Vision sources.
       // (Texture-based rendering may show green/purple tint on certain P8 files.)
       final viewType = _isAndroid ? _viewType : VideoViewType.textureView;
 
       late final VideoPlayerController controller;
       if (uri == null || uri.scheme.isEmpty) {
-        controller = VideoPlayerController.file(File(path), viewType: viewType);
+        controller =
+            VideoPlayerController.file(File(source), viewType: viewType);
       } else {
         final scheme = uri.scheme.toLowerCase();
         final isHttpUrl = (scheme == 'http' || scheme == 'https') &&

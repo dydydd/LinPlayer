@@ -5,6 +5,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.ViewGroup;
@@ -30,6 +31,7 @@ import com.linplayer.tvlegacy.player.PlayerTrack;
 import com.linplayer.tvlegacy.remote.PlaybackSession;
 import com.linplayer.tvlegacy.servers.ServerConfig;
 import com.linplayer.tvlegacy.servers.ServerStore;
+import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -39,6 +41,14 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import okhttp3.Credentials;
+import okhttp3.HttpUrl;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 public final class PlayerActivity extends AppCompatActivity {
     static final String EXTRA_URL = "url";
@@ -96,6 +106,9 @@ public final class PlayerActivity extends AppCompatActivity {
 
     private final List<Episode> episodes = new ArrayList<>();
     private int selectedEpisodePos = -1;
+
+    private int openSeq = 0;
+    private final Map<String, String> resolvedUrlCache = new HashMap<>();
 
     private boolean subtitlesOff = false;
     @Nullable private Integer selectedSubtitleId;
@@ -575,9 +588,295 @@ public final class PlayerActivity extends AppCompatActivity {
     private void openInCore(long startPosMs, boolean playWhenReady) {
         PlayerCore p = playerCore;
         if (p == null) return;
-        Map<String, String> playbackHeaders = buildPlaybackHeaders(url);
-        p.open(url, playbackHeaders, startPosMs, playWhenReady);
-        applyTrackSelection();
+
+        final String requestedUrl = safe(url);
+        if (requestedUrl.isEmpty()) return;
+
+        final String cached;
+        synchronized (resolvedUrlCache) {
+            cached = resolvedUrlCache.get(requestedUrl);
+        }
+        if (cached != null && !cached.isEmpty()) {
+            url = cached;
+            Map<String, String> playbackHeaders = buildPlaybackHeaders(cached);
+            p.open(cached, playbackHeaders, startPosMs, playWhenReady);
+            applyTrackSelection();
+            return;
+        }
+
+        final ServerConfig active = ServerStore.getActive(this);
+        final boolean shouldResolveStrm = looksLikeStrmUrl(requestedUrl);
+        final boolean shouldResolveEmbyLike =
+                active != null && (active.isType("emby") || active.isType("jellyfin"));
+
+        if (!shouldResolveStrm && !shouldResolveEmbyLike) {
+            Map<String, String> playbackHeaders = buildPlaybackHeaders(requestedUrl);
+            p.open(requestedUrl, playbackHeaders, startPosMs, playWhenReady);
+            applyTrackSelection();
+            return;
+        }
+
+        final int seq = ++openSeq;
+        new Thread(
+                        () -> {
+                            String resolved = requestedUrl;
+                            try {
+                                resolved = resolvePlaybackUrl(active, requestedUrl);
+                            } catch (Exception ignored) {
+                            }
+
+                            final String finalResolved = safe(resolved);
+                            main.post(
+                                    () -> {
+                                        if (isFinishing() || isDestroyed()) return;
+                                        if (seq != openSeq) return;
+                                        PlayerCore current = playerCore;
+                                        if (current == null || current != p) return;
+
+                                        String toOpen = finalResolved.isEmpty() ? requestedUrl : finalResolved;
+                                        if (!toOpen.equals(requestedUrl)) {
+                                            synchronized (resolvedUrlCache) {
+                                                resolvedUrlCache.put(requestedUrl, toOpen);
+                                            }
+                                        }
+                                        url = toOpen;
+                                        Map<String, String> playbackHeaders = buildPlaybackHeaders(toOpen);
+                                        current.open(toOpen, playbackHeaders, startPosMs, playWhenReady);
+                                        applyTrackSelection();
+                                    });
+                        },
+                        "tv-legacy-resolve")
+                .start();
+    }
+
+    private static boolean looksLikeStrmUrl(String playUrl) {
+        String v = safe(playUrl);
+        if (v.isEmpty()) return false;
+
+        int q = v.indexOf('?');
+        if (q >= 0) v = v.substring(0, q);
+        int f = v.indexOf('#');
+        if (f >= 0) v = v.substring(0, f);
+
+        v = v.trim();
+        return !v.isEmpty() && v.toLowerCase(Locale.US).endsWith(".strm");
+    }
+
+    private String resolvePlaybackUrl(@Nullable ServerConfig active, String requestedUrl)
+            throws IOException, JSONException {
+        String req = safe(requestedUrl);
+        if (req.isEmpty()) return req;
+
+        if (looksLikeStrmUrl(req)) {
+            String out = resolveStrmFileUrl(req);
+            return !out.isEmpty() ? out : req;
+        }
+
+        if (active != null && (active.isType("emby") || active.isType("jellyfin"))) {
+            String out = resolveEmbyLikeUrl(active, req);
+            return !out.isEmpty() ? out : req;
+        }
+
+        return req;
+    }
+
+    private String resolveStrmFileUrl(String strmUrl) throws IOException {
+        String src = safe(strmUrl);
+        if (src.isEmpty()) return "";
+
+        OkHttpClient client = NetworkClients.okHttp(getApplicationContext());
+        Request.Builder rb =
+                new Request.Builder().url(src).get().header("Accept", "text/plain, */*");
+        Map<String, String> headers = buildPlaybackHeaders(src);
+        if (headers != null && !headers.isEmpty()) {
+            for (Map.Entry<String, String> e : headers.entrySet()) {
+                if (e == null) continue;
+                String k = safe(e.getKey());
+                String v = e.getValue();
+                if (!k.isEmpty() && v != null) rb.header(k, v);
+            }
+        }
+
+        try (Response resp = client.newCall(rb.build()).execute()) {
+            if (!resp.isSuccessful()) {
+                throw new IOException("HTTP " + resp.code() + " " + resp.message());
+            }
+            ResponseBody body = resp.body();
+            String text = body != null ? body.string() : "";
+            String target = parseFirstStrmTarget(text);
+            if (target.isEmpty()) return "";
+            String resolved = resolveRelativeUrl(src, target);
+            return !resolved.isEmpty() ? resolved : target;
+        }
+    }
+
+    private static String parseFirstStrmTarget(String raw) {
+        String text = raw != null ? raw : "";
+        if (text.startsWith("\uFEFF")) text = text.substring(1);
+
+        String[] lines = text.split("\\r?\\n");
+        for (String line : lines) {
+            String v = line != null ? line.trim() : "";
+            if (v.isEmpty()) continue;
+            if (v.startsWith("#")) continue;
+            if (v.startsWith(";")) continue;
+            if (v.startsWith("//")) continue;
+
+            if ((v.startsWith("\"") && v.endsWith("\"")) || (v.startsWith("'") && v.endsWith("'"))) {
+                v = v.substring(1, v.length() - 1).trim();
+            }
+            if (v.startsWith("\uFEFF")) v = v.substring(1).trim();
+            if (!v.isEmpty()) return v;
+        }
+
+        return "";
+    }
+
+    private static String resolveRelativeUrl(String baseUrl, String ref) {
+        String base = safe(baseUrl);
+        String r = safe(ref);
+        if (base.isEmpty() || r.isEmpty()) return r;
+
+        // Absolute scheme (http/https/rtsp/etc) - keep as-is.
+        int colon = r.indexOf(':');
+        if (colon > 0) {
+            return r;
+        }
+
+        HttpUrl b = HttpUrl.parse(base);
+        if (b == null) return r;
+        HttpUrl resolved = b.resolve(r);
+        return resolved != null ? resolved.toString() : r;
+    }
+
+    private String resolveEmbyLikeUrl(@NonNull ServerConfig active, String requestedUrl)
+            throws IOException, JSONException {
+        String apiKey = safe(active.apiKey);
+        String userId = safe(active.userId);
+        if (apiKey.isEmpty() || userId.isEmpty()) return requestedUrl;
+
+        String itemId = extractEmbyVideoId(requestedUrl);
+        if (itemId.isEmpty()) return requestedUrl;
+
+        HttpUrl base = parseHttpBaseUrl(active.baseUrl);
+        if (base == null) return requestedUrl;
+
+        HttpUrl.Builder b = base.newBuilder();
+        String prefix = safe(active.apiPrefix);
+        if (!prefix.isEmpty()) b.addPathSegments(prefix);
+        b.addPathSegments("Items/" + itemId + "/PlaybackInfo");
+        b.addQueryParameter("UserId", userId);
+        String deviceId = deviceId();
+        if (!deviceId.isEmpty()) b.addQueryParameter("DeviceId", deviceId);
+        if (!apiKey.isEmpty()) b.addQueryParameter("api_key", apiKey);
+        HttpUrl url = b.build();
+
+        OkHttpClient client = NetworkClients.okHttp(getApplicationContext());
+        Request.Builder rb =
+                new Request.Builder().url(url).get().header("Accept", "application/json");
+        if (!apiKey.isEmpty()) rb.header("X-Emby-Token", apiKey);
+
+        try (Response resp = client.newCall(rb.build()).execute()) {
+            if (!resp.isSuccessful()) {
+                throw new IOException("HTTP " + resp.code() + " " + resp.message());
+            }
+            ResponseBody body = resp.body();
+            String json = body != null ? body.string() : "";
+            JSONObject root = new JSONObject(json);
+            JSONArray sources = root.optJSONArray("MediaSources");
+            JSONObject ms = sources != null ? sources.optJSONObject(0) : null;
+            if (ms == null) return requestedUrl;
+
+            String direct = safe(ms.optString("DirectStreamUrl", ""));
+            String transcode = safe(ms.optString("TranscodingUrl", ""));
+            String path = safe(ms.optString("Path", ""));
+
+            String candidate = !direct.isEmpty() ? direct : (!transcode.isEmpty() ? transcode : "");
+            String resolvedCandidate = resolveEmbyLikeCandidate(base, apiKey, candidate);
+            if (!resolvedCandidate.isEmpty()) return resolvedCandidate;
+
+            // STRM: Path may contain an external URL. Only accept if it looks like a network URI.
+            if (looksLikeNetworkUri(path)) {
+                return path;
+            }
+
+            return requestedUrl;
+        }
+    }
+
+    private static String resolveEmbyLikeCandidate(
+            @NonNull HttpUrl serverBase, @NonNull String apiKey, @Nullable String candidate) {
+        String c = safe(candidate);
+        if (c.isEmpty()) return "";
+
+        HttpUrl resolved = serverBase.resolve(c);
+        if (resolved == null) return c;
+
+        boolean sameOrigin =
+                resolved.scheme().equalsIgnoreCase(serverBase.scheme())
+                        && resolved.host().equalsIgnoreCase(serverBase.host())
+                        && resolved.port() == serverBase.port();
+        if (!sameOrigin) return resolved.toString();
+
+        if (!apiKey.isEmpty() && resolved.queryParameter("api_key") == null) {
+            resolved = resolved.newBuilder().addQueryParameter("api_key", apiKey).build();
+        }
+        return resolved.toString();
+    }
+
+    private static boolean looksLikeNetworkUri(String raw) {
+        String v = safe(raw);
+        if (v.isEmpty()) return false;
+        try {
+            android.net.Uri uri = android.net.Uri.parse(v);
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+            return scheme != null
+                    && !scheme.trim().isEmpty()
+                    && host != null
+                    && !host.trim().isEmpty();
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private static String extractEmbyVideoId(String rawUrl) {
+        HttpUrl url = HttpUrl.parse(safe(rawUrl));
+        if (url == null) return "";
+        List<String> segments = url.pathSegments();
+        if (segments == null || segments.isEmpty()) return "";
+        for (int i = 0; i < segments.size() - 1; i++) {
+            String s = segments.get(i);
+            if (s == null) continue;
+            if ("videos".equalsIgnoreCase(s.trim())) {
+                String id = segments.get(i + 1);
+                return safe(id);
+            }
+        }
+        return "";
+    }
+
+    @Nullable
+    private static HttpUrl parseHttpBaseUrl(String baseUrl) {
+        String b = safe(baseUrl);
+        while (b.endsWith("/")) b = b.substring(0, b.length() - 1);
+        if (b.isEmpty()) return null;
+
+        HttpUrl parsed = HttpUrl.parse(b);
+        if (parsed != null) return parsed;
+        if (!b.contains("://")) {
+            return HttpUrl.parse("http://" + b);
+        }
+        return null;
+    }
+
+    private String deviceId() {
+        try {
+            String id = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
+            return safe(id);
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 
     private void releasePlayerCore(boolean forceGc) {

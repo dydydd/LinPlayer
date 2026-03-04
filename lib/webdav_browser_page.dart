@@ -117,6 +117,7 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
       'mpeg',
       'm4v',
       '3gp',
+      'strm',
       'rm',
       'rmvb',
     };

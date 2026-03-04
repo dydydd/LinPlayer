@@ -21,6 +21,7 @@ import 'services/app_route_observer.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/desktop_window.dart';
 import 'services/playback_proxy/playback_proxy.dart';
+import 'services/strm/strm_resolver.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
 import 'widgets/list_picker_dialog.dart';
 
@@ -62,6 +63,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     'mpeg',
     'mpg',
     'mts',
+    'strm',
     'ts',
     'webm',
     'wmv',
@@ -1342,8 +1344,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _isTv(BuildContext context) => DeviceType.isTv;
 
   Future<void> _pickFile() async {
+    final exts = _kLocalVideoExtensions.toList(growable: false);
     final result = await FilePicker.platform.pickFiles(
-      type: FileType.video,
+      type: FileType.custom,
+      allowedExtensions: exts,
       allowMultiple: true,
       withData: kIsWeb,
     );
@@ -1463,8 +1467,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   Future<void> _pickAndOpenLocalVideo() async {
+    final exts = _kLocalVideoExtensions.toList(growable: false);
     final result = await FilePicker.platform.pickFiles(
-      type: FileType.video,
+      type: FileType.custom,
+      allowedExtensions: exts,
       allowMultiple: false,
       withData: kIsWeb,
     );
@@ -1545,8 +1551,24 @@ class _PlayerScreenState extends State<PlayerScreen>
     Duration? startPosition,
     bool? autoPlay,
   }) async {
+    final isTv = _isTv(context);
     final rawPath = (file.path ?? '').trim();
-    final uri = Uri.tryParse(rawPath);
+    final isStrm = StrmResolver.looksLikeStrmFileName(file.name) ||
+        StrmResolver.looksLikeStrmPathOrUrl(rawPath);
+    final resolved = isStrm
+        ? (await StrmResolver.resolveTarget(
+            sourcePathOrUrl: rawPath,
+            fileName: file.name,
+            bytes: file.bytes,
+          ))
+        : null;
+    final source = (resolved ?? rawPath).trim();
+    if (source.isEmpty) {
+      setState(() => _playError = isStrm ? 'STRM 解析失败' : '无法读取文件路径');
+      return;
+    }
+
+    final uri = Uri.tryParse(source);
     final isHttpUrl = uri != null &&
         (uri.scheme == 'http' || uri.scheme == 'https') &&
         uri.host.isNotEmpty;
@@ -1589,7 +1611,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
     _danmakuKey.currentState?.clear();
-    final isTv = _isTv(context);
     _isTvDevice = isTv;
     if (_fullScreen) {
       // ignore: unawaited_futures
@@ -1636,7 +1657,7 @@ class _PlayerScreenState extends State<PlayerScreen>
 
       final httpProxy = isNetwork
           ? (() {
-              final uri = Uri.tryParse(rawPath);
+              final uri = Uri.tryParse(source);
               if (uri == null) return null;
               if (proxyReady) return BuiltInProxyService.proxyUrlForUri(uri);
               final appState = widget.appState;
@@ -1646,14 +1667,15 @@ class _PlayerScreenState extends State<PlayerScreen>
           : null;
 
       await _playerService.initialize(
-        isNetwork ? null : rawPath,
-        networkUrl: isNetwork ? rawPath : null,
+        isNetwork ? null : source,
+        networkUrl: isNetwork ? source : null,
         isTv: isTv,
         hardwareDecode: _hwdecOn,
         mpvCacheSizeMb: widget.appState?.mpvCacheSizeMb ?? 500,
         bufferBackRatio: widget.appState?.playbackBufferBackRatio ?? 0.05,
         unlimitedStreamCache: widget.appState?.unlimitedStreamCache ?? false,
-        networkStreamSizeBytes: (isNetwork && file.size > 0) ? file.size : null,
+        networkStreamSizeBytes:
+            (isNetwork && !isStrm && file.size > 0) ? file.size : null,
         externalMpvPath: widget.appState?.externalMpvPath,
         httpProxy: httpProxy,
       );

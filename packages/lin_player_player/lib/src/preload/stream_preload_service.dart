@@ -116,8 +116,22 @@ class StreamPreloadService {
           final bitrate = _estimateBitrateBitsPerSecond(ms);
           final bytesToFetch = _estimateBytesToFetch(bitrate);
           final sizeBytes = _asInt(ms?['Size']);
+
+          bool sameOrigin(Uri a, Uri b) {
+            int portOf(Uri u) => u.hasPort ? u.port : (u.scheme == 'https' ? 443 : 80);
+            return a.scheme == b.scheme && a.host == b.host && portOf(a) == portOf(b);
+          }
+
+          final streamUri = Uri.tryParse(streamUrl);
+          final baseUri = Uri.tryParse(auth.baseUrl);
+          final needsAuthHeaders = streamUri != null &&
+              baseUri != null &&
+              streamUri.host.isNotEmpty &&
+              baseUri.host.isNotEmpty &&
+              sameOrigin(streamUri, baseUri);
+
           final headers = <String, String>{
-            ...adapter.buildStreamHeaders(auth),
+            if (needsAuthHeaders) ...adapter.buildStreamHeaders(auth),
             'User-Agent': preloadUserAgent,
           };
           final ok = await _prefetch(
@@ -126,7 +140,7 @@ class StreamPreloadService {
             bytesToFetch: bytesToFetch,
             startPosition: safeStartPosition,
             bitrateBitsPerSecond: bitrate,
-            sizeBytes: sizeBytes,
+            sizeBytes: needsAuthHeaders ? sizeBytes : null,
             httpProxyUrl: httpProxyUrl,
           );
           if (ok) {
@@ -682,8 +696,28 @@ class StreamPreloadService {
     final token = auth.token;
     final userId = auth.userId;
 
+    final baseUri = Uri.tryParse(base);
+
+    int effectivePort(Uri uri) {
+      if (uri.hasPort) return uri.port;
+      return uri.scheme.toLowerCase() == 'https' ? 443 : 80;
+    }
+
+    bool isSameOrigin(Uri a, Uri b) {
+      return a.scheme.toLowerCase() == b.scheme.toLowerCase() &&
+          a.host.toLowerCase() == b.host.toLowerCase() &&
+          effectivePort(a) == effectivePort(b);
+    }
+
+    bool shouldApplyServerParams(Uri uri) {
+      if (baseUri == null || baseUri.host.isEmpty) return true;
+      if (uri.host.isEmpty) return true;
+      return isSameOrigin(uri, baseUri);
+    }
+
     String applyQueryPrefs(String url) {
       final uri = Uri.parse(url);
+      if (!shouldApplyServerParams(uri)) return uri.toString();
       final params = Map<String, String>.from(uri.queryParameters);
       if (!params.containsKey('api_key') && token.trim().isNotEmpty) {
         params['api_key'] = token.trim();
@@ -704,11 +738,26 @@ class StreamPreloadService {
 
     final directStreamUrl = (mediaSource?['DirectStreamUrl'] as String?)?.trim();
     final transcodingUrl = (mediaSource?['TranscodingUrl'] as String?)?.trim();
+    final sourcePath = (mediaSource?['Path'] as String?)?.trim();
     if (directStreamUrl != null && directStreamUrl.isNotEmpty) {
       return resolve(directStreamUrl);
     }
     if (exoPlayer && transcodingUrl != null && transcodingUrl.isNotEmpty) {
       return resolve(transcodingUrl);
+    }
+
+    // STRM or other URL-based sources may expose an absolute playable URL via `Path`.
+    final pathUri =
+        (sourcePath == null || sourcePath.isEmpty) ? null : Uri.tryParse(sourcePath);
+    if (pathUri != null && pathUri.scheme.isNotEmpty && pathUri.host.isNotEmpty) {
+      final isHttp = (pathUri.scheme == 'http' || pathUri.scheme == 'https') &&
+          pathUri.host.isNotEmpty;
+      if (isHttp) {
+        return shouldApplyServerParams(pathUri)
+            ? applyQueryPrefs(pathUri.toString())
+            : pathUri.toString();
+      }
+      return pathUri.toString();
     }
 
     final mediaSourceId =
