@@ -884,7 +884,8 @@ class _TvBangumiRankingPageState extends State<TvBangumiRankingPage> {
             added++;
           }
 
-          final nextOffset = resp.offset + page.length;
+          final step = resp.limit > 0 ? resp.limit : page.length;
+          final nextOffset = resp.offset + step;
           if (nextOffset <= _offset) {
             _noMore = true;
           } else {

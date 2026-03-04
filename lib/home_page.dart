@@ -22,7 +22,6 @@ import 'server_adapters/server_access.dart';
 import 'services/app_route_observer.dart';
 import 'show_detail_page.dart';
 import 'tv/tv_bangumi_page.dart';
-import 'tv/tv_imdb_page.dart';
 import 'tv/tv_tmdb_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -536,9 +535,9 @@ class _HomePageState extends State<HomePage> {
             ),
             TvTmdbPage(appState: widget.appState),
             TvBangumiPage(appState: widget.appState),
-            TvImdbPage(appState: widget.appState),
-            const _TvPlaceholderPage(title: 'Bilibili'),
           ];
+          final maxIndex = tvPages.isEmpty ? 0 : tvPages.length - 1;
+          final tvIndex = _tvHomeTabIndex.clamp(0, maxIndex).toInt();
 
           return Scaffold(
             body: Column(
@@ -575,7 +574,7 @@ class _HomePageState extends State<HomePage> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
                   child: _TvHomeTabBar(
-                    selectedIndex: _tvHomeTabIndex,
+                    selectedIndex: tvIndex,
                     onSelected: (i) => setState(() => _tvHomeTabIndex = i),
                   ),
                 ),
@@ -584,7 +583,7 @@ class _HomePageState extends State<HomePage> {
                     context: context,
                     removeTop: true,
                     child:
-                        IndexedStack(index: _tvHomeTabIndex, children: tvPages),
+                        IndexedStack(index: tvIndex, children: tvPages),
                   ),
                 ),
               ],
@@ -1030,36 +1029,7 @@ class _TvHomeTabBar extends StatelessWidget {
           button(index: 1, label: 'TMDB'),
           const SizedBox(width: 10),
           button(index: 2, label: 'Bangumi'),
-          const SizedBox(width: 10),
-          button(index: 3, label: 'IMDb'),
-          const SizedBox(width: 10),
-          button(index: 4, label: 'Bilibili'),
         ],
-      ),
-    );
-  }
-}
-
-class _TvPlaceholderPage extends StatelessWidget {
-  const _TvPlaceholderPage({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Text(
-          '$title 页面占位（开发中）',
-          textAlign: TextAlign.center,
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w700,
-            color: scheme.onSurfaceVariant,
-          ),
-        ),
       ),
     );
   }

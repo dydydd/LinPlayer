@@ -430,107 +430,72 @@ class BangumiApiClient {
     int offset = 0,
     bool japanOnly = true,
   }) async {
-    final baseFilter = <String, dynamic>{
-      'type': 2,
-      'nsfw': false,
-    };
+    final resp = await browseSubjects(
+      type: 2,
+      sort: sort.apiValue,
+      limit: limit,
+      offset: offset,
+    );
 
-    final candidates = <Map<String, dynamic>>[
-      if (japanOnly)
-        {
-          'meta_tags': const ['日本']
-        },
-      if (japanOnly)
-        {
-          'meta_tags': const ['日本动画']
-        },
-      if (japanOnly)
-        {
-          'tag': const ['日本']
-        },
-      if (japanOnly)
-        {
-          'tag': const ['日本动画']
-        },
-      if (!japanOnly) const <String, dynamic>{},
-    ];
-
-    Object? lastError;
-    for (final extra in candidates) {
-      try {
-        final resp = await searchSubjects(
-          keyword: '',
-          sort: sort,
-          limit: limit,
-          offset: offset,
-          filter: <String, dynamic>{...baseFilter, ...extra},
-        );
-        if (resp.data.isEmpty) continue;
-
-        final items = resp.data.toList(growable: true);
-        switch (sort) {
-          case BangumiSubjectSort.rank:
-            int effRank(BangumiSubject s) {
-              final v = s.effectiveRank;
-              if (v == null || v <= 0) return 1 << 30;
-              return v;
-            }
-
-            double effScore(BangumiSubject s) {
-              final v = s.effectiveScore;
-              if (v == null || v <= 0) return -1;
-              return v;
-            }
-
-            items.sort((a, b) {
-              final cmp = effRank(a).compareTo(effRank(b));
-              if (cmp != 0) return cmp;
-              return effScore(b).compareTo(effScore(a));
-            });
-            break;
-          case BangumiSubjectSort.score:
-            double effScore(BangumiSubject s) {
-              final v = s.effectiveScore;
-              if (v == null || v <= 0) return -1;
-              return v;
-            }
-
-            int effRank(BangumiSubject s) {
-              final v = s.effectiveRank;
-              if (v == null || v <= 0) return 1 << 30;
-              return v;
-            }
-
-            items.sort((a, b) {
-              final cmp = effScore(b).compareTo(effScore(a));
-              if (cmp != 0) return cmp;
-              return effRank(a).compareTo(effRank(b));
-            });
-            break;
-          case BangumiSubjectSort.heat:
-          case BangumiSubjectSort.match:
-            break;
-        }
-
-        return BangumiSearchResponse(
-          total: resp.total,
-          limit: resp.limit,
-          offset: resp.offset,
-          data: items,
-        );
-      } catch (e) {
-        lastError = e;
+    var items = resp.data.toList(growable: true);
+    if (japanOnly) {
+      final canDetectJapan = items.any(
+        (s) => s.tags.isNotEmpty || s.metaTags.isNotEmpty,
+      );
+      if (canDetectJapan) {
+        final filtered = items.where((s) => s.isJapanAnime).toList();
+        if (filtered.isNotEmpty) items = filtered;
       }
     }
-    if (lastError != null) {
-      // ignore: only_throw_errors
-      throw lastError;
+    switch (sort) {
+      case BangumiSubjectSort.rank:
+        int effRank(BangumiSubject s) {
+          final v = s.effectiveRank;
+          if (v == null || v <= 0) return 1 << 30;
+          return v;
+        }
+
+        double effScore(BangumiSubject s) {
+          final v = s.effectiveScore;
+          if (v == null || v <= 0) return -1;
+          return v;
+        }
+
+        items.sort((a, b) {
+          final cmp = effRank(a).compareTo(effRank(b));
+          if (cmp != 0) return cmp;
+          return effScore(b).compareTo(effScore(a));
+        });
+        break;
+      case BangumiSubjectSort.score:
+        double effScore(BangumiSubject s) {
+          final v = s.effectiveScore;
+          if (v == null || v <= 0) return -1;
+          return v;
+        }
+
+        int effRank(BangumiSubject s) {
+          final v = s.effectiveRank;
+          if (v == null || v <= 0) return 1 << 30;
+          return v;
+        }
+
+        items.sort((a, b) {
+          final cmp = effScore(b).compareTo(effScore(a));
+          if (cmp != 0) return cmp;
+          return effRank(a).compareTo(effRank(b));
+        });
+        break;
+      case BangumiSubjectSort.heat:
+      case BangumiSubjectSort.match:
+        break;
     }
-    return const BangumiSearchResponse(
-      total: 0,
-      limit: 0,
-      offset: 0,
-      data: <BangumiSubject>[],
+
+    return BangumiSearchResponse(
+      total: resp.total,
+      limit: resp.limit,
+      offset: resp.offset,
+      data: items,
     );
   }
 }
