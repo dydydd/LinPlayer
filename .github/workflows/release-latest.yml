@@ -57,15 +57,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source .github/scripts/retry.sh
           rm -rf dist
           mkdir -p dist
-          gh release download nightly --dir dist
+          gh_retry release download nightly --dir dist
 
       - name: Extract nightly version
         shell: bash
         run: |
           set -euo pipefail
-          BODY="$(gh release view nightly --json body -q '.body')"
+          source .github/scripts/retry.sh
+          BODY="$(gh_retry release view nightly --json body -q '.body')"
           VERSION_FULL="$(printf '%b\n' "$BODY" | sed -n 's/^- Version: //p' | head -n 1)"
           if [[ -z "${VERSION_FULL:-}" ]]; then
             VERSION_FULL="unknown"
@@ -132,6 +134,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source .github/scripts/retry.sh
           NOTES="$(cat <<EOF
           Stable release
 
@@ -142,10 +145,10 @@ jobs:
           EOF
           )"
 
-          if gh release view "$STABLE_TAG" >/dev/null 2>&1; then
-            gh release edit "$STABLE_TAG" --title "$STABLE_TAG" --notes "$NOTES"
+          if gh_retry release view "$STABLE_TAG" >/dev/null 2>&1; then
+            gh_retry release edit "$STABLE_TAG" --title "$STABLE_TAG" --notes "$NOTES"
           else
-            gh release create "$STABLE_TAG" --title "$STABLE_TAG" --notes "$NOTES"
+            gh_retry release create "$STABLE_TAG" --title "$STABLE_TAG" --notes "$NOTES"
           fi
 
       - name: Update latest tag
@@ -161,6 +164,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source .github/scripts/retry.sh
           NOTES="$(cat <<EOF
           Stable build
 
@@ -170,16 +174,17 @@ jobs:
           EOF
           )"
 
-          if gh release view latest >/dev/null 2>&1; then
-            gh release edit latest --title "Latest (${VERSION_FULL})" --notes "$NOTES"
+          if gh_retry release view latest >/dev/null 2>&1; then
+            gh_retry release edit latest --title "Latest (${VERSION_FULL})" --notes "$NOTES"
           else
-            gh release create latest --title "Latest (${VERSION_FULL})" --notes "$NOTES"
+            gh_retry release create latest --title "Latest (${VERSION_FULL})" --notes "$NOTES"
           fi
 
       - name: Upload assets (stable + latest)
         shell: bash
         run: |
           set -euo pipefail
+          source .github/scripts/retry.sh
           echo "--- dist/ ---"
           ls -la dist || true
 
@@ -190,27 +195,27 @@ jobs:
             # Android
             ANDROID_FOUND=0
             if [[ -f "dist/LinPlayer-Android-arm64-v8a.apk" ]]; then
-              gh release upload "$target" "dist/LinPlayer-Android-arm64-v8a.apk#LinPlayer-Android-arm64-v8a.apk" --clobber
+              gh_retry release upload "$target" "dist/LinPlayer-Android-arm64-v8a.apk#LinPlayer-Android-arm64-v8a.apk" --clobber
               ANDROID_FOUND=1
             elif [[ -f "dist/app-arm64-v8a-release.apk" ]]; then
-              gh release upload "$target" "dist/app-arm64-v8a-release.apk#LinPlayer-Android-arm64-v8a.apk" --clobber
+              gh_retry release upload "$target" "dist/app-arm64-v8a-release.apk#LinPlayer-Android-arm64-v8a.apk" --clobber
               ANDROID_FOUND=1
             fi
             if [[ -f "dist/LinPlayer-Android-TV.apk" ]]; then
-              gh release upload "$target" "dist/LinPlayer-Android-TV.apk#LinPlayer-Android-TV.apk" --clobber
+              gh_retry release upload "$target" "dist/LinPlayer-Android-TV.apk#LinPlayer-Android-TV.apk" --clobber
               ANDROID_FOUND=1
             elif [[ -f "dist/LinPlayer-Android-armeabi-v7a.apk" ]]; then
-              gh release upload "$target" "dist/LinPlayer-Android-armeabi-v7a.apk#LinPlayer-Android-TV.apk" --clobber
+              gh_retry release upload "$target" "dist/LinPlayer-Android-armeabi-v7a.apk#LinPlayer-Android-TV.apk" --clobber
               ANDROID_FOUND=1
             elif [[ -f "dist/app-armeabi-v7a-release.apk" ]]; then
-              gh release upload "$target" "dist/app-armeabi-v7a-release.apk#LinPlayer-Android-TV.apk" --clobber
+              gh_retry release upload "$target" "dist/app-armeabi-v7a-release.apk#LinPlayer-Android-TV.apk" --clobber
               ANDROID_FOUND=1
             fi
             if [[ -f "dist/LinPlayer-Android.apk" ]]; then
-              gh release upload "$target" "dist/LinPlayer-Android.apk#LinPlayer-Android.apk" --clobber
+              gh_retry release upload "$target" "dist/LinPlayer-Android.apk#LinPlayer-Android.apk" --clobber
               ANDROID_FOUND=1
             elif [[ -f "dist/app-release.apk" ]]; then
-              gh release upload "$target" "dist/app-release.apk#LinPlayer-Android.apk" --clobber
+              gh_retry release upload "$target" "dist/app-release.apk#LinPlayer-Android.apk" --clobber
               ANDROID_FOUND=1
             fi
             if [[ "$ANDROID_FOUND" -eq 0 ]]; then
@@ -220,9 +225,9 @@ jobs:
 
             # Windows
             if [[ -f "dist/LinPlayer-Windows-Setup-x64.exe" ]]; then
-              gh release upload "$target" "dist/LinPlayer-Windows-Setup-x64.exe#LinPlayer-Windows-Setup-x64.exe" --clobber
+              gh_retry release upload "$target" "dist/LinPlayer-Windows-Setup-x64.exe#LinPlayer-Windows-Setup-x64.exe" --clobber
             elif [[ -f "dist/LinPlayer-Setup-x64.exe" ]]; then
-              gh release upload "$target" "dist/LinPlayer-Setup-x64.exe#LinPlayer-Windows-Setup-x64.exe" --clobber
+              gh_retry release upload "$target" "dist/LinPlayer-Setup-x64.exe#LinPlayer-Windows-Setup-x64.exe" --clobber
             else
               echo "Windows installer not found in dist/." >&2
               exit 1
@@ -230,7 +235,7 @@ jobs:
 
             # iOS
             if [[ -f "dist/LinPlayer-iOS-unsigned.ipa" ]]; then
-              gh release upload "$target" "dist/LinPlayer-iOS-unsigned.ipa#LinPlayer-iOS-unsigned.ipa" --clobber
+              gh_retry release upload "$target" "dist/LinPlayer-iOS-unsigned.ipa#LinPlayer-iOS-unsigned.ipa" --clobber
             else
               echo "iOS IPA not found in dist/." >&2
               exit 1
@@ -238,19 +243,19 @@ jobs:
             
             # Apple TV (tvOS) (optional/experimental)
             if [[ -f "dist/LinPlayer-AppleTV-unsigned.ipa" ]]; then
-              gh release upload "$target" "dist/LinPlayer-AppleTV-unsigned.ipa#LinPlayer-AppleTV-unsigned.ipa" --clobber
+              gh_retry release upload "$target" "dist/LinPlayer-AppleTV-unsigned.ipa#LinPlayer-AppleTV-unsigned.ipa" --clobber
             fi
 
             # macOS
             if [[ -f "dist/LinPlayer-macOS-arm64.dmg" ]]; then
-              gh release upload "$target" "dist/LinPlayer-macOS-arm64.dmg#LinPlayer-macOS-arm64.dmg" --clobber
+              gh_retry release upload "$target" "dist/LinPlayer-macOS-arm64.dmg#LinPlayer-macOS-arm64.dmg" --clobber
             else
               echo "macOS arm64 DMG not found in dist/." >&2
               exit 1
             fi
 
             if [[ -f "dist/LinPlayer-macOS-x86_64.dmg" ]]; then
-              gh release upload "$target" "dist/LinPlayer-macOS-x86_64.dmg#LinPlayer-macOS-x86_64.dmg" --clobber
+              gh_retry release upload "$target" "dist/LinPlayer-macOS-x86_64.dmg#LinPlayer-macOS-x86_64.dmg" --clobber
             else
               echo "macOS x86_64 DMG not found in dist/." >&2
               exit 1

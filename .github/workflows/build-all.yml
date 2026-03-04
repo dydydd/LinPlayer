@@ -794,6 +794,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source .github/scripts/retry.sh
           NOTES="$(cat <<EOF
           Nightly build
 
@@ -803,18 +804,19 @@ jobs:
           EOF
           )"
 
-          if gh release view nightly >/dev/null 2>&1; then
-            gh release edit nightly --title "Nightly (${VERSION_FULL})" --notes "$NOTES"
+          if gh_retry release view nightly >/dev/null 2>&1; then
+            gh_retry release edit nightly --title "Nightly (${VERSION_FULL})" --notes "$NOTES"
           else
-            gh release create nightly --title "Nightly (${VERSION_FULL})" --notes "$NOTES" --prerelease
+            gh_retry release create nightly --title "Nightly (${VERSION_FULL})" --notes "$NOTES" --prerelease
           fi
 
       - name: Purge old nightly assets (LinPlayer-*)
         shell: bash
         run: |
           set -euo pipefail
+          source .github/scripts/retry.sh
           mapfile -t old_ids < <(
-            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/nightly" \
+            gh_retry api "repos/${GITHUB_REPOSITORY}/releases/tags/nightly" \
               --jq '.assets[] | select(.name | startswith("LinPlayer-")) | .id'
           )
           if [[ ${#old_ids[@]} -eq 0 ]]; then
@@ -822,32 +824,34 @@ jobs:
             exit 0
           fi
           for id in "${old_ids[@]}"; do
-            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/$id"
+            gh_retry api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/$id"
           done
 
       - name: Upload release assets (overwrite)
         shell: bash
         run: |
           set -euo pipefail
+          source .github/scripts/retry.sh
 
-          gh release upload nightly "dist/LinPlayer-Android-arm64-v8a.apk" --clobber
-          gh release upload nightly "dist/LinPlayer-Android-TV.apk" --clobber
-          gh release upload nightly "dist/LinPlayer-Android.apk" --clobber
-          gh release upload nightly "dist/LinPlayer-Windows-Setup-x64.exe" --clobber
-          gh release upload nightly "dist/LinPlayer-Linux-x86_64.tar.gz" --clobber
-          gh release upload nightly "dist/LinPlayer-iOS-unsigned.ipa" --clobber
-          gh release upload nightly "dist/LinPlayer-macOS-arm64.dmg" --clobber
-          gh release upload nightly "dist/LinPlayer-macOS-x86_64.dmg" --clobber
+          gh_retry release upload nightly "dist/LinPlayer-Android-arm64-v8a.apk" --clobber
+          gh_retry release upload nightly "dist/LinPlayer-Android-TV.apk" --clobber
+          gh_retry release upload nightly "dist/LinPlayer-Android.apk" --clobber
+          gh_retry release upload nightly "dist/LinPlayer-Windows-Setup-x64.exe" --clobber
+          gh_retry release upload nightly "dist/LinPlayer-Linux-x86_64.tar.gz" --clobber
+          gh_retry release upload nightly "dist/LinPlayer-iOS-unsigned.ipa" --clobber
+          gh_retry release upload nightly "dist/LinPlayer-macOS-arm64.dmg" --clobber
+          gh_retry release upload nightly "dist/LinPlayer-macOS-x86_64.dmg" --clobber
 
           # Apple TV (tvOS) is optional/experimental.
           if [[ -f "dist/LinPlayer-AppleTV-unsigned.ipa" ]]; then
-            gh release upload nightly "dist/LinPlayer-AppleTV-unsigned.ipa" --clobber
+            gh_retry release upload nightly "dist/LinPlayer-AppleTV-unsigned.ipa" --clobber
           fi
 
       - name: Remove stale/duplicate nightly assets
         shell: bash
         run: |
           set -euo pipefail
+          source .github/scripts/retry.sh
 
           # Keep only the latest asset for each expected filename, and remove any older/stale
           # LinPlayer-* assets that may have been left behind by previous workflow versions.
@@ -872,7 +876,7 @@ jobs:
 
           # Fetch current nightly release assets (id, name, created_at).
           mapfile -t assets < <(
-            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/nightly" \
+            gh_retry api "repos/${GITHUB_REPOSITORY}/releases/tags/nightly" \
               --jq '.assets[] | "\(.id)\t\(.name)\t\(.created_at)"'
           )
 
@@ -914,7 +918,7 @@ jobs:
             fi
 
             echo "Deleting stale asset: $name ($id)"
-            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/$id"
+            gh_retry api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/$id"
           done
 
           # Delete duplicates for expected assets, keeping only the newest one per name.
@@ -931,7 +935,7 @@ jobs:
             fi
 
             echo "Deleting duplicate asset: $name ($id)"
-            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/$id"
+            gh_retry api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/$id"
           done
 
       - name: Update VitePress download page
