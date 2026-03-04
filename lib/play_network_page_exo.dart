@@ -3857,7 +3857,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     VideoVersionPreference pref,
   ) {
     if (sources.isEmpty) return null;
-    if (pref == VideoVersionPreference.defaultVersion) return null;
 
     int heightOf(Map<String, dynamic> ms) {
       final videos = _streamsOfType(ms, 'Video');
@@ -3954,6 +3953,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         );
         break;
       case VideoVersionPreference.defaultVersion:
+        chosen = (List<Map<String, dynamic>>.from(sources)
+              ..sort(_compareMediaSourcesByQuality))
+            .first;
         break;
     }
 

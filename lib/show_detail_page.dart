@@ -1518,7 +1518,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     List<Map<String, dynamic>> sources,
     VideoVersionPreference pref,
   ) {
-    if (pref == VideoVersionPreference.defaultVersion) return null;
+    if (sources.isEmpty) return null;
 
     int heightOf(Map<String, dynamic> ms) {
       final videos = _streamsOfType(ms, 'Video');
@@ -1568,7 +1568,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       });
     }
 
-    Map<String, dynamic>? chosen;
+    late final Map<String, dynamic> chosen;
     switch (pref) {
       case VideoVersionPreference.highestResolution:
         chosen = pickBest(
@@ -1605,10 +1605,13 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
         );
         break;
       case VideoVersionPreference.defaultVersion:
+        chosen = (List<Map<String, dynamic>>.from(sources)
+              ..sort(_compareMediaSourcesByQuality))
+            .first;
         break;
     }
 
-    final id = chosen?['Id']?.toString();
+    final id = chosen['Id']?.toString();
     return (id == null || id.trim().isEmpty) ? null : id.trim();
   }
 
@@ -7882,4 +7885,3 @@ Widget _externalLinksSection(
     ],
   );
 }
-

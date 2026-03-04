@@ -508,8 +508,6 @@ class StreamPreloadService {
   }) {
     final selected = (selectedMediaSourceId ?? '').trim();
     if (selected.isNotEmpty) return selected;
-
-    if (preferred == VideoVersionPreference.defaultVersion) return null;
     if (sources.isEmpty) return null;
 
     int heightOf(Map<String, dynamic> ms) {
@@ -519,6 +517,22 @@ class StreamPreloadService {
     }
 
     int bitrateOf(Map<String, dynamic> ms) => _asInt(ms['Bitrate']) ?? 0;
+
+    int sizeOf(Map<String, dynamic> ms) {
+      final v = ms['Size'];
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      if (v is String) return int.tryParse(v) ?? 0;
+      return 0;
+    }
+
+    int compareByQuality(Map<String, dynamic> a, Map<String, dynamic> b) {
+      final h = heightOf(b) - heightOf(a);
+      if (h != 0) return h;
+      final br = bitrateOf(b) - bitrateOf(a);
+      if (br != 0) return br;
+      return sizeOf(b) - sizeOf(a);
+    }
 
     String videoCodecOf(Map<String, dynamic> ms) {
       final msCodec = (ms['VideoCodec'] as String?)?.trim();
@@ -607,6 +621,8 @@ class StreamPreloadService {
         );
         break;
       case VideoVersionPreference.defaultVersion:
+        chosen = (List<Map<String, dynamic>>.from(sources)..sort(compareByQuality))
+            .first;
         break;
     }
 

@@ -262,6 +262,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   String? _episodeSelectedSeasonId;
   final Map<String, List<MediaItem>> _episodeEpisodesCache = {};
   final Map<String, Future<List<MediaItem>>> _episodeEpisodesFutureCache = {};
+  final Map<String, Future<_EpisodeMediaSpec>> _episodeMediaSpecFutureCache = {};
 
   @override
   void initState() {
@@ -1373,6 +1374,85 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         : _episodesForSeasonId(seasonId);
     _episodeEpisodesFutureCache[seasonId] = future;
     return future;
+  }
+
+  Future<_EpisodeMediaSpec> _episodeMediaSpecFuture(MediaItem episode) {
+    final cached = _episodeMediaSpecFutureCache[episode.id];
+    if (cached != null) return cached;
+    final future = _loadEpisodeMediaSpec(episode);
+    _episodeMediaSpecFutureCache[episode.id] = future;
+    return future;
+  }
+
+  Future<_EpisodeMediaSpec> _loadEpisodeMediaSpec(MediaItem episode) async {
+    int? estimateBitrateFromSizeAndRuntime(
+      int? sizeBytes,
+      int? runtimeTicks,
+    ) {
+      if (sizeBytes == null || sizeBytes <= 0) return null;
+      final ticks = runtimeTicks ?? 0;
+      if (ticks <= 0) return null;
+      final seconds = ticks / 10000000.0;
+      if (!seconds.isFinite || seconds <= 0) return null;
+      return ((sizeBytes * 8) / seconds).round();
+    }
+
+    try {
+      final access = _serverAccess;
+      if (access == null) throw Exception('Not connected');
+
+      final info = await access.adapter.fetchPlaybackInfo(
+        access.auth,
+        itemId: episode.id,
+      );
+      final sources = info.mediaSources.cast<Map<String, dynamic>>();
+      if (sources.isEmpty) throw Exception('No media sources');
+
+      final sid = (episode.seriesId ?? widget.seriesId ?? '').trim();
+      final serverId = widget.server?.id ?? widget.appState.activeServerId;
+      Map<String, dynamic>? selected;
+      if (serverId != null && serverId.isNotEmpty && sid.isNotEmpty) {
+        final idx = widget.appState
+            .seriesMediaSourceIndex(serverId: serverId, seriesId: sid);
+        if (idx != null && idx >= 0 && idx < sources.length) {
+          selected = sources[idx];
+        }
+      }
+
+      if (selected == null) {
+        final preferredId = (_pickPreferredMediaSourceId(
+                  sources,
+                  widget.appState.preferredVideoVersion,
+                ) ??
+                '')
+            .trim();
+        selected = preferredId.isEmpty
+            ? sources.first
+            : sources.firstWhere(
+                (s) => (s['Id'] as String? ?? '') == preferredId,
+                orElse: () => sources.first,
+              );
+      }
+
+      final sizeBytes = _asInt(selected['Size']) ?? episode.sizeBytes;
+      var bitrate = _asInt(selected['Bitrate']);
+      bitrate ??= estimateBitrateFromSizeAndRuntime(
+        sizeBytes,
+        episode.runTimeTicks,
+      );
+      return _EpisodeMediaSpec(
+        sizeBytes: sizeBytes,
+        bitrateBitsPerSecond: bitrate,
+      );
+    } catch (_) {
+      final sizeBytes = episode.sizeBytes;
+      final bitrate =
+          estimateBitrateFromSizeAndRuntime(sizeBytes, episode.runTimeTicks);
+      return _EpisodeMediaSpec(
+        sizeBytes: sizeBytes,
+        bitrateBitsPerSecond: bitrate,
+      );
+    }
   }
 
   void _playEpisodeFromPicker(MediaItem episode) {
@@ -2715,7 +2795,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     VideoVersionPreference pref,
   ) {
     if (sources.isEmpty) return null;
-    if (pref == VideoVersionPreference.defaultVersion) return null;
 
     int heightOf(Map<String, dynamic> ms) {
       final videos = _streamsOfType(ms, 'Video');
@@ -2812,6 +2891,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         );
         break;
       case VideoVersionPreference.defaultVersion:
+        chosen = (List<Map<String, dynamic>>.from(sources)
+              ..sort(_compareMediaSourcesByQuality))
+            .first;
         break;
     }
 
@@ -2839,6 +2921,23 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     if (sizeGb != null) parts.add('$sizeGb GB');
     if (bitrateMbps != null) parts.add('$bitrateMbps Mbps');
     return parts.isEmpty ? '直连播放' : parts.join(' / ');
+  }
+
+  static String _formatBytes(int? sizeBytes) {
+    if (sizeBytes == null || sizeBytes <= 0) return '--';
+    const kb = 1024;
+    const mb = kb * 1024;
+    const gb = mb * 1024;
+    if (sizeBytes >= gb) return '${(sizeBytes / gb).toStringAsFixed(1)} GB';
+    if (sizeBytes >= mb) return '${(sizeBytes / mb).toStringAsFixed(1)} MB';
+    if (sizeBytes >= kb) return '${(sizeBytes / kb).toStringAsFixed(1)} KB';
+    return '$sizeBytes B';
+  }
+
+  static String _formatBitrateMbps(int? bitrateBitsPerSecond) {
+    final br = bitrateBitsPerSecond ?? 0;
+    if (br <= 0) return '--';
+    return '${(br / 1000000).toStringAsFixed(1)} Mbps';
   }
 
   Duration _safeSeekTarget(Duration target, Duration total) {
@@ -8435,6 +8534,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     MediaItem season,
     bool isDark,
   ) {
+    final metaStyle = Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: isDark ? Colors.white70 : Colors.black54,
+        );
     return ListView.separated(
       itemCount: episodes.length,
       separatorBuilder: (_, __) => const SizedBox(height: 8),
@@ -8523,6 +8625,25 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 2),
+                      SizedBox(
+                        height: 16,
+                        child: FutureBuilder<_EpisodeMediaSpec>(
+                          future: _episodeMediaSpecFuture(e),
+                          builder: (ctx, snapshot) {
+                            final spec = snapshot.data;
+                            final text = spec == null
+                                ? '-- · --'
+                                : '${_formatBytes(spec.sizeBytes)} · ${_formatBitrateMbps(spec.bitrateBitsPerSecond)}';
+                            return Text(
+                              text,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: metaStyle,
+                            );
+                          },
+                        ),
                       ),
                     ],
                   ),
@@ -9589,6 +9710,16 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       );
     } catch (_) {}
   }
+}
+
+class _EpisodeMediaSpec {
+  final int? sizeBytes;
+  final int? bitrateBitsPerSecond;
+
+  const _EpisodeMediaSpec({
+    required this.sizeBytes,
+    required this.bitrateBitsPerSecond,
+  });
 }
 
 enum _PlayerMenuAction { anime4k, switchCore, switchVersion }
