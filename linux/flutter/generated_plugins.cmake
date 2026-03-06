@@ -5,6 +5,7 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   desktop_drop
   dynamic_color
+  flutter_js
   media_kit_libs_linux
   media_kit_video
   url_launcher_linux

@@ -4,6 +4,7 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
+import 'package:flutter_js/flutter_js.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -28,15 +29,13 @@ bool pluginRuntimeSupportedV1() {
     TargetPlatform.iOS => true,
     TargetPlatform.macOS => true,
     TargetPlatform.windows => true,
+    TargetPlatform.linux => true,
     _ => false,
   };
 }
 
 abstract class _PluginWebBackendV1 {
-  Future<void> init(
-    String html, {
-    required ValueChanged<Object?> onMessage,
-  });
+  Future<void> init({required ValueChanged<Object?> onMessage});
 
   Future<void> runJavaScript(String js);
 
@@ -48,15 +47,15 @@ abstract class _PluginWebBackendV1 {
 class _FlutterWebBackendV1 implements _PluginWebBackendV1 {
   _FlutterWebBackendV1({required this.channelName});
 
+  static const String _blankHtml =
+      '<!DOCTYPE html><html><head><meta charset="utf-8" /></head><body></body></html>';
+
   final String channelName;
 
   final WebViewController _controller = WebViewController();
 
   @override
-  Future<void> init(
-    String html, {
-    required ValueChanged<Object?> onMessage,
-  }) async {
+  Future<void> init({required ValueChanged<Object?> onMessage}) async {
     await _controller.setJavaScriptMode(JavaScriptMode.unrestricted);
     await _controller.setBackgroundColor(const Color(0x00000000));
     _controller.setNavigationDelegate(
@@ -68,7 +67,7 @@ class _FlutterWebBackendV1 implements _PluginWebBackendV1 {
       channelName,
       onMessageReceived: (msg) => onMessage(msg.message),
     );
-    await _controller.loadHtmlString(html);
+    await _controller.loadHtmlString(_blankHtml);
   }
 
   @override
@@ -82,16 +81,16 @@ class _FlutterWebBackendV1 implements _PluginWebBackendV1 {
 }
 
 class _WindowsWebBackendV1 implements _PluginWebBackendV1 {
+  static const String _blankHtml =
+      '<!DOCTYPE html><html><head><meta charset="utf-8" /></head><body></body></html>';
+
   final webview_windows.WebviewController _controller =
       webview_windows.WebviewController();
 
   StreamSubscription? _sub;
 
   @override
-  Future<void> init(
-    String html, {
-    required ValueChanged<Object?> onMessage,
-  }) async {
+  Future<void> init({required ValueChanged<Object?> onMessage}) async {
     final version = await webview_windows.WebviewController.getWebViewVersion();
     if (version == null || version.trim().isEmpty) {
       throw PluginRuntimeException(
@@ -105,7 +104,7 @@ class _WindowsWebBackendV1 implements _PluginWebBackendV1 {
         .setPopupWindowPolicy(webview_windows.WebviewPopupWindowPolicy.deny);
     await _controller.setBackgroundColor(const Color(0x00000000));
     _sub = _controller.webMessage.listen(onMessage, onError: (_) {});
-    await _controller.loadStringContent(html);
+    await _controller.loadStringContent(_blankHtml);
   }
 
   @override
@@ -120,6 +119,51 @@ class _WindowsWebBackendV1 implements _PluginWebBackendV1 {
   Future<void> dispose() async {
     await _sub?.cancel();
     await _controller.dispose();
+  }
+}
+
+class _FlutterJsBackendV1 implements _PluginWebBackendV1 {
+  _FlutterJsBackendV1({required this.channelName});
+
+  final String channelName;
+  JavascriptRuntime? _runtime;
+
+  @override
+  Future<void> init({required ValueChanged<Object?> onMessage}) async {
+    final rt = getJavascriptRuntime(xhr: false);
+    _runtime = rt;
+
+    rt.onMessage(channelName, (dynamic args) {
+      onMessage(args);
+    });
+
+    // Ensure "window" exists for plugin scripts.
+    rt.evaluate(
+      '''
+(function () {
+  try { if (typeof window === 'undefined') { globalThis.window = globalThis; } } catch (_) {}
+})();''',
+    );
+
+    rt.executePendingJob();
+  }
+
+  @override
+  Future<void> runJavaScript(String js) async {
+    final rt = _runtime;
+    if (rt == null) throw PluginRuntimeException('运行时未初始化');
+    final res = rt.evaluate(js);
+    rt.executePendingJob();
+    if (res.isError) throw PluginRuntimeException(res.stringResult);
+  }
+
+  @override
+  Widget buildView() => const SizedBox.shrink();
+
+  @override
+  Future<void> dispose() async {
+    _runtime?.dispose();
+    _runtime = null;
   }
 }
 
@@ -158,9 +202,11 @@ class PluginRuntimeV1 {
       );
     }
 
-    final backend = (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
-        ? _WindowsWebBackendV1()
-        : _FlutterWebBackendV1(channelName: _channelName);
+    final backend = switch (defaultTargetPlatform) {
+      TargetPlatform.windows => _WindowsWebBackendV1(),
+      TargetPlatform.linux => _FlutterJsBackendV1(channelName: _channelName),
+      _ => _FlutterWebBackendV1(channelName: _channelName),
+    };
     _backend = backend;
 
     final entryRel = manifest.entry.entryForTarget(target).script;
@@ -172,12 +218,14 @@ class PluginRuntimeV1 {
     final entryBytes = await entryFile.readAsBytes();
 
     final ctx = await _buildInitialCtx();
-    final html = _buildHtml(entryBytes, ctx);
+    final bootstrapJs = _buildBootstrapJs(ctx);
+    final entryCode = utf8.decode(entryBytes);
 
-    await backend.init(
-      html,
-      onMessage: (msg) => unawaited(_handleJsMessage(msg)),
-    );
+    await backend.init(onMessage: (msg) => unawaited(_handleJsMessage(msg)));
+
+    await backend.runJavaScript(bootstrapJs);
+    await backend.runJavaScript(entryCode);
+    await backend.runJavaScript("window.__lp_post({ type: 'ready' });");
 
     await _ready.future.timeout(const Duration(seconds: 12));
   }
@@ -250,26 +298,28 @@ class PluginRuntimeV1 {
     };
   }
 
-  String _buildHtml(List<int> entryBytes, Map<String, Object?> ctx) {
+  String _buildBootstrapJs(Map<String, Object?> ctx) {
     final ctxJson = jsonEncode(ctx);
-    final b64 = base64Encode(entryBytes);
     return '''
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-</head>
-<body>
-<script>
 (function () {
+  try { if (typeof window === 'undefined') { globalThis.window = globalThis; } } catch (_) {}
+
   const CHANNEL = ${jsonEncode(_channelName)};
   function post(msg) {
     const raw = JSON.stringify(msg);
     try { window[CHANNEL].postMessage(raw); return; } catch (_) {}
     try {
       const wv = window.chrome && window.chrome.webview;
-      if (wv && typeof wv.postMessage === 'function') wv.postMessage(raw);
+      if (wv && typeof wv.postMessage === 'function') {
+        wv.postMessage(raw);
+        return;
+      }
+    } catch (_) {}
+    try {
+      if (typeof sendMessage === 'function') {
+        sendMessage(CHANNEL, raw);
+        return;
+      }
     } catch (_) {}
   }
   window.__lp_post = post;
@@ -297,7 +347,10 @@ class PluginRuntimeV1 {
 
   window.__lp_hostInvoke = async function (callId, handlerName, argsArray) {
     try {
-      const fn = globalThis[handlerName];
+      let fn = globalThis[handlerName];
+      if (typeof fn !== 'function') {
+        try { fn = (0, eval)(handlerName); } catch (_) {}
+      }
       if (typeof fn !== 'function') throw new Error('Handler not found: ' + handlerName);
       const args = Array.isArray(argsArray) ? argsArray : [];
       const result = await fn(window.__lp_ctx, ...args);
@@ -326,31 +379,6 @@ class PluginRuntimeV1 {
   ctx.log = (level, message, extra) => post({ type: 'log', level, message, extra });
   window.__lp_ctx = ctx;
 })();
-</script>
-
-<script>
-(function () {
-  const b64 = ${jsonEncode(b64)};
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  let code;
-  try {
-    if (typeof TextDecoder !== 'undefined') {
-      code = new TextDecoder('utf-8').decode(bytes);
-    } else {
-      code = decodeURIComponent(escape(bin));
-    }
-  } catch (_) {
-    code = bin;
-  }
-  (0, eval)(code);
-})();
-</script>
-
-<script>window.__lp_post({ type: 'ready' });</script>
-</body>
-</html>
 ''';
   }
 
