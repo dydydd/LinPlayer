@@ -19,7 +19,11 @@ import '../../server_page.dart';
 import '../../server_adapters/server_access.dart';
 import '../../settings_page.dart';
 import '../../show_detail_page.dart';
+import '../../plugins/plugin_slot_area.dart';
+import '../../plugins/plugin_page_host_page.dart';
 import '../../services/app_route_observer.dart';
+import '../../services/plugins/plugin_manager.dart';
+import '../../services/plugins/plugin_runtime_v1.dart';
 import '../widgets/desktop_unified_background.dart';
 
 class DesktopHomePage extends StatefulWidget {
@@ -1098,11 +1102,10 @@ class _DesktopHomePageState extends State<DesktopHomePage> with RouteAware {
                   ),
                   const SizedBox(width: 12),
                   TextButton.icon(
-                    onPressed: () =>
-                        _reloadContinueWatching(
-                          forceRefresh: true,
-                          forceNewRequest: true,
-                        ),
+                    onPressed: () => _reloadContinueWatching(
+                      forceRefresh: true,
+                      forceNewRequest: true,
+                    ),
                     icon: const Icon(Icons.refresh),
                     label: const Text('重试'),
                   ),
@@ -1316,6 +1319,7 @@ class _DesktopHomePageState extends State<DesktopHomePage> with RouteAware {
                   children: [
                     const SizedBox(height: 8),
                     _DesktopHeaderBar(
+                      appState: widget.appState,
                       horizontalPadding: horizontalPadding,
                       onMenuTap: _showMainMenu,
                       onSearchTap: _openSearch,
@@ -1364,6 +1368,19 @@ class _DesktopHomePageState extends State<DesktopHomePage> with RouteAware {
                                 ),
                               ),
                             if (_selectedTab == _DesktopHomeTab.home) ...[
+                              PluginSlotArea(
+                                appState: widget.appState,
+                                slotId: 'home.feed.beforeSections',
+                                padding: EdgeInsets.fromLTRB(
+                                  horizontalPadding,
+                                  0,
+                                  horizontalPadding,
+                                  22,
+                                ),
+                                params: const <String, Object?>{
+                                  'page': 'desktop.home',
+                                },
+                              ),
                               _buildMediaLibrarySection(
                                 horizontalPadding: horizontalPadding,
                                 libraries: visibleLibraries,
@@ -1462,12 +1479,14 @@ class _DesktopHomePageState extends State<DesktopHomePage> with RouteAware {
 
 class _DesktopHeaderBar extends StatelessWidget {
   const _DesktopHeaderBar({
+    required this.appState,
     required this.horizontalPadding,
     required this.onMenuTap,
     required this.onSearchTap,
     required this.onRouteTap,
   });
 
+  final AppState appState;
   final double horizontalPadding;
   final VoidCallback onMenuTap;
   final VoidCallback onSearchTap;
@@ -1513,6 +1532,7 @@ class _DesktopHeaderBar extends StatelessWidget {
               ),
             ),
             const Spacer(),
+            _PluginEntryActions(appState: appState),
             _HeaderIconButton(
               icon: Icons.search_rounded,
               tooltip: '搜索',
@@ -1529,6 +1549,131 @@ class _DesktopHeaderBar extends StatelessWidget {
       ),
     );
   }
+}
+
+class _PluginEntryActions extends StatefulWidget {
+  const _PluginEntryActions({required this.appState});
+
+  final AppState appState;
+
+  @override
+  State<_PluginEntryActions> createState() => _PluginEntryActionsState();
+}
+
+class _PluginEntryActionsState extends State<_PluginEntryActions> {
+  final _manager = PluginManagerV1.instance;
+
+  Future<List<_PluginEntryPage>>? _future;
+
+  @override
+  void initState() {
+    super.initState();
+    PluginManagerV1.revision.addListener(_onRevisionChanged);
+    _future = _load();
+  }
+
+  @override
+  void dispose() {
+    PluginManagerV1.revision.removeListener(_onRevisionChanged);
+    super.dispose();
+  }
+
+  void _onRevisionChanged() {
+    if (!mounted) return;
+    setState(() => _future = _load());
+  }
+
+  Future<List<_PluginEntryPage>> _load() async {
+    final target = currentPluginTarget();
+    final installed = await _manager.listInstalled();
+    final out = <_PluginEntryPage>[];
+
+    for (final p in installed) {
+      if (!p.enabled) continue;
+      PluginManifestV1 manifest;
+      try {
+        manifest = await _manager.loadManifest(p);
+      } catch (_) {
+        continue;
+      }
+      if (!manifest.targets.contains(target)) continue;
+
+      final pages = manifest.contributions.pages
+          .where((pg) => pg.entry && pg.targets.contains(target))
+          .toList(growable: false);
+
+      for (final pg in pages) {
+        out.add(_PluginEntryPage(plugin: p, manifest: manifest, page: pg));
+      }
+    }
+
+    out.sort((a, b) {
+      final order = a.page.order.compareTo(b.page.order);
+      if (order != 0) return order;
+      return '${a.plugin.id}@${a.page.id}'
+          .compareTo('${b.plugin.id}@${b.page.id}');
+    });
+    return out;
+  }
+
+  Future<void> _open(_PluginEntryPage entry) async {
+    if (!pluginRuntimeSupportedV1()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('当前平台暂不支持脚本插件运行（需要 WebView 支持）')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PluginPageHostPage(
+          appState: widget.appState,
+          plugin: entry.plugin,
+          manifest: entry.manifest,
+          page: entry.page,
+          params: const <String, Object?>{
+            'page': 'desktop.home',
+          },
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<_PluginEntryPage>>(
+      future: _future,
+      builder: (context, snap) {
+        final items = snap.data;
+        if (items == null || items.isEmpty) return const SizedBox.shrink();
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final it in items) ...[
+              _HeaderIconButton(
+                icon: Icons.extension_rounded,
+                tooltip: it.page.title,
+                onTap: () => _open(it),
+              ),
+              const SizedBox(width: 10),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _PluginEntryPage {
+  _PluginEntryPage({
+    required this.plugin,
+    required this.manifest,
+    required this.page,
+  });
+
+  final InstalledPluginV1 plugin;
+  final PluginManifestV1 manifest;
+  final PluginPageContributionV1 page;
 }
 
 class _HeaderIconButton extends StatelessWidget {

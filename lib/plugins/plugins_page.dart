@@ -5,6 +5,7 @@ import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
 
 import '../services/plugins/plugin_manager.dart';
+import '../services/plugins/plugin_runtime_v1.dart';
 import '../tv/tv_focusable.dart';
 import 'plugin_page_host_page.dart';
 
@@ -145,9 +146,15 @@ class _PluginsPageState extends State<PluginsPage> {
       } catch (_) {}
       if (!context.mounted) return;
       final displayName = manifest?.name ?? installed.id;
+      final runtimeSupported = pluginRuntimeSupportedV1();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('安装成功：$displayName (${installed.version})')),
       );
+      if (!runtimeSupported) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('注意：当前平台暂不支持脚本插件运行（需要 WebView 支持）')),
+        );
+      }
       await _reload();
     } catch (e) {
       if (!context.mounted) return;
@@ -159,7 +166,8 @@ class _PluginsPageState extends State<PluginsPage> {
     }
   }
 
-  Future<void> _confirmUninstall(BuildContext context, InstalledPluginV1 plugin) async {
+  Future<void> _confirmUninstall(
+      BuildContext context, InstalledPluginV1 plugin) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dctx) => AlertDialog(
@@ -202,6 +210,12 @@ class _PluginsPageState extends State<PluginsPage> {
     BuildContext context,
     InstalledPluginV1 plugin,
   ) async {
+    if (!pluginRuntimeSupportedV1()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('当前平台暂不支持脚本插件运行（需要 WebView 支持）')),
+      );
+      return;
+    }
     if (!plugin.enabled) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('请先启用该插件')),
@@ -212,8 +226,9 @@ class _PluginsPageState extends State<PluginsPage> {
     manifest ??= await _manager.loadManifest(plugin);
     if (!context.mounted) return;
     final target = currentPluginTarget();
-    final pages =
-        manifest.contributions.pages.where((p) => p.targets.contains(target)).toList();
+    final pages = manifest.contributions.pages
+        .where((p) => p.targets.contains(target))
+        .toList();
     if (pages.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('该插件没有可用页面')),
@@ -270,7 +285,8 @@ class _PluginsPageState extends State<PluginsPage> {
       return TvFocusFrame(
         borderRadius: BorderRadius.circular(radius),
         surfaceColor: Colors.transparent,
-        focusedSurfaceColor: scheme.primary.withValues(alpha: isDark ? 0.22 : 0.16),
+        focusedSurfaceColor:
+            scheme.primary.withValues(alpha: isDark ? 0.22 : 0.16),
         borderColor: Colors.transparent,
         focusedBorderColor: scheme.primary,
         padding: EdgeInsets.zero,
@@ -318,7 +334,8 @@ class _PluginsPageState extends State<PluginsPage> {
                               children: [
                                 const SizedBox(width: 8),
                                 TextButton.icon(
-                                  onPressed: () => _confirmUninstall(context, p),
+                                  onPressed: () =>
+                                      _confirmUninstall(context, p),
                                   icon: const Icon(Icons.delete_outline),
                                   label: const Text('卸载'),
                                 ),

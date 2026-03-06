@@ -6,21 +6,29 @@ import 'package:lin_player_ui/lin_player_ui.dart';
 
 import '../tv/tv_focusable.dart';
 
-typedef PluginEventCallback = FutureOr<void> Function(Map<String, Object?> event);
+typedef PluginEventCallback = FutureOr<void> Function(
+    Map<String, Object?> event);
 
 class PluginSchemaRenderer extends StatelessWidget {
   const PluginSchemaRenderer({
     super.key,
     required this.schema,
     required this.onEvent,
+    this.scrollable = true,
   });
 
   final Object? schema;
   final PluginEventCallback onEvent;
+  final bool scrollable;
 
   @override
   Widget build(BuildContext context) {
-    return _renderNode(context, schema, onEvent: onEvent);
+    return _renderNode(
+      context,
+      schema,
+      onEvent: onEvent,
+      scrollable: scrollable,
+    );
   }
 }
 
@@ -28,14 +36,29 @@ Widget _renderNode(
   BuildContext context,
   Object? node, {
   required PluginEventCallback onEvent,
+  required bool scrollable,
 }) {
   if (node == null) {
     return const Center(child: Text('插件未返回 UI Schema'));
   }
   if (node is List) {
     final children = node
-        .map((e) => _renderNode(context, e, onEvent: onEvent))
+        .map((e) => _renderNode(
+              context,
+              e,
+              onEvent: onEvent,
+              scrollable: scrollable,
+            ))
         .toList(growable: false);
+    if (!scrollable) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: children,
+        ),
+      );
+    }
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: children,
@@ -54,24 +77,51 @@ Widget _renderNode(
 
   switch (type) {
     case 'page':
-      return SingleChildScrollView(
-        padding: padding ?? const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        child: _renderColumnLike(context, children, props, onEvent: onEvent),
+      final child = _renderColumnLike(
+        context,
+        children,
+        props,
+        onEvent: onEvent,
+        scrollable: scrollable,
       );
+      final effectivePadding =
+          padding ?? const EdgeInsets.fromLTRB(16, 12, 16, 24);
+      if (!scrollable) {
+        return Padding(padding: effectivePadding, child: child);
+      }
+      return SingleChildScrollView(padding: effectivePadding, child: child);
     case 'column':
       return Padding(
         padding: padding ?? EdgeInsets.zero,
-        child: _renderColumnLike(context, children, props, onEvent: onEvent),
+        child: _renderColumnLike(
+          context,
+          children,
+          props,
+          onEvent: onEvent,
+          scrollable: scrollable,
+        ),
       );
     case 'row':
       return Padding(
         padding: padding ?? EdgeInsets.zero,
-        child: _renderRowLike(context, children, props, onEvent: onEvent),
+        child: _renderRowLike(
+          context,
+          children,
+          props,
+          onEvent: onEvent,
+          scrollable: scrollable,
+        ),
       );
     case 'list':
       return Padding(
         padding: padding ?? EdgeInsets.zero,
-        child: _renderColumnLike(context, children, props, onEvent: onEvent),
+        child: _renderColumnLike(
+          context,
+          children,
+          props,
+          onEvent: onEvent,
+          scrollable: scrollable,
+        ),
       );
     case 'card':
       final child = children.isEmpty ? null : children.first;
@@ -81,15 +131,23 @@ Widget _renderNode(
           padding: padding ?? const EdgeInsets.all(12),
           child: child == null
               ? const SizedBox.shrink()
-              : _renderNode(context, child, onEvent: onEvent),
+              : _renderNode(
+                  context,
+                  child,
+                  onEvent: onEvent,
+                  scrollable: scrollable,
+                ),
         ),
       );
     case 'divider':
       return const Divider(height: 1);
     case 'spacer':
       final size = _asDouble(props['size']) ?? 12.0;
-      final axis = (props['axis'] as String? ?? 'vertical').trim().toLowerCase();
-      return axis == 'horizontal' ? SizedBox(width: size) : SizedBox(height: size);
+      final axis =
+          (props['axis'] as String? ?? 'vertical').trim().toLowerCase();
+      return axis == 'horizontal'
+          ? SizedBox(width: size)
+          : SizedBox(height: size);
     case 'text':
     case 'markdown':
       final text = (props['text'] as String? ?? '').trim();
@@ -151,10 +209,12 @@ Widget _renderColumnLike(
   List children, // dynamic list
   Map<String, Object?> props, {
   required PluginEventCallback onEvent,
+  required bool scrollable,
 }) {
   final gap = _asDouble(props['gap']);
   final rendered = children
-      .map((e) => _renderNode(context, e, onEvent: onEvent))
+      .map((e) =>
+          _renderNode(context, e, onEvent: onEvent, scrollable: scrollable))
       .toList(growable: false);
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
@@ -167,10 +227,12 @@ Widget _renderRowLike(
   List children, // dynamic list
   Map<String, Object?> props, {
   required PluginEventCallback onEvent,
+  required bool scrollable,
 }) {
   final gap = _asDouble(props['gap']);
   final rendered = children
-      .map((e) => _renderNode(context, e, onEvent: onEvent))
+      .map((e) =>
+          _renderNode(context, e, onEvent: onEvent, scrollable: scrollable))
       .toList(growable: false);
   return Row(
     crossAxisAlignment: CrossAxisAlignment.center,
@@ -186,7 +248,11 @@ List<Widget> _withGap(
   if (gap == null || gap <= 0 || children.length <= 1) return children;
   final out = <Widget>[];
   for (var i = 0; i < children.length; i++) {
-    if (i > 0) out.add(axis == Axis.horizontal ? SizedBox(width: gap) : SizedBox(height: gap));
+    if (i > 0) {
+      out.add(axis == Axis.horizontal
+          ? SizedBox(width: gap)
+          : SizedBox(height: gap));
+    }
     out.add(children[i]);
   }
   return out;
@@ -218,7 +284,8 @@ Widget _renderButton(
       enabled: enabled && event != null,
       onPressed: fire,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      child: Center(child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis)),
+      child: Center(
+          child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis)),
     );
   }
 
@@ -292,4 +359,3 @@ BoxFit? _parseBoxFit(Object? raw) {
     _ => BoxFit.cover,
   };
 }
-

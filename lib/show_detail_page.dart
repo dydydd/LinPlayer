@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'dart:ui';
 
@@ -11,7 +11,9 @@ import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher_string.dart';
+import 'plugins/plugin_slot_area.dart';
 import 'server_adapters/server_access.dart';
+import 'services/plugins/plugin_manager.dart';
 import 'services/playback_proxy/playback_proxy.dart';
 import 'person_page.dart';
 import 'play_network_page.dart';
@@ -64,9 +66,8 @@ Widget _detailActionButton(
   final bg = primary
       ? const Color(0xFF1F9F75).withValues(alpha: 0.84)
       : Colors.black.withValues(alpha: 0.34);
-  final borderColor = primary
-      ? Colors.transparent
-      : Colors.white.withValues(alpha: 0.20);
+  final borderColor =
+      primary ? Colors.transparent : Colors.white.withValues(alpha: 0.20);
   return Material(
     color: Colors.transparent,
     child: InkWell(
@@ -133,8 +134,9 @@ Widget _detailGlassPanel({
     decoration: BoxDecoration(
       borderRadius: borderRadius,
       gradient: effectiveGradient,
-      border:
-          showBorder ? Border.all(color: Colors.white.withValues(alpha: 0.20)) : null,
+      border: showBorder
+          ? Border.all(color: Colors.white.withValues(alpha: 0.20))
+          : null,
       boxShadow: [
         BoxShadow(
           color: Colors.black.withValues(alpha: 0.22),
@@ -215,7 +217,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
   }
 
   String get _localFavoriteKey {
-    final serverKey = (_baseUrl ?? 'default').replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+    final serverKey =
+        (_baseUrl ?? 'default').replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
     return 'show_detail_local_favorite_${serverKey}_${widget.itemId}';
   }
 
@@ -294,8 +297,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     String? httpProxyUrl;
     final baseUri = Uri.tryParse(access.auth.baseUrl);
     if (baseUri != null) {
-      httpProxyUrl =
-          resolvePlaybackHttpProxyForUri(appState: widget.appState, uri: baseUri);
+      httpProxyUrl = resolvePlaybackHttpProxyForUri(
+          appState: widget.appState, uri: baseUri);
     }
 
     final result = await StreamPreloadService.instance.preloadFirst3Seconds(
@@ -744,7 +747,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
   String _episodeTitle(MediaItem ep) {
     final epNo = ep.episodeNumber ?? 1;
     final name = ep.name.trim();
-    return name.isNotEmpty ? 'S${ep.seasonNumber ?? 1}:E$epNo - $name' : 'S${ep.seasonNumber ?? 1}:E$epNo';
+    return name.isNotEmpty
+        ? 'S${ep.seasonNumber ?? 1}:E$epNo - $name'
+        : 'S${ep.seasonNumber ?? 1}:E$epNo';
   }
 
   void _showTopActionHint(String label) {
@@ -957,7 +962,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       if (isSeries) '共${_seasons.length}季',
       if (!isSeries && runtime != null) _fmt(runtime),
     ];
-    final featuredLabel = _featuredEpisode == null ? '' : _episodeTitle(_featuredEpisode!);
+    final featuredLabel =
+        _featuredEpisode == null ? '' : _episodeTitle(_featuredEpisode!);
 
     final posterCard = SizedBox(
       width: wide ? 290 : 220,
@@ -1035,11 +1041,13 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       children: [
         Text(
           item.name,
-          style: (wide ? theme.textTheme.headlineMedium : theme.textTheme.headlineSmall)
+          style: (wide
+                  ? theme.textTheme.headlineMedium
+                  : theme.textTheme.headlineSmall)
               ?.copyWith(
-                color: heroTextColor,
-                fontWeight: FontWeight.w700,
-              ),
+            color: heroTextColor,
+            fontWeight: FontWeight.w700,
+          ),
         ),
         const SizedBox(height: 8),
         Wrap(
@@ -1048,7 +1056,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           children: meta
               .map(
                 (m) => Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: heroMetaBg,
                     borderRadius: BorderRadius.circular(999),
@@ -1057,8 +1066,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                   child: Text(
                     m,
                     style: theme.textTheme.labelMedium?.copyWith(
-                          color: heroTextColor,
-                        ),
+                      color: heroTextColor,
+                    ),
                   ),
                 ),
               )
@@ -1068,10 +1077,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: item.genres
-              .take(3)
-              .map((g) => _pill(context, g))
-              .toList(),
+          children: item.genres.take(3).map((g) => _pill(context, g)).toList(),
         ),
         const SizedBox(height: 14),
         Wrap(
@@ -1089,8 +1095,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
             if (!isSeries)
               _heroActionButton(
                 context,
-                icon:
-                    item.played ? Icons.check_circle : Icons.radio_button_unchecked,
+                icon: item.played
+                    ? Icons.check_circle
+                    : Icons.radio_button_unchecked,
                 label: item.played ? '已播放' : '未播放',
                 onTap: null,
               ),
@@ -1113,9 +1120,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           Text(
             featuredLabel,
             style: theme.textTheme.titleSmall?.copyWith(
-                  color: heroTextColor,
-                  fontWeight: FontWeight.w700,
-                ),
+              color: heroTextColor,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ],
         const SizedBox(height: 8),
@@ -1124,9 +1131,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           maxLines: 4,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.bodyMedium?.copyWith(
-                color: heroMutedTextColor,
-                height: 1.45,
-              ),
+            color: heroMutedTextColor,
+            height: 1.45,
+          ),
         ),
       ],
     );
@@ -1136,12 +1143,12 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: theme.textTheme.headlineSmall?.copyWith(
-            color: heroTextColor,
-            fontWeight: FontWeight.w700,
-            shadows: const [
-              Shadow(color: Colors.black54, blurRadius: 10),
-            ],
-          ),
+        color: heroTextColor,
+        fontWeight: FontWeight.w700,
+        shadows: const [
+          Shadow(color: Colors.black54, blurRadius: 10),
+        ],
+      ),
     );
 
     final infoPanel = wide
@@ -1245,14 +1252,17 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                   itemBuilder: (context, index) {
                     final ep = unwatched[index];
                     final epNo = ep.episodeNumber ?? (index + 1);
-                    final seasonNo = ep.seasonNumber ?? season.seasonNumber ?? 1;
+                    final seasonNo =
+                        ep.seasonNumber ?? season.seasonNumber ?? 1;
                     final imageUrl = access == null
                         ? ''
                         : access.adapter.imageUrl(
                             access.auth,
                             itemId: ep.hasImage
                                 ? ep.id
-                                : (season.id.isNotEmpty ? season.id : seriesItem.id),
+                                : (season.id.isNotEmpty
+                                    ? season.id
+                                    : seriesItem.id),
                             maxWidth: 640,
                           );
                     return _HoverScale(
@@ -1262,13 +1272,13 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                           color: Colors.transparent,
                           child: InkWell(
                             onTap: () => _openEpisode(context, ep),
-                            borderRadius:
-                                BorderRadius.circular(_DetailUiTokens.cardRadius),
+                            borderRadius: BorderRadius.circular(
+                                _DetailUiTokens.cardRadius),
                             child: Ink(
                               decoration: BoxDecoration(
                                 color: Colors.black.withValues(alpha: 0.26),
-                                borderRadius:
-                                    BorderRadius.circular(_DetailUiTokens.cardRadius),
+                                borderRadius: BorderRadius.circular(
+                                    _DetailUiTokens.cardRadius),
                                 border: Border.all(
                                   color: Colors.white.withValues(alpha: 0.22),
                                 ),
@@ -1419,7 +1429,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           Expanded(
             child: OutlinedButton(
               style: outlinedStyle,
-              onPressed: _selectedSeason == null ? null : () => _pickEpisode(context),
+              onPressed:
+                  _selectedSeason == null ? null : () => _pickEpisode(context),
               child: const Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -1829,7 +1840,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           Divider(height: 1, color: Colors.white.withValues(alpha: 0.20)),
           ListTile(
             leading: const Icon(Icons.subtitles, color: Colors.white),
-            title: Text(subtitleText, style: const TextStyle(color: Colors.white)),
+            title:
+                Text(subtitleText, style: const TextStyle(color: Colors.white)),
             trailing: const Icon(Icons.arrow_drop_down, color: Colors.white70),
             onTap: hasSubs ? () => _pickSubtitleStream(context, ms) : null,
           ),
@@ -2080,8 +2092,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                     ? scheme.primary
                                     : Colors.white70,
                               ),
-                              SizedBox(
-                                  width: (12 * uiScale).clamp(10.0, 16.0)),
+                              SizedBox(width: (12 * uiScale).clamp(10.0, 16.0)),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2090,19 +2101,16 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                       opt.label,
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
-                                      style: theme.textTheme.titleSmall
-                                          ?.copyWith(
+                                      style:
+                                          theme.textTheme.titleSmall?.copyWith(
                                         color: Colors.white,
                                         fontWeight: FontWeight.w700,
                                       ),
                                     ),
-                                    if ((opt.subtitle ?? '')
-                                        .trim()
-                                        .isNotEmpty)
+                                    if ((opt.subtitle ?? '').trim().isNotEmpty)
                                       Padding(
                                         padding: EdgeInsets.only(
-                                          top:
-                                              (4 * uiScale).clamp(2.0, 6.0),
+                                          top: (4 * uiScale).clamp(2.0, 6.0),
                                         ),
                                         child: Text(
                                           opt.subtitle!,
@@ -2154,7 +2162,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
             selected: id == _selectedMediaSourceId,
           );
         })
-        .whereType<({String value, String label, String? subtitle, bool selected})>()
+        .whereType<
+            ({String value, String label, String? subtitle, bool selected})>()
         .toList();
 
     final selected = await _showTvPicker<String>(
@@ -2186,7 +2195,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     final def = _defaultStream(audioStreams);
     final defIndex = _asInt(def?['Index']);
 
-    final options = <({int value, String label, String? subtitle, bool selected})>[
+    final options =
+        <({int value, String label, String? subtitle, bool selected})>[
       (
         value: _kTvPickerDefault,
         label: '默认',
@@ -2205,7 +2215,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           subtitle: codec?.isEmpty == true ? null : codec,
           selected: selectedNow,
         );
-      }).whereType<({int value, String label, String? subtitle, bool selected})>(),
+      }).whereType<
+          ({int value, String label, String? subtitle, bool selected})>(),
     ];
 
     final selected = await _showTvPicker<int>(
@@ -2232,7 +2243,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     final def = _defaultStream(subtitleStreams);
     final defIndex = _asInt(def?['Index']);
 
-    final options = <({int value, String label, String? subtitle, bool selected})>[
+    final options =
+        <({int value, String label, String? subtitle, bool selected})>[
       (
         value: -1,
         label: '关闭',
@@ -2257,7 +2269,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           subtitle: codec?.isEmpty == true ? null : codec,
           selected: selectedNow,
         );
-      }).whereType<({int value, String label, String? subtitle, bool selected})>(),
+      }).whereType<
+          ({int value, String label, String? subtitle, bool selected})>(),
     ];
 
     final selected = await _showTvPicker<int>(
@@ -2322,12 +2335,11 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
 
     final played = item.played;
     final hasResume = item.playbackPositionTicks > 0 && !played && !isSeries;
-    final playLabel = isSeries
-        ? '播放'
-        : (hasResume ? '继续播放' : (played ? '重播' : '播放'));
+    final playLabel =
+        isSeries ? '播放' : (hasResume ? '继续播放' : (played ? '重播' : '播放'));
 
-    final canSwitchCore = !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android;
+    final canSwitchCore =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
     final coreLabel =
         widget.appState.playerCore == PlayerCore.exo ? '内核：Exo' : '内核：mpv';
 
@@ -2448,8 +2460,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
         children: [
           if (rating != null) ...[
             for (int i = 0; i < full; i++)
-              const Icon(Icons.star_rounded,
-                  size: 18, color: Colors.amber),
+              const Icon(Icons.star_rounded, size: 18, color: Colors.amber),
             if (hasHalf)
               const Icon(Icons.star_half_rounded,
                   size: 18, color: Colors.amber),
@@ -2605,8 +2616,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                 child: posterUrl.isEmpty
                                     ? const ColoredBox(
                                         color: Colors.black26,
-                                        child:
-                                            Center(child: Icon(Icons.image)),
+                                        child: Center(child: Icon(Icons.image)),
                                       )
                                     : Image.network(
                                         posterUrl,
@@ -2629,7 +2639,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                               children: [
                                 Text(
                                   item.name,
-                                  style: theme.textTheme.headlineSmall?.copyWith(
+                                  style:
+                                      theme.textTheme.headlineSmall?.copyWith(
                                     color: Colors.white,
                                     fontWeight: FontWeight.w900,
                                     height: 1.08,
@@ -2640,8 +2651,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                 ratingLine(),
                                 if (dateLine.isNotEmpty) ...[
                                   SizedBox(
-                                      height:
-                                          (8 * uiScale).clamp(6.0, 12.0)),
+                                      height: (8 * uiScale).clamp(6.0, 12.0)),
                                   Text(
                                     dateLine,
                                     style: theme.textTheme.bodyMedium?.copyWith(
@@ -2651,8 +2661,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                   ),
                                 ],
                                 SizedBox(
-                                    height:
-                                        (16 * uiScale).clamp(12.0, 22.0)),
+                                    height: (16 * uiScale).clamp(12.0, 22.0)),
                                 Wrap(
                                   spacing: buttonGap,
                                   runSpacing: buttonGap,
@@ -2671,7 +2680,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                       pillButton(
                                         icon: played
                                             ? Icons.visibility_off_outlined
-                                            : Icons.check_circle_outline_rounded,
+                                            : Icons
+                                                .check_circle_outline_rounded,
                                         label: played ? '标记未播放' : '标记已播放',
                                         onPressed: _markBusy
                                             ? null
@@ -2699,8 +2709,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                 ),
                                 if (!isSeries) ...[
                                   SizedBox(
-                                      height:
-                                          (14 * uiScale).clamp(10.0, 18.0)),
+                                      height: (14 * uiScale).clamp(10.0, 18.0)),
                                   Wrap(
                                     spacing: buttonGap,
                                     runSpacing: buttonGap,
@@ -2713,9 +2722,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                         onPressed: playInfo == null
                                             ? null
                                             : () => unawaited(
-                                                _pickMediaSourceTv(
-                                                    context, playInfo),
-                                              ),
+                                                  _pickMediaSourceTv(
+                                                      context, playInfo),
+                                                ),
                                       ),
                                       menuButton(
                                         icon: Icons.audiotrack_rounded,
@@ -2793,8 +2802,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     final gap = (14 * uiScale).clamp(10.0, 18.0);
     final cardPadding = (8 * uiScale).clamp(6.0, 12.0);
     final labelGap = (8 * uiScale).clamp(6.0, 10.0);
-    final listHeight = (cardWidth / (16 / 9) +
-            (54 * uiScale).clamp(40.0, 70.0))
+    final listHeight = (cardWidth / (16 / 9) + (54 * uiScale).clamp(40.0, 70.0))
         .clamp(150.0, 300.0);
 
     final selectedId = _selectedSeasonId;
@@ -2917,8 +2925,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     final gap = (14 * uiScale).clamp(10.0, 18.0);
     final cardPadding = (8 * uiScale).clamp(6.0, 12.0);
     final labelGap = (8 * uiScale).clamp(6.0, 10.0);
-    final listHeight = (cardWidth / (16 / 9) +
-            (54 * uiScale).clamp(40.0, 74.0))
+    final listHeight = (cardWidth / (16 / 9) + (54 * uiScale).clamp(40.0, 74.0))
         .clamp(160.0, 320.0);
 
     return FutureBuilder<List<MediaItem>>(
@@ -2934,7 +2941,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
               height: listHeight,
               child: eps.isEmpty
                   ? const Center(
-                      child: Text('暂无剧集', style: TextStyle(color: Colors.white70)),
+                      child:
+                          Text('暂无剧集', style: TextStyle(color: Colors.white70)),
                     )
                   : ListView.separated(
                       scrollDirection: Axis.horizontal,
@@ -2954,7 +2962,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                         return SizedBox(
                           width: cardWidth,
                           child: TvFocusable(
-                            onPressed: () => unawaited(_openEpisode(context, ep)),
+                            onPressed: () =>
+                                unawaited(_openEpisode(context, ep)),
                             borderRadius: BorderRadius.circular(cardRadius),
                             surfaceColor: Colors.black.withValues(alpha: 0.24),
                             focusedSurfaceColor: scheme.primary.withValues(
@@ -2984,8 +2993,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                             },
                                             errorBuilder: (_, __, ___) =>
                                                 const ColoredBox(
-                                                  color: Colors.black26,
-                                                ),
+                                              color: Colors.black26,
+                                            ),
                                           ),
                                   ),
                                 ),
@@ -3152,9 +3161,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           _sectionTitle(context, '媒体信息'),
           SizedBox(height: (10 * uiScale).clamp(8.0, 14.0)),
           Text(
-            item.type.toLowerCase() == 'series'
-                ? '请进入单集查看媒体信息'
-                : '暂无媒体信息',
+            item.type.toLowerCase() == 'series' ? '请进入单集查看媒体信息' : '暂无媒体信息',
             style: theme.textTheme.bodyMedium?.copyWith(
               color: Colors.white70,
               fontWeight: FontWeight.w600,
@@ -3212,7 +3219,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       if (aspect != null) out.add((k: '视频比例', v: aspect));
       if (fr != null) out.add((k: '帧速率', v: fr.toString()));
       if (bitrate != null && bitrate > 0) {
-        out.add((k: '比特率', v: '${(bitrate / 1000000).toStringAsFixed(1)} Mbps'));
+        out.add(
+            (k: '比特率', v: '${(bitrate / 1000000).toStringAsFixed(1)} Mbps'));
       }
       out.add((k: '默认', v: yn(v['IsDefault'])));
       return out;
@@ -3327,8 +3335,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       );
     }
 
-    final container =
-        (ms['Container'] ?? item.container ?? ms['Name'] ?? '').toString().trim();
+    final container = (ms['Container'] ?? item.container ?? ms['Name'] ?? '')
+        .toString()
+        .trim();
     final sizeText = fmtSize(ms['Size'] ?? item.sizeBytes);
 
     final fileCardRadius = (18 * uiScale).clamp(14.0, 22.0);
@@ -3573,84 +3582,85 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                         ),
                         if (widget.itemId.isEmpty)
                           Positioned(
-                          left: 16,
-                          bottom: 16,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(item.name,
-                                  style: theme.textTheme.headlineSmall
-                                      ?.copyWith(
-                                          color: heroTitleColor,
-                                          fontWeight: FontWeight.w700)),
-                              const SizedBox(height: 8),
-                              Wrap(
-                                spacing: 8,
-                                children: [
-                                  if (item.communityRating != null)
-                                    _pill(context,
-                                        '★ ${item.communityRating!.toStringAsFixed(1)}'),
-                                  if (item.premiereDate != null)
-                                    _pill(context,
-                                        item.premiereDate!.split('T').first),
-                                  if (item.genres.isNotEmpty)
-                                    _pill(context, item.genres.first),
-                                  if (isSeries)
-                                    _pill(context, '${_seasons.length} 季')
-                                  else if (runtime != null)
-                                    _pill(context, _fmt(runtime)),
-                                ],
-                              ),
-                            ],
+                            left: 16,
+                            bottom: 16,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(item.name,
+                                    style: theme.textTheme.headlineSmall
+                                        ?.copyWith(
+                                            color: heroTitleColor,
+                                            fontWeight: FontWeight.w700)),
+                                const SizedBox(height: 8),
+                                Wrap(
+                                  spacing: 8,
+                                  children: [
+                                    if (item.communityRating != null)
+                                      _pill(context,
+                                          '★ ${item.communityRating!.toStringAsFixed(1)}'),
+                                    if (item.premiereDate != null)
+                                      _pill(context,
+                                          item.premiereDate!.split('T').first),
+                                    if (item.genres.isNotEmpty)
+                                      _pill(context, item.genres.first),
+                                    if (isSeries)
+                                      _pill(context, '${_seasons.length} 季')
+                                    else if (runtime != null)
+                                      _pill(context, _fmt(runtime)),
+                                  ],
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
                         if (widget.itemId.isEmpty)
                           Positioned(
-                          right: 16,
-                          top: MediaQuery.of(context).padding.top + 16,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              if (item.communityRating != null)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: Colors.green.withValues(alpha: 0.85),
-                                    borderRadius: BorderRadius.circular(999),
+                            right: 16,
+                            top: MediaQuery.of(context).padding.top + 16,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                if (item.communityRating != null)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color:
+                                          Colors.green.withValues(alpha: 0.85),
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Text(
+                                      item.communityRating!.toStringAsFixed(1),
+                                      style:
+                                          theme.textTheme.labelMedium?.copyWith(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
                                   ),
-                                  child: Text(
-                                    item.communityRating!.toStringAsFixed(1),
-                                    style: theme.textTheme.labelMedium?.copyWith(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w700,
+                                const SizedBox(height: 8),
+                                Material(
+                                  color: Colors.black.withValues(alpha: 0.55),
+                                  borderRadius: BorderRadius.circular(999),
+                                  child: IconButton(
+                                    onPressed: _favoriteLoaded
+                                        ? _toggleLocalFavorite
+                                        : null,
+                                    tooltip:
+                                        _localFavorite ? '已本地收藏' : '添加到本地收藏',
+                                    icon: Icon(
+                                      _localFavorite
+                                          ? Icons.star
+                                          : Icons.star_border_rounded,
+                                      color: _localFavorite
+                                          ? Colors.pinkAccent
+                                          : Colors.white,
                                     ),
                                   ),
                                 ),
-                              const SizedBox(height: 8),
-                              Material(
-                                color: Colors.black.withValues(alpha: 0.55),
-                                borderRadius: BorderRadius.circular(999),
-                                child: IconButton(
-                                  onPressed: _favoriteLoaded
-                                      ? _toggleLocalFavorite
-                                      : null,
-                                  tooltip: _localFavorite
-                                      ? '已本地收藏'
-                                      : '添加到本地收藏',
-                                  icon: Icon(
-                                    _localFavorite
-                                        ? Icons.star
-                                        : Icons.star_border_rounded,
-                                    color: _localFavorite
-                                        ? Colors.pinkAccent
-                                        : Colors.white,
-                                  ),
-                                ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -3743,7 +3753,10 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                         if (widget.itemId.isEmpty)
                           Text(
                             item.overview,
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
                                   color: Colors.white.withValues(alpha: 0.88),
                                 ),
                           ),
@@ -3831,7 +3844,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                         onTap: () {
                                           Navigator.of(context).push(
                                             MaterialPageRoute(
-                                              builder: (_) => SeasonEpisodesPage(
+                                              builder: (_) =>
+                                                  SeasonEpisodesPage(
                                                 season: s,
                                                 appState: widget.appState,
                                                 server: widget.server,
@@ -3906,9 +3920,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                                                 LinHttpClientFactory
                                                                     .userAgent,
                                                           },
-                                                          errorBuilder:
-                                                              (_, __, ___) =>
-                                                                  const ColoredBox(
+                                                          errorBuilder: (_, __,
+                                                                  ___) =>
+                                                              const ColoredBox(
                                                             color:
                                                                 Colors.black26,
                                                           ),
@@ -4040,6 +4054,23 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                         ],
                         const SizedBox(height: 16),
                         _externalLinksSection(context, item, widget.appState),
+                        if (currentPluginTarget() == PluginTarget.pc) ...[
+                          const SizedBox(height: _DetailUiTokens.sectionGap),
+                          PluginSlotArea(
+                            appState: widget.appState,
+                            slotId: 'detail.sections.bottom',
+                            params: <String, Object?>{
+                              'page': 'detail',
+                              'itemId': item.id,
+                              'title': item.name,
+                              'item': <String, Object?>{
+                                'id': item.id,
+                                'name': item.name,
+                                'type': item.type,
+                              },
+                            },
+                          ),
+                        ],
                         if (showFloatingSettings) const SizedBox(height: 88),
                       ],
                     ),
@@ -4582,8 +4613,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     final seq = ++_loadSeq;
     final episodeId = _episode.id.trim();
     try {
-      final detail = await access.adapter
-          .fetchItemDetail(access.auth, itemId: episodeId);
+      final detail =
+          await access.adapter.fetchItemDetail(access.auth, itemId: episodeId);
       if (!mounted || seq != _loadSeq) return;
 
       final resolvedSeriesId =
@@ -4670,8 +4701,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
 
       List<ChapterInfo> chaps = const [];
       try {
-        chaps = await access.adapter
-            .fetchChapters(access.auth, itemId: episodeId);
+        chaps =
+            await access.adapter.fetchChapters(access.auth, itemId: episodeId);
       } catch (_) {
         // Chapters are optional; hide section when unavailable.
       }
@@ -4785,14 +4816,17 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                   _mediaSourceSubtitle(ms),
                   style: const TextStyle(color: Colors.white70),
                 ),
-                trailing: const Icon(Icons.arrow_drop_down, color: Colors.white70),
+                trailing:
+                    const Icon(Icons.arrow_drop_down, color: Colors.white70),
                 onTap: () => _pickMediaSource(context, info),
               ),
               Divider(height: 1, color: dividerColor),
               ListTile(
                 leading: const Icon(Icons.audiotrack, color: Colors.white),
-                title: Text(audioText, style: const TextStyle(color: Colors.white)),
-                trailing: const Icon(Icons.arrow_drop_down, color: Colors.white70),
+                title: Text(audioText,
+                    style: const TextStyle(color: Colors.white)),
+                trailing:
+                    const Icon(Icons.arrow_drop_down, color: Colors.white70),
                 onTap: audioStreams.isEmpty
                     ? null
                     : () => _pickAudioStream(context, ms),
@@ -4800,8 +4834,10 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
               Divider(height: 1, color: dividerColor),
               ListTile(
                 leading: const Icon(Icons.subtitles, color: Colors.white),
-                title: Text(subtitleText, style: const TextStyle(color: Colors.white)),
-                trailing: const Icon(Icons.arrow_drop_down, color: Colors.white70),
+                title: Text(subtitleText,
+                    style: const TextStyle(color: Colors.white)),
+                trailing:
+                    const Icon(Icons.arrow_drop_down, color: Colors.white70),
                 onTap: hasSubs ? () => _pickSubtitleStream(context, ms) : null,
               ),
             ],
@@ -5136,7 +5172,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                 icon: const Icon(Icons.arrow_back),
               ),
               IconButton(
-                onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
+                onPressed: () =>
+                    Navigator.of(context).popUntil((r) => r.isFirst),
                 icon: const Icon(Icons.home),
               ),
               IconButton(
@@ -5210,7 +5247,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         var autofocusAssigned = false;
         return Dialog(
           backgroundColor: Colors.transparent,
-          insetPadding: EdgeInsets.symmetric(horizontal: insetH, vertical: insetV),
+          insetPadding:
+              EdgeInsets.symmetric(horizontal: insetH, vertical: insetV),
           child: ConstrainedBox(
             constraints: BoxConstraints(
               maxWidth: maxWidth,
@@ -5270,8 +5308,9 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                 opt.selected
                                     ? Icons.check_circle
                                     : Icons.circle_outlined,
-                                color:
-                                    opt.selected ? scheme.primary : Colors.white70,
+                                color: opt.selected
+                                    ? scheme.primary
+                                    : Colors.white70,
                               ),
                               SizedBox(width: (12 * uiScale).clamp(10.0, 16.0)),
                               Expanded(
@@ -5282,7 +5321,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                       opt.label,
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
-                                      style: theme.textTheme.titleSmall?.copyWith(
+                                      style:
+                                          theme.textTheme.titleSmall?.copyWith(
                                         color: Colors.white,
                                         fontWeight: FontWeight.w700,
                                       ),
@@ -5296,7 +5336,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                           opt.subtitle!,
                                           maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
-                                          style: theme.textTheme.bodySmall?.copyWith(
+                                          style: theme.textTheme.bodySmall
+                                              ?.copyWith(
                                             color: Colors.white70,
                                             height: 1.25,
                                           ),
@@ -5341,7 +5382,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
             selected: id == _selectedMediaSourceId,
           );
         })
-        .whereType<({String value, String label, String? subtitle, bool selected})>()
+        .whereType<
+            ({String value, String label, String? subtitle, bool selected})>()
         .toList();
 
     final selected = await _showTvPicker<String>(
@@ -5388,7 +5430,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     final def = _ShowDetailPageState._defaultStream(audioStreams);
     final defIndex = _ShowDetailPageState._asInt(def?['Index']);
 
-    final options = <({int value, String label, String? subtitle, bool selected})>[
+    final options =
+        <({int value, String label, String? subtitle, bool selected})>[
       (
         value: _kTvPickerDefault,
         label: '默认',
@@ -5407,7 +5450,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
           subtitle: codec?.isEmpty == true ? null : codec,
           selected: selectedNow,
         );
-      }).whereType<({int value, String label, String? subtitle, bool selected})>(),
+      }).whereType<
+          ({int value, String label, String? subtitle, bool selected})>(),
     ];
 
     final selected = await _showTvPicker<int>(
@@ -5443,7 +5487,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     final def = _ShowDetailPageState._defaultStream(subtitleStreams);
     final defIndex = _ShowDetailPageState._asInt(def?['Index']);
 
-    final options = <({int value, String label, String? subtitle, bool selected})>[
+    final options =
+        <({int value, String label, String? subtitle, bool selected})>[
       (
         value: -1,
         label: '关闭',
@@ -5468,7 +5513,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
           subtitle: codec?.isEmpty == true ? null : codec,
           selected: selectedNow,
         );
-      }).whereType<({int value, String label, String? subtitle, bool selected})>(),
+      }).whereType<
+          ({int value, String label, String? subtitle, bool selected})>(),
     ];
 
     final selected = await _showTvPicker<int>(
@@ -5527,9 +5573,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
 
     final canSwitchCore =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
-    final coreLabel = widget.appState.playerCore == PlayerCore.exo
-        ? '内核：Exo'
-        : '内核：mpv';
+    final coreLabel =
+        widget.appState.playerCore == PlayerCore.exo ? '内核：Exo' : '内核：mpv';
 
     final posterWidth = (320 * uiScale).clamp(220.0, 420.0);
     final posterRadius = (20 * uiScale).clamp(14.0, 26.0);
@@ -5677,7 +5722,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
             backdropUrl,
             fit: BoxFit.cover,
             headers: {'User-Agent': LinHttpClientFactory.userAgent},
-            errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black26),
+            errorBuilder: (_, __, ___) =>
+                const ColoredBox(color: Colors.black26),
           );
 
     final scrim = LinearGradient(
@@ -5745,10 +5791,12 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                         posterUrl,
                                         fit: BoxFit.cover,
                                         headers: {
-                                          'User-Agent': LinHttpClientFactory.userAgent
+                                          'User-Agent':
+                                              LinHttpClientFactory.userAgent
                                         },
                                         errorBuilder: (_, __, ___) =>
-                                            const ColoredBox(color: Colors.black26),
+                                            const ColoredBox(
+                                                color: Colors.black26),
                                       ),
                               ),
                             ),
@@ -5760,13 +5808,15 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                               children: [
                                 Text(
                                   seriesTitle,
-                                  style: theme.textTheme.headlineSmall?.copyWith(
+                                  style:
+                                      theme.textTheme.headlineSmall?.copyWith(
                                     color: Colors.white,
                                     fontWeight: FontWeight.w900,
                                     height: 1.08,
                                   ),
                                 ),
-                                SizedBox(height: (10 * uiScale).clamp(8.0, 14.0)),
+                                SizedBox(
+                                    height: (10 * uiScale).clamp(8.0, 14.0)),
                                 Text(
                                   ep.name.trim().isNotEmpty
                                       ? ep.name.trim()
@@ -5776,7 +5826,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                     fontWeight: FontWeight.w800,
                                   ),
                                 ),
-                                SizedBox(height: (10 * uiScale).clamp(8.0, 14.0)),
+                                SizedBox(
+                                    height: (10 * uiScale).clamp(8.0, 14.0)),
                                 markLine(),
                                 if (dateLine.isNotEmpty) ...[
                                   SizedBox(
@@ -5789,7 +5840,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                     ),
                                   ),
                                 ],
-                                SizedBox(height: (16 * uiScale).clamp(12.0, 22.0)),
+                                SizedBox(
+                                    height: (16 * uiScale).clamp(12.0, 22.0)),
                                 Wrap(
                                   spacing: buttonGap,
                                   runSpacing: buttonGap,
@@ -5831,15 +5883,15 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                     pillButton(
                                       icon: Icons.memory_rounded,
                                       label: coreLabel,
-                                      onPressed:
-                                          canSwitchCore ? _togglePlayerCore : null,
+                                      onPressed: canSwitchCore
+                                          ? _togglePlayerCore
+                                          : null,
                                     ),
                                   ],
                                 ),
                                 if (playInfo != null) ...[
                                   SizedBox(
-                                      height:
-                                          (14 * uiScale).clamp(10.0, 18.0)),
+                                      height: (14 * uiScale).clamp(10.0, 18.0)),
                                   Wrap(
                                     spacing: buttonGap,
                                     runSpacing: buttonGap,
@@ -5880,16 +5932,18 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                     ],
                                   ),
                                 ],
-                                if ((_detail?.overview ?? '').trim().isNotEmpty) ...[
+                                if ((_detail?.overview ?? '')
+                                    .trim()
+                                    .isNotEmpty) ...[
                                   SizedBox(
-                                      height:
-                                          (14 * uiScale).clamp(10.0, 18.0)),
+                                      height: (14 * uiScale).clamp(10.0, 18.0)),
                                   Text(
                                     _detail!.overview,
                                     maxLines: 3,
                                     overflow: TextOverflow.ellipsis,
                                     style: theme.textTheme.bodyMedium?.copyWith(
-                                      color: Colors.white.withValues(alpha: 0.88),
+                                      color:
+                                          Colors.white.withValues(alpha: 0.88),
                                       height: 1.45,
                                     ),
                                   ),
@@ -5904,7 +5958,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                         _otherEpisodesSection(context),
                         SizedBox(height: (18 * uiScale).clamp(14.0, 26.0)),
                       ],
-                      if (_detail?.people.isNotEmpty == true && access != null) ...[
+                      if (_detail?.people.isNotEmpty == true &&
+                          access != null) ...[
                         SizedBox(height: (18 * uiScale).clamp(14.0, 26.0)),
                         _castSection(
                           context,
@@ -5920,8 +5975,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                           spacing: 8,
                           runSpacing: 8,
                           children: _chapters
-                              .map((c) =>
-                                  Chip(label: Text('${c.name} ${_fmt(c.start)}')))
+                              .map((c) => Chip(
+                                  label: Text('${c.name} ${_fmt(c.start)}')))
                               .toList(),
                         ),
                       ],
@@ -6305,8 +6360,9 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     final played = _detail?.played ?? false;
     final ticks = _detail?.playbackPositionTicks ?? 0;
     final hasResume = ticks > 0 && !played;
-    final playLabel =
-        hasResume ? '继续播放（${_fmtClock(_ticksToDuration(ticks))}）' : (played ? '重播' : '播放');
+    final playLabel = hasResume
+        ? '继续播放（${_fmtClock(_ticksToDuration(ticks))}）'
+        : (played ? '重播' : '播放');
     final runtime = ep.runTimeTicks != null
         ? Duration(microseconds: (ep.runTimeTicks! / 10).round())
         : null;
@@ -6401,7 +6457,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                     thumbUrl,
                                     fit: BoxFit.cover,
                                     headers: {
-                                      'User-Agent': LinHttpClientFactory.userAgent
+                                      'User-Agent':
+                                          LinHttpClientFactory.userAgent
                                     },
                                     errorBuilder: (_, __, ___) =>
                                         const ColoredBox(color: Colors.black26),
@@ -6424,18 +6481,18 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                               style: (wide
                                       ? theme.textTheme.headlineMedium
                                       : theme.textTheme.headlineSmall)
-                                   ?.copyWith(
-                                     color: heroTextColor,
-                                      fontWeight: FontWeight.w700,
-                                   ),
+                                  ?.copyWith(
+                                color: heroTextColor,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                             const SizedBox(height: 6),
                             Text(
                               _episodeLine(ep),
                               style: theme.textTheme.titleLarge?.copyWith(
-                                    color: heroTextColor,
-                                    fontWeight: FontWeight.w700,
-                                  ),
+                                color: heroTextColor,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                             const SizedBox(height: 8),
                             Wrap(
@@ -6448,7 +6505,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                           horizontal: 8, vertical: 4),
                                       decoration: BoxDecoration(
                                         color: heroMetaBg,
-                                        border: Border.all(color: heroMetaBorder),
+                                        border:
+                                            Border.all(color: heroMetaBorder),
                                         borderRadius:
                                             BorderRadius.circular(999),
                                       ),
@@ -6464,8 +6522,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                             const SizedBox(height: 12),
                             Text(
                               '视频：${_currentVideoText()}',
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: heroTextColor),
+                              style: theme.textTheme.bodyMedium
+                                  ?.copyWith(color: heroTextColor),
                             ),
                             const SizedBox(height: 6),
                             if (ms != null)
@@ -6532,8 +6590,9 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                   label: playLabel,
                                   primary: true,
                                   onTap: () => _playCurrentEpisode(
-                                    startPosition:
-                                        hasResume ? _ticksToDuration(ticks) : null,
+                                    startPosition: hasResume
+                                        ? _ticksToDuration(ticks)
+                                        : null,
                                   ),
                                 ),
                                 _episodeActionButton(
@@ -6541,8 +6600,9 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                       ? Icons.check_circle
                                       : Icons.radio_button_unchecked,
                                   label: played ? '已播放' : '未播放',
-                                  onTap:
-                                      _markBusy ? null : _toggleEpisodePlayedMark,
+                                  onTap: _markBusy
+                                      ? null
+                                      : _toggleEpisodePlayedMark,
                                 ),
                                 _episodeActionButton(
                                   icon: _localFavorite
@@ -6560,7 +6620,9 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                 ),
                               ],
                             ),
-                            if ((_detail?.overview ?? '').trim().isNotEmpty) ...[
+                            if ((_detail?.overview ?? '')
+                                .trim()
+                                .isNotEmpty) ...[
                               const SizedBox(height: 12),
                               Text(
                                 _detail!.overview,
@@ -6641,7 +6703,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                       spacing: 8,
                       runSpacing: 8,
                       children: _chapters
-                          .map((c) => Chip(label: Text('${c.name} ${_fmt(c.start)}')))
+                          .map((c) =>
+                              Chip(label: Text('${c.name} ${_fmt(c.start)}')))
                           .toList(),
                     ),
                   ],
@@ -6651,6 +6714,24 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                       context,
                       _playInfo!,
                       selectedMediaSourceId: _selectedMediaSourceId,
+                    ),
+                  ],
+                  if (currentPluginTarget() == PluginTarget.pc) ...[
+                    const SizedBox(height: _DetailUiTokens.sectionGap),
+                    PluginSlotArea(
+                      appState: widget.appState,
+                      slotId: 'detail.sections.bottom',
+                      params: <String, Object?>{
+                        'page': 'detail',
+                        'itemId': _episode.id,
+                        'title': _episode.name,
+                        if (_detail != null)
+                          'item': <String, Object?>{
+                            'id': _detail!.id,
+                            'name': _detail!.name,
+                            'type': _detail!.type,
+                          },
+                      },
                     ),
                   ],
                 ],
@@ -6735,8 +6816,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         episodesCacheForUi[selectedSeasonId] = items;
       }
 
-      final shouldPreload =
-          widget.appState.preloadEnabled &&
+      final shouldPreload = widget.appState.preloadEnabled &&
           !StreamPreloadService.instance.permanentlyDisabled;
       if (shouldPreload &&
           selectedSeasonId != null &&
@@ -7193,13 +7273,15 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                         _DetailUiTokens.cardRadius,
                                       ),
                                       child: img.isEmpty
-                                          ? const ColoredBox(color: Colors.black26)
+                                          ? const ColoredBox(
+                                              color: Colors.black26)
                                           : Image.network(
                                               img,
                                               fit: BoxFit.cover,
                                               headers: {
                                                 'User-Agent':
-                                                    LinHttpClientFactory.userAgent
+                                                    LinHttpClientFactory
+                                                        .userAgent
                                               },
                                               errorBuilder: (_, __, ___) =>
                                                   const ColoredBox(
@@ -7215,7 +7297,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                             end: Alignment.bottomCenter,
                                             colors: [
                                               Colors.transparent,
-                                              Colors.black.withValues(alpha: 0.8),
+                                              Colors.black
+                                                  .withValues(alpha: 0.8),
                                             ],
                                           ),
                                         ),
@@ -7328,9 +7411,10 @@ Widget _chaptersSection(BuildContext context, List<ChapterInfo> chapters) {
                         const SizedBox(height: 4),
                         Text(
                           _fmt(c.start),
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: Colors.white70,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: Colors.white70,
+                                  ),
                         ),
                       ],
                     ),
@@ -7429,8 +7513,7 @@ Widget _withHorizontalEdgeFade(
   double fadeWidth = 18,
 }) {
   final isDark = Theme.of(context).brightness == Brightness.dark;
-  final background =
-      Colors.black.withValues(alpha: isDark ? 0.42 : 0.34);
+  final background = Colors.black.withValues(alpha: isDark ? 0.42 : 0.34);
   return Stack(
     children: [
       Positioned.fill(child: child),
@@ -7549,7 +7632,8 @@ Widget _peopleSection(
                   children: [
                     CircleAvatar(
                       radius: 42,
-                      backgroundImage: img.isNotEmpty ? NetworkImage(img) : null,
+                      backgroundImage:
+                          img.isNotEmpty ? NetworkImage(img) : null,
                       backgroundColor: avatarBg,
                       child: img.isEmpty
                           ? Text(p.name.isNotEmpty ? p.name[0] : '?')
@@ -7615,7 +7699,8 @@ Widget _castSection(
                     children: [
                       CircleAvatar(
                         radius: 42,
-                        backgroundImage: img.isNotEmpty ? NetworkImage(img) : null,
+                        backgroundImage:
+                            img.isNotEmpty ? NetworkImage(img) : null,
                         backgroundColor: avatarBg,
                         child: img.isEmpty
                             ? Text(p.name.isNotEmpty ? p.name[0] : '?')
@@ -7856,7 +7941,7 @@ Widget _externalLinksSection(
     final opened = await launchUrlString(url);
     if (!opened && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('无法打开链接')),
+        const SnackBar(content: Text('无法打开链接')),
       );
     }
   }

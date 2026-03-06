@@ -165,6 +165,9 @@ class PluginPageContributionV1 {
     required this.targets,
     required this.render,
     required this.onEvent,
+    this.icon,
+    this.order = 0,
+    this.entry = false,
   });
 
   factory PluginPageContributionV1.fromJson(
@@ -179,6 +182,9 @@ class PluginPageContributionV1 {
     final route = (json['route'] as String? ?? '').trim();
     final render = (json['render'] as String? ?? '').trim();
     final onEvent = (json['onEvent'] as String? ?? '').trim();
+    final icon = (json['icon'] as String? ?? '').trim();
+    final order = json['order'] as int? ?? 0;
+    final entry = json['entry'] as bool? ?? false;
     if (id.isEmpty) {
       throw PluginInstallException('manifest.contributions.pages[].id 不能为空');
     }
@@ -199,6 +205,9 @@ class PluginPageContributionV1 {
     if (onEvent.isEmpty) {
       throw PluginInstallException(
           'manifest.contributions.pages[].onEvent 不能为空');
+    }
+    if (icon.isNotEmpty) {
+      _validateRelativePath(icon);
     }
 
     final targetsRaw = json['targets'];
@@ -243,6 +252,9 @@ class PluginPageContributionV1 {
       targets: effectiveTargets,
       render: render,
       onEvent: onEvent,
+      icon: icon.isEmpty ? null : icon,
+      order: order,
+      entry: entry,
     );
   }
 
@@ -252,28 +264,141 @@ class PluginPageContributionV1 {
   final Set<PluginTarget> targets;
   final String render;
   final String onEvent;
+  final String? icon; // relative path in plugin files
+  final int order;
+  final bool entry;
+}
+
+class PluginSlotContributionV1 {
+  PluginSlotContributionV1({
+    required this.id,
+    required this.title,
+    required this.slotId,
+    required this.targets,
+    required this.render,
+    required this.onEvent,
+    this.priority = 0,
+  });
+
+  factory PluginSlotContributionV1.fromJson(
+    Object? json, {
+    required Set<PluginTarget> defaultTargets,
+  }) {
+    if (json is! Map) {
+      throw PluginInstallException('manifest.contributions.slots[] 格式错误（不是对象）');
+    }
+    final id = (json['id'] as String? ?? '').trim();
+    final title = (json['title'] as String? ?? '').trim();
+    final slotId = (json['slotId'] as String? ?? '').trim();
+    final render = (json['render'] as String? ?? '').trim();
+    final onEvent = (json['onEvent'] as String? ?? '').trim();
+    final priority = json['priority'] as int? ?? 0;
+    if (id.isEmpty) {
+      throw PluginInstallException('manifest.contributions.slots[].id 不能为空');
+    }
+    if (title.isEmpty) {
+      throw PluginInstallException('manifest.contributions.slots[].title 不能为空');
+    }
+    if (slotId.isEmpty) {
+      throw PluginInstallException(
+          'manifest.contributions.slots[].slotId 不能为空');
+    }
+    if (render.isEmpty) {
+      throw PluginInstallException(
+          'manifest.contributions.slots[].render 不能为空');
+    }
+    if (onEvent.isEmpty) {
+      throw PluginInstallException(
+          'manifest.contributions.slots[].onEvent 不能为空');
+    }
+
+    final targetsRaw = json['targets'];
+    final targets = <PluginTarget>{};
+    if (targetsRaw == null) {
+      // Fall back to manifest targets.
+    } else if (targetsRaw is List) {
+      for (final v in targetsRaw) {
+        final s = (v as String? ?? '').trim().toLowerCase();
+        switch (s) {
+          case 'tv':
+            targets.add(PluginTarget.tv);
+          case 'mobile':
+            targets.add(PluginTarget.mobile);
+          case 'pc':
+            targets.add(PluginTarget.pc);
+        }
+      }
+      if (targets.isEmpty) {
+        throw PluginInstallException(
+            'manifest.contributions.slots[].targets 格式错误');
+      }
+    } else {
+      throw PluginInstallException(
+          'manifest.contributions.slots[].targets 格式错误（不是数组）');
+    }
+    final effectiveTargets = targets.isEmpty ? defaultTargets : targets;
+    if (effectiveTargets.isEmpty) {
+      throw PluginInstallException(
+          'manifest.contributions.slots[].targets 不能为空');
+    }
+    if (effectiveTargets.any((t) => !defaultTargets.contains(t))) {
+      throw PluginInstallException(
+        'manifest.contributions.slots[].targets 必须是 manifest.targets 的子集',
+      );
+    }
+
+    return PluginSlotContributionV1(
+      id: id,
+      title: title,
+      slotId: slotId,
+      targets: effectiveTargets,
+      render: render,
+      onEvent: onEvent,
+      priority: priority,
+    );
+  }
+
+  final String id;
+  final String title;
+  final String slotId;
+  final Set<PluginTarget> targets;
+  final String render;
+  final String onEvent;
+  final int priority;
 }
 
 class PluginContributionsV1 {
-  PluginContributionsV1({required this.pages});
+  PluginContributionsV1({required this.pages, required this.slots});
 
   factory PluginContributionsV1.fromJson(
     Object? json, {
     required Set<PluginTarget> defaultTargets,
   }) {
-    if (json is! Map) return PluginContributionsV1(pages: const []);
-    final pagesRaw = json['pages'];
-    if (pagesRaw is! List || pagesRaw.isEmpty) {
-      return PluginContributionsV1(pages: const []);
+    if (json is! Map) {
+      return PluginContributionsV1(pages: const [], slots: const []);
     }
-    final pages = pagesRaw
-        .map((e) => PluginPageContributionV1.fromJson(e,
-            defaultTargets: defaultTargets))
-        .toList(growable: false);
-    return PluginContributionsV1(pages: pages);
+
+    final pagesRaw = json['pages'];
+    final pages = (pagesRaw is List && pagesRaw.isNotEmpty)
+        ? pagesRaw
+            .map((e) => PluginPageContributionV1.fromJson(e,
+                defaultTargets: defaultTargets))
+            .toList(growable: false)
+        : const <PluginPageContributionV1>[];
+
+    final slotsRaw = json['slots'];
+    final slots = (slotsRaw is List && slotsRaw.isNotEmpty)
+        ? slotsRaw
+            .map((e) => PluginSlotContributionV1.fromJson(e,
+                defaultTargets: defaultTargets))
+            .toList(growable: false)
+        : const <PluginSlotContributionV1>[];
+
+    return PluginContributionsV1(pages: pages, slots: slots);
   }
 
   final List<PluginPageContributionV1> pages;
+  final List<PluginSlotContributionV1> slots;
 }
 
 class PluginManifestV1 {
@@ -441,6 +566,7 @@ class PluginManagerV1 {
   PluginManagerV1._();
 
   static final PluginManagerV1 instance = PluginManagerV1._();
+  static final ValueNotifier<int> revision = ValueNotifier<int>(0);
 
   static const _prefsKey = 'linplayer.plugins.installed.v1';
 
@@ -485,6 +611,7 @@ class PluginManagerV1 {
       _prefsKey,
       jsonEncode(plugins.map((e) => e.toJson()).toList(growable: false)),
     );
+    revision.value++;
   }
 
   Future<PluginManifestV1> loadManifest(InstalledPluginV1 plugin) async {

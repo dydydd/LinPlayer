@@ -17,11 +17,13 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'plugins/plugin_slot_area.dart';
 import 'play_network_page_exo.dart';
 import 'server_adapters/server_access.dart';
 import 'services/app_route_observer.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/desktop_window.dart';
+import 'services/plugins/plugin_manager.dart';
 import 'services/playback_proxy/playback_proxy.dart';
 import 'tv/tv_focusable.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
@@ -263,7 +265,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   String? _episodeSelectedSeasonId;
   final Map<String, List<MediaItem>> _episodeEpisodesCache = {};
   final Map<String, Future<List<MediaItem>>> _episodeEpisodesFutureCache = {};
-  final Map<String, Future<_EpisodeMediaSpec>> _episodeMediaSpecFutureCache = {};
+  final Map<String, Future<_EpisodeMediaSpec>> _episodeMediaSpecFutureCache =
+      {};
 
   @override
   void initState() {
@@ -2381,9 +2384,12 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       final pathUri = (sourcePath == null || sourcePath.isEmpty)
           ? null
           : Uri.tryParse(sourcePath);
-      if (pathUri != null && pathUri.scheme.isNotEmpty && pathUri.host.isNotEmpty) {
-        final isHttp = (pathUri.scheme == 'http' || pathUri.scheme == 'https') &&
-            pathUri.host.isNotEmpty;
+      if (pathUri != null &&
+          pathUri.scheme.isNotEmpty &&
+          pathUri.host.isNotEmpty) {
+        final isHttp =
+            (pathUri.scheme == 'http' || pathUri.scheme == 'https') &&
+                pathUri.host.isNotEmpty;
         if (isHttp) {
           final url = shouldApplyServerParams(pathUri)
               ? applyQueryPrefs(pathUri.toString())
@@ -5455,6 +5461,18 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                               icon: Icon(_orientationIcon),
                               onPressed: _cycleOrientationMode,
                             ),
+                            if (currentPluginTarget() == PluginTarget.pc)
+                              PluginSlotArea(
+                                appState: widget.appState,
+                                slotId: 'player.appbar.trailing',
+                                axis: Axis.horizontal,
+                                gap: 6,
+                                params: <String, Object?>{
+                                  'page': 'player',
+                                  'itemId': widget.itemId,
+                                  'title': widget.title,
+                                },
+                              ),
                             PopupMenuButton<_PlayerMenuAction>(
                               tooltip: '更多',
                               icon: const Icon(Icons.more_vert),

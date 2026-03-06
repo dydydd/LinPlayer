@@ -17,9 +17,11 @@ import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import 'plugins/plugin_slot_area.dart';
 import 'services/app_route_observer.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/desktop_window.dart';
+import 'services/plugins/plugin_manager.dart';
 import 'services/playback_proxy/playback_proxy.dart';
 import 'services/strm/strm_resolver.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
@@ -511,8 +513,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     final key = event.logicalKey;
 
-    final shortcuts =
-        widget.appState?.desktopShortcutBindings ?? DesktopShortcutBindings.defaults;
+    final shortcuts = widget.appState?.desktopShortcutBindings ??
+        DesktopShortcutBindings.defaults;
     final playPauseBinding =
         shortcuts.bindingOf(DesktopShortcutAction.playPause);
 
@@ -563,7 +565,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     final isDownOrRepeat = event is KeyDownEvent || event is KeyRepeatEvent;
     if (isDownOrRepeat && matches(DesktopShortcutAction.volumeUp)) {
       _showControls();
-      _desktopAdjustLevelByKey(target: _DesktopLevelTarget.volume, direction: 1);
+      _desktopAdjustLevelByKey(
+          target: _DesktopLevelTarget.volume, direction: 1);
       return KeyEventResult.handled;
     }
     if (isDownOrRepeat && matches(DesktopShortcutAction.volumeDown)) {
@@ -1192,8 +1195,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (!_gesturesEnabled) return;
     if (_playerService.isExternalPlayback) return;
 
-    final shortcuts =
-        widget.appState?.desktopShortcutBindings ?? DesktopShortcutBindings.defaults;
+    final shortcuts = widget.appState?.desktopShortcutBindings ??
+        DesktopShortcutBindings.defaults;
     final backDown = (event.buttons & kBackMouseButton) != 0;
     final forwardDown = (event.buttons & kForwardMouseButton) != 0;
     if (!backDown && !forwardDown) return;
@@ -1662,7 +1665,8 @@ class _PlayerScreenState extends State<PlayerScreen>
               if (proxyReady) return BuiltInProxyService.proxyUrlForUri(uri);
               final appState = widget.appState;
               if (appState == null) return null;
-              return resolvePlaybackHttpProxyForUri(appState: appState, uri: uri);
+              return resolvePlaybackHttpProxyForUri(
+                  appState: appState, uri: uri);
             })()
           : null;
 
@@ -2705,6 +2709,18 @@ class _PlayerScreenState extends State<PlayerScreen>
                                 icon: Icon(_orientationIcon),
                                 onPressed: _cycleOrientationMode,
                               ),
+                              if (widget.appState != null &&
+                                  currentPluginTarget() == PluginTarget.pc)
+                                PluginSlotArea(
+                                  appState: widget.appState!,
+                                  slotId: 'player.appbar.trailing',
+                                  axis: Axis.horizontal,
+                                  gap: 6,
+                                  params: <String, Object?>{
+                                    'page': 'player.local',
+                                    'fileName': currentFileName,
+                                  },
+                                ),
                               IconButton(
                                 icon: const Icon(Icons.folder_open),
                                 onPressed: _pickFile,
@@ -2803,8 +2819,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                                             _gestureBrightnessEnabled ||
                                                 _gestureVolumeEnabled;
                                         return Listener(
-                                          behavior:
-                                              HitTestBehavior.translucent,
+                                          behavior: HitTestBehavior.translucent,
                                           onPointerDown: (e) {
                                             _onDesktopMouseSideButtonPointerDown(
                                               e,
@@ -2860,17 +2875,17 @@ class _PlayerScreenState extends State<PlayerScreen>
                                                 (_gesturesEnabled &&
                                                         sideDragEnabled)
                                                     ? (d) => _onSideDragStart(
-                                                        d,
-                                                        width: w,
-                                                      )
+                                                          d,
+                                                          width: w,
+                                                        )
                                                     : null,
                                             onVerticalDragUpdate:
                                                 (_gesturesEnabled &&
                                                         sideDragEnabled)
                                                     ? (d) => _onSideDragUpdate(
-                                                        d,
-                                                        height: h,
-                                                      )
+                                                          d,
+                                                          height: h,
+                                                        )
                                                     : null,
                                             onVerticalDragEnd:
                                                 (_gesturesEnabled &&
@@ -2892,11 +2907,10 @@ class _PlayerScreenState extends State<PlayerScreen>
                                                           height: h,
                                                         )
                                                     : null,
-                                            onLongPressEnd:
-                                                (_gesturesEnabled &&
-                                                        _gestureLongPressEnabled)
-                                                    ? _onLongPressEnd
-                                                    : null,
+                                            onLongPressEnd: (_gesturesEnabled &&
+                                                    _gestureLongPressEnabled)
+                                                ? _onLongPressEnd
+                                                : null,
                                             child: const SizedBox.expand(),
                                           ),
                                         );
@@ -3542,8 +3556,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                               ? () => _showControls()
                               : _toggleControls,
                           onDoubleTapDown: _gesturesEnabled
-                              ? (d) =>
-                                  _doubleTapDownPosition = d.localPosition
+                              ? (d) => _doubleTapDownPosition = d.localPosition
                               : null,
                           onDoubleTap: _gesturesEnabled
                               ? () {
@@ -3569,14 +3582,14 @@ class _PlayerScreenState extends State<PlayerScreen>
                               (_gesturesEnabled && _gestureSeekEnabled)
                                   ? _onSeekDragEnd
                                   : null,
-                          onVerticalDragStart: (_gesturesEnabled &&
-                                  sideDragEnabled)
-                              ? (d) => _onSideDragStart(d, width: w)
-                              : null,
-                          onVerticalDragUpdate: (_gesturesEnabled &&
-                                  sideDragEnabled)
-                              ? (d) => _onSideDragUpdate(d, height: h)
-                              : null,
+                          onVerticalDragStart:
+                              (_gesturesEnabled && sideDragEnabled)
+                                  ? (d) => _onSideDragStart(d, width: w)
+                                  : null,
+                          onVerticalDragUpdate:
+                              (_gesturesEnabled && sideDragEnabled)
+                                  ? (d) => _onSideDragUpdate(d, height: h)
+                                  : null,
                           onVerticalDragEnd:
                               (_gesturesEnabled && sideDragEnabled)
                                   ? _onSideDragEnd
@@ -4136,9 +4149,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     final info = hasCurrent
         ? _desktopEpisodeInfoForIndex(_currentlyPlayingIndex)
         : _desktopEpisodeInfoForFile(currentFileName);
-    final centerText = hasCurrent
-        ? '${info.mark} ${info.title}'.trim()
-        : currentFileName;
+    final centerText =
+        hasCurrent ? '${info.mark} ${info.title}'.trim() : currentFileName;
     final canPop = Navigator.of(context).canPop();
     final netSpeed = _desktopNetSpeedMbPerSecondLabel();
 
@@ -4249,7 +4261,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                       label: '字幕',
                       active: _desktopSidePanel == _DesktopSidePanel.subtitle,
                       onTap: _playerService.isInitialized
-                          ? () => _toggleDesktopPanel(_DesktopSidePanel.subtitle)
+                          ? () =>
+                              _toggleDesktopPanel(_DesktopSidePanel.subtitle)
                           : null,
                     ),
                     const SizedBox(width: 8),
@@ -4273,7 +4286,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                       label: 'Anime4K',
                       active: _desktopSidePanel == _DesktopSidePanel.anime4k ||
                           !_anime4kPreset.isOff,
-                      onTap: () => _toggleDesktopPanel(_DesktopSidePanel.anime4k),
+                      onTap: () =>
+                          _toggleDesktopPanel(_DesktopSidePanel.anime4k),
                     ),
                   ],
                 ),
@@ -5530,7 +5544,8 @@ class _PlayerScreenState extends State<PlayerScreen>
           cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
           child: Listener(
             behavior: HitTestBehavior.translucent,
-            onPointerDown: enabled ? (_) => _setDesktopLevelTarget(target) : null,
+            onPointerDown:
+                enabled ? (_) => _setDesktopLevelTarget(target) : null,
             child: Row(
               children: [
                 Icon(icon, size: 16, color: iconColor),
@@ -6182,7 +6197,15 @@ enum _GestureMode { none, brightness, volume, seek, speed }
 
 enum _DesktopLevelTarget { volume, brightness }
 
-enum _DesktopSidePanel { none, line, audio, subtitle, danmaku, episode, anime4k }
+enum _DesktopSidePanel {
+  none,
+  line,
+  audio,
+  subtitle,
+  danmaku,
+  episode,
+  anime4k
+}
 
 extension on _DesktopSidePanel {
   String get title {
