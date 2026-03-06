@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 
 import '../services/plugins/plugin_manager.dart';
 import '../services/plugins/plugin_runtime_v1.dart';
@@ -60,16 +59,19 @@ class _PluginPageHostPageState extends State<PluginPageHostPage> {
       _loading = true;
       _error = null;
     });
+    PluginRuntimeV1? rt;
     try {
-      final rt = PluginRuntimeV1(plugin: widget.plugin, manifest: widget.manifest);
+      rt = PluginRuntimeV1(plugin: widget.plugin, manifest: widget.manifest);
       await rt.init();
       if (!mounted) {
         await rt.dispose();
         return;
       }
       setState(() => _runtime = rt);
+      rt = null;
       await _render();
     } catch (e) {
+      unawaited(rt?.dispose());
       if (!mounted) return;
       setState(() => _error = e.toString());
     } finally {
@@ -102,7 +104,8 @@ class _PluginPageHostPageState extends State<PluginPageHostPage> {
     final title = (res['title'] as String? ?? '').trim();
     final stateRaw = res['state'];
     final schema = res['schema'];
-    final state = stateRaw is Map ? Map<String, Object?>.from(stateRaw) : _state;
+    final state =
+        stateRaw is Map ? Map<String, Object?>.from(stateRaw) : _state;
     setState(() {
       _pageTitle = title.isEmpty ? null : title;
       _state = state;
@@ -149,13 +152,15 @@ class _PluginPageHostPageState extends State<PluginPageHostPage> {
         case 'toast':
           final message = (a['message'] as String? ?? '').trim();
           if (!mounted || message.isEmpty) continue;
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(message)));
           break;
         case 'navigate':
           final route = (a['route'] as String? ?? '').trim();
           final paramsRaw = a['params'];
-          final params =
-              paramsRaw is Map ? Map<String, Object?>.from(paramsRaw) : const <String, Object?>{};
+          final params = paramsRaw is Map
+              ? Map<String, Object?>.from(paramsRaw)
+              : const <String, Object?>{};
           if (route.isEmpty) continue;
           await _navigateTo(route, params);
           break;
@@ -262,7 +267,7 @@ class _PluginPageHostPageState extends State<PluginPageHostPage> {
                 height: 1,
                 child: Opacity(
                   opacity: 0,
-                  child: WebViewWidget(controller: rt.controller),
+                  child: rt.buildView(),
                 ),
               ),
             ),

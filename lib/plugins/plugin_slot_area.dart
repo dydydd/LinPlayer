@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:lin_player_state/lin_player_state.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 
 import '../services/plugins/plugin_manager.dart';
 import '../services/plugins/plugin_runtime_v1.dart';
@@ -223,17 +222,19 @@ class _PluginSlotHostState extends State<_PluginSlotHost> {
       _loading = true;
       _error = null;
     });
+    PluginRuntimeV1? rt;
     try {
-      final rt =
-          PluginRuntimeV1(plugin: widget.plugin, manifest: widget.manifest);
+      rt = PluginRuntimeV1(plugin: widget.plugin, manifest: widget.manifest);
       await rt.init();
       if (!mounted) {
         await rt.dispose();
         return;
       }
       setState(() => _runtime = rt);
+      rt = null;
       await _render();
     } catch (e) {
+      unawaited(rt?.dispose());
       if (!mounted) return;
       setState(() => _error = e.toString());
     } finally {
@@ -430,7 +431,7 @@ class _PluginSlotHostState extends State<_PluginSlotHost> {
             height: 1,
             child: Opacity(
               opacity: 0,
-              child: WebViewWidget(controller: rt.controller),
+              child: rt.buildView(),
             ),
           ),
         ),

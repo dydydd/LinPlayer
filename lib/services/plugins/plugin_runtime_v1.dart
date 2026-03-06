@@ -3,10 +3,12 @@ import 'dart:convert';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_windows/webview_windows.dart' as webview_windows;
 
 import 'plugin_manager.dart';
 
@@ -25,8 +27,100 @@ bool pluginRuntimeSupportedV1() {
     TargetPlatform.android => true,
     TargetPlatform.iOS => true,
     TargetPlatform.macOS => true,
+    TargetPlatform.windows => true,
     _ => false,
   };
+}
+
+abstract class _PluginWebBackendV1 {
+  Future<void> init(
+    String html, {
+    required ValueChanged<Object?> onMessage,
+  });
+
+  Future<void> runJavaScript(String js);
+
+  Widget buildView();
+
+  Future<void> dispose();
+}
+
+class _FlutterWebBackendV1 implements _PluginWebBackendV1 {
+  _FlutterWebBackendV1({required this.channelName});
+
+  final String channelName;
+
+  final WebViewController _controller = WebViewController();
+
+  @override
+  Future<void> init(
+    String html, {
+    required ValueChanged<Object?> onMessage,
+  }) async {
+    await _controller.setJavaScriptMode(JavaScriptMode.unrestricted);
+    await _controller.setBackgroundColor(const Color(0x00000000));
+    _controller.setNavigationDelegate(
+      NavigationDelegate(
+        onNavigationRequest: (req) => NavigationDecision.prevent,
+      ),
+    );
+    _controller.addJavaScriptChannel(
+      channelName,
+      onMessageReceived: (msg) => onMessage(msg.message),
+    );
+    await _controller.loadHtmlString(html);
+  }
+
+  @override
+  Future<void> runJavaScript(String js) => _controller.runJavaScript(js);
+
+  @override
+  Widget buildView() => WebViewWidget(controller: _controller);
+
+  @override
+  Future<void> dispose() async {}
+}
+
+class _WindowsWebBackendV1 implements _PluginWebBackendV1 {
+  final webview_windows.WebviewController _controller =
+      webview_windows.WebviewController();
+
+  StreamSubscription? _sub;
+
+  @override
+  Future<void> init(
+    String html, {
+    required ValueChanged<Object?> onMessage,
+  }) async {
+    final version = await webview_windows.WebviewController.getWebViewVersion();
+    if (version == null || version.trim().isEmpty) {
+      throw PluginRuntimeException(
+        '未检测到 WebView2 Runtime，请先安装后重启软件：'
+        'https://developer.microsoft.com/microsoft-edge/webview2/',
+      );
+    }
+
+    await _controller.initialize();
+    await _controller
+        .setPopupWindowPolicy(webview_windows.WebviewPopupWindowPolicy.deny);
+    await _controller.setBackgroundColor(const Color(0x00000000));
+    _sub = _controller.webMessage.listen(onMessage, onError: (_) {});
+    await _controller.loadStringContent(html);
+  }
+
+  @override
+  Future<void> runJavaScript(String js) async {
+    await _controller.executeScript(js);
+  }
+
+  @override
+  Widget buildView() => webview_windows.Webview(_controller);
+
+  @override
+  Future<void> dispose() async {
+    await _sub?.cancel();
+    await _controller.dispose();
+  }
 }
 
 class PluginRuntimeV1 {
@@ -42,7 +136,13 @@ class PluginRuntimeV1 {
   final PluginManifestV1 manifest;
   final PluginTarget target;
 
-  final WebViewController controller = WebViewController();
+  _PluginWebBackendV1? _backend;
+
+  Widget buildView() {
+    final backend = _backend;
+    if (backend == null) return const SizedBox.shrink();
+    return backend.buildView();
+  }
 
   final Completer<void> _ready = Completer<void>();
   final Map<String, Completer<Object?>> _pendingHostCalls = {};
@@ -57,8 +157,15 @@ class PluginRuntimeV1 {
         '当前平台暂不支持脚本插件运行（需要 WebView 支持）',
       );
     }
+
+    final backend = (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows)
+        ? _WindowsWebBackendV1()
+        : _FlutterWebBackendV1(channelName: _channelName);
+    _backend = backend;
+
     final entryRel = manifest.entry.entryForTarget(target).script;
-    final entryFile = await PluginManagerV1.instance.pluginFile(plugin, entryRel);
+    final entryFile =
+        await PluginManagerV1.instance.pluginFile(plugin, entryRel);
     if (!await entryFile.exists()) {
       throw PluginRuntimeException('入口脚本不存在：$entryRel');
     }
@@ -67,19 +174,10 @@ class PluginRuntimeV1 {
     final ctx = await _buildInitialCtx();
     final html = _buildHtml(entryBytes, ctx);
 
-    await controller.setJavaScriptMode(JavaScriptMode.unrestricted);
-    await controller.setBackgroundColor(const Color(0x00000000));
-    controller.setNavigationDelegate(
-      NavigationDelegate(
-        onNavigationRequest: (req) => NavigationDecision.prevent,
-      ),
+    await backend.init(
+      html,
+      onMessage: (msg) => unawaited(_handleJsMessage(msg)),
     );
-    controller.addJavaScriptChannel(
-      _channelName,
-      onMessageReceived: (msg) => unawaited(_handleJsMessage(msg.message)),
-    );
-
-    await controller.loadHtmlString(html);
 
     await _ready.future.timeout(const Duration(seconds: 12));
   }
@@ -91,6 +189,8 @@ class PluginRuntimeV1 {
     }
     _pendingHostCalls.clear();
     _client.close();
+    await _backend?.dispose();
+    _backend = null;
   }
 
   Future<Object?> call(
@@ -111,7 +211,9 @@ class PluginRuntimeV1 {
       ..write(',')
       ..write(jsonEncode(args))
       ..write(');');
-    await controller.runJavaScript(js.toString());
+    final backend = _backend;
+    if (backend == null) throw PluginRuntimeException('运行时未初始化');
+    await backend.runJavaScript(js.toString());
     try {
       return await completer.future.timeout(timeout);
     } finally {
@@ -123,7 +225,8 @@ class PluginRuntimeV1 {
     String hostVersion = '0.0.0';
     try {
       final info = await PackageInfo.fromPlatform();
-      hostVersion = info.version.trim().isEmpty ? hostVersion : info.version.trim();
+      hostVersion =
+          info.version.trim().isEmpty ? hostVersion : info.version.trim();
     } catch (_) {}
 
     final prefs = await SharedPreferences.getInstance();
@@ -162,7 +265,12 @@ class PluginRuntimeV1 {
 (function () {
   const CHANNEL = ${jsonEncode(_channelName)};
   function post(msg) {
-    try { window[CHANNEL].postMessage(JSON.stringify(msg)); } catch (_) {}
+    const raw = JSON.stringify(msg);
+    try { window[CHANNEL].postMessage(raw); return; } catch (_) {}
+    try {
+      const wv = window.chrome && window.chrome.webview;
+      if (wv && typeof wv.postMessage === 'function') wv.postMessage(raw);
+    } catch (_) {}
   }
   window.__lp_post = post;
 
@@ -246,13 +354,17 @@ class PluginRuntimeV1 {
 ''';
   }
 
-  Future<void> _handleJsMessage(String raw) async {
+  Future<void> _handleJsMessage(Object? raw) async {
     if (_disposed) return;
     Object? decoded;
-    try {
-      decoded = jsonDecode(raw);
-    } catch (_) {
-      return;
+    if (raw is String) {
+      try {
+        decoded = jsonDecode(raw);
+      } catch (_) {
+        return;
+      }
+    } else {
+      decoded = raw;
     }
     if (decoded is! Map) return;
     final type = (decoded['type'] as String? ?? '').trim();
@@ -327,7 +439,9 @@ class PluginRuntimeV1 {
       ..write(',')
       ..write(jsonEncode(payload))
       ..write(');');
-    await controller.runJavaScript(js.toString());
+    final backend = _backend;
+    if (backend == null) return;
+    await backend.runJavaScript(js.toString());
   }
 
   bool _domainAllowed(String host) {
@@ -341,7 +455,9 @@ class PluginRuntimeV1 {
       if (h.endsWith('.$d')) return true;
       if (d.startsWith('*.')) {
         final suffix = d.substring(2);
-        if (suffix.isNotEmpty && (h == suffix || h.endsWith('.$suffix'))) return true;
+        if (suffix.isNotEmpty && (h == suffix || h.endsWith('.$suffix'))) {
+          return true;
+        }
       }
     }
     return false;
@@ -360,7 +476,9 @@ class PluginRuntimeV1 {
     } catch (_) {
       throw PluginRuntimeException('net.request.url 不是合法 URL');
     }
-    if (!uri.isAbsolute) throw PluginRuntimeException('net.request.url 必须是绝对 URL');
+    if (!uri.isAbsolute) {
+      throw PluginRuntimeException('net.request.url 必须是绝对 URL');
+    }
     if (uri.scheme != 'http' && uri.scheme != 'https') {
       throw PluginRuntimeException('net.request 仅支持 http/https');
     }
@@ -384,7 +502,8 @@ class PluginRuntimeV1 {
         ? Duration(milliseconds: timeoutMs)
         : const Duration(seconds: 15);
 
-    final responseType = (args['responseType'] as String? ?? 'text').trim().toLowerCase();
+    final responseType =
+        (args['responseType'] as String? ?? 'text').trim().toLowerCase();
 
     final request = http.Request(method, uri);
     request.headers.addAll(headers);
@@ -427,7 +546,8 @@ class PluginRuntimeV1 {
     };
   }
 
-  static String _storageKey(String pluginId) => 'linplayer.plugins.storage.v1.$pluginId';
+  static String _storageKey(String pluginId) =>
+      'linplayer.plugins.storage.v1.$pluginId';
 
   Future<Map<String, Object?>> _readStorage() async {
     final prefs = await SharedPreferences.getInstance();
