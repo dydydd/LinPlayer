@@ -16,6 +16,7 @@ import 'package:url_launcher/url_launcher_string.dart';
 
 import 'danmaku_settings_page.dart';
 import 'interaction_settings_page.dart';
+import 'plugins/plugins_page.dart';
 import 'server_text_import_sheet.dart';
 import 'services/app_update_flow.dart';
 import 'services/app_update_service.dart';
@@ -3325,6 +3326,24 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                       const Divider(height: 1),
                     ],
+                    tvFocusRow(
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.extension_outlined),
+                        title: const Text('插件'),
+                        subtitle: const Text('安装/管理脚本插件'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  PluginsPage(appState: widget.appState),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    const Divider(height: 1),
                     tvFocusRow(
                       ListTile(
                         contentPadding: EdgeInsets.zero,
