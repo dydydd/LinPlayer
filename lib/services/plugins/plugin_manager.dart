@@ -45,13 +45,15 @@ class PluginFileEntryV1 {
     final path = (json['path'] as String? ?? '').trim();
     final size = json['size'];
     final sha256 = (json['sha256'] as String? ?? '').trim().toLowerCase();
-    if (path.isEmpty) throw PluginInstallException('manifest.files[].path 不能为空');
+    if (path.isEmpty)
+      throw PluginInstallException('manifest.files[].path 不能为空');
     if (size is! int || size < 0) {
       throw PluginInstallException('manifest.files[].size 格式错误');
     }
     final sha256Re = RegExp(r'^[a-f0-9]{64}$');
     if (!sha256Re.hasMatch(sha256)) {
-      throw PluginInstallException('manifest.files[].sha256 格式错误（需 64 位小写十六进制）');
+      throw PluginInstallException(
+          'manifest.files[].sha256 格式错误（需 64 位小写十六进制）');
     }
     _validateRelativePath(path);
     return PluginFileEntryV1(path: path, size: size, sha256: sha256);
@@ -110,7 +112,8 @@ class PluginEntryTargetV1 {
       throw PluginInstallException('manifest.entry.<target> 格式错误（不是对象）');
     }
     final script = (json['script'] as String? ?? '').trim();
-    if (script.isEmpty) throw PluginInstallException('manifest.entry.<target>.script 不能为空');
+    if (script.isEmpty)
+      throw PluginInstallException('manifest.entry.<target>.script 不能为空');
     _validateRelativePath(script);
     return PluginEntryTargetV1(script: script);
   }
@@ -126,11 +129,13 @@ class PluginEntryV1 {
     PluginEntryTargetV1? tv;
     PluginEntryTargetV1? mobile;
     PluginEntryTargetV1? pc;
-    if (targets.contains(PluginTarget.tv)) tv = PluginEntryTargetV1.fromJson(json['tv']);
+    if (targets.contains(PluginTarget.tv))
+      tv = PluginEntryTargetV1.fromJson(json['tv']);
     if (targets.contains(PluginTarget.mobile)) {
       mobile = PluginEntryTargetV1.fromJson(json['mobile']);
     }
-    if (targets.contains(PluginTarget.pc)) pc = PluginEntryTargetV1.fromJson(json['pc']);
+    if (targets.contains(PluginTarget.pc))
+      pc = PluginEntryTargetV1.fromJson(json['pc']);
     return PluginEntryV1(tv: tv, mobile: mobile, pc: pc);
   }
 
@@ -173,14 +178,22 @@ class PluginPageContributionV1 {
     final route = (json['route'] as String? ?? '').trim();
     final render = (json['render'] as String? ?? '').trim();
     final onEvent = (json['onEvent'] as String? ?? '').trim();
-    if (id.isEmpty) throw PluginInstallException('manifest.contributions.pages[].id 不能为空');
-    if (title.isEmpty) throw PluginInstallException('manifest.contributions.pages[].title 不能为空');
-    if (route.isEmpty) throw PluginInstallException('manifest.contributions.pages[].route 不能为空');
+    if (id.isEmpty)
+      throw PluginInstallException('manifest.contributions.pages[].id 不能为空');
+    if (title.isEmpty)
+      throw PluginInstallException('manifest.contributions.pages[].title 不能为空');
+    if (route.isEmpty)
+      throw PluginInstallException('manifest.contributions.pages[].route 不能为空');
     if (!route.startsWith('/')) {
-      throw PluginInstallException('manifest.contributions.pages[].route 必须以 / 开头');
+      throw PluginInstallException(
+          'manifest.contributions.pages[].route 必须以 / 开头');
     }
-    if (render.isEmpty) throw PluginInstallException('manifest.contributions.pages[].render 不能为空');
-    if (onEvent.isEmpty) throw PluginInstallException('manifest.contributions.pages[].onEvent 不能为空');
+    if (render.isEmpty)
+      throw PluginInstallException(
+          'manifest.contributions.pages[].render 不能为空');
+    if (onEvent.isEmpty)
+      throw PluginInstallException(
+          'manifest.contributions.pages[].onEvent 不能为空');
 
     final targetsRaw = json['targets'];
     final targets = <PluginTarget>{};
@@ -199,14 +212,17 @@ class PluginPageContributionV1 {
         }
       }
       if (targets.isEmpty) {
-        throw PluginInstallException('manifest.contributions.pages[].targets 格式错误');
+        throw PluginInstallException(
+            'manifest.contributions.pages[].targets 格式错误');
       }
     } else {
-      throw PluginInstallException('manifest.contributions.pages[].targets 格式错误（不是数组）');
+      throw PluginInstallException(
+          'manifest.contributions.pages[].targets 格式错误（不是数组）');
     }
     final effectiveTargets = targets.isEmpty ? defaultTargets : targets;
     if (effectiveTargets.isEmpty) {
-      throw PluginInstallException('manifest.contributions.pages[].targets 不能为空');
+      throw PluginInstallException(
+          'manifest.contributions.pages[].targets 不能为空');
     }
     if (effectiveTargets.any((t) => !defaultTargets.contains(t))) {
       throw PluginInstallException(
@@ -245,7 +261,8 @@ class PluginContributionsV1 {
       return PluginContributionsV1(pages: const []);
     }
     final pages = pagesRaw
-        .map((e) => PluginPageContributionV1.fromJson(e, defaultTargets: defaultTargets))
+        .map((e) => PluginPageContributionV1.fromJson(e,
+            defaultTargets: defaultTargets))
         .toList(growable: false);
     return PluginContributionsV1(pages: pages);
   }
@@ -290,15 +307,18 @@ class PluginManifestV1 {
     final version = (decoded['version'] as String? ?? '').trim();
     final minHostVersion = (decoded['minHostVersion'] as String? ?? '').trim();
     if (!_validPluginId(id)) {
-      throw PluginInstallException('manifest.id 格式错误（建议反向域名，如 com.example.plugin）');
+      throw PluginInstallException(
+          'manifest.id 格式错误（建议反向域名，如 com.example.plugin）');
     }
     if (name.isEmpty) throw PluginInstallException('manifest.name 不能为空');
-    if (description.isEmpty) throw PluginInstallException('manifest.description 不能为空');
+    if (description.isEmpty)
+      throw PluginInstallException('manifest.description 不能为空');
     if (!_SemVer.tryParse(version).isValid) {
       throw PluginInstallException('manifest.version 不是合法 SemVer：$version');
     }
     if (!_SemVer.tryParse(minHostVersion).isValid) {
-      throw PluginInstallException('manifest.minHostVersion 不是合法 SemVer：$minHostVersion');
+      throw PluginInstallException(
+          'manifest.minHostVersion 不是合法 SemVer：$minHostVersion');
     }
 
     final targetsRaw = decoded['targets'];
@@ -326,10 +346,12 @@ class PluginManifestV1 {
     if (filesRaw is! List || filesRaw.isEmpty) {
       throw PluginInstallException('manifest.files 不能为空');
     }
-    final files = filesRaw.map(PluginFileEntryV1.fromJson).toList(growable: false);
+    final files =
+        filesRaw.map(PluginFileEntryV1.fromJson).toList(growable: false);
 
-    final contributions =
-        PluginContributionsV1.fromJson(decoded['contributions'], defaultTargets: targets);
+    final contributions = PluginContributionsV1.fromJson(
+        decoded['contributions'],
+        defaultTargets: targets);
 
     return PluginManifestV1(
       schemaVersion: schemaVersion,
@@ -479,7 +501,8 @@ class PluginManagerV1 {
         await dir.delete(recursive: true);
       }
     }
-    final next = installed.where((e) => e.id != pluginId).toList(growable: false);
+    final next =
+        installed.where((e) => e.id != pluginId).toList(growable: false);
     await _saveInstalled(next);
   }
 
@@ -639,7 +662,23 @@ Future<List<int>> _downloadBytes(http.Client client, Uri url) async {
     throw PluginInstallException('下载失败：$e');
   }
   if (res.statusCode < 200 || res.statusCode >= 300) {
-    throw PluginInstallException('下载失败：HTTP ${res.statusCode} (${url.toString()})');
+    throw PluginInstallException(
+        '下载失败：HTTP ${res.statusCode} (${url.toString()})');
+  }
+  return res.bodyBytes;
+}
+
+Future<List<int>?> _downloadBytesOptional(http.Client client, Uri url) async {
+  http.Response res;
+  try {
+    res = await client.get(url);
+  } catch (e) {
+    throw PluginInstallException('下载失败：$e');
+  }
+  if (res.statusCode == 404) return null;
+  if (res.statusCode < 200 || res.statusCode >= 300) {
+    throw PluginInstallException(
+        '下载失败：HTTP ${res.statusCode} (${url.toString()})');
   }
   return res.bodyBytes;
 }
@@ -676,7 +715,8 @@ bool _validPluginId(String id) {
 }
 
 class _SemVer {
-  _SemVer(this.major, this.minor, this.patch, {required this.raw, required this.isValid});
+  _SemVer(this.major, this.minor, this.patch,
+      {required this.raw, required this.isValid});
 
   factory _SemVer.tryParse(String raw) {
     final cleaned = raw.trim().split('-').first.split('+').first.trim();
@@ -732,7 +772,8 @@ Future<void> _enforceBlockedList(
   PluginManifestV1 manifest,
   PluginTarget target,
 ) async {
-  final bytes = await _downloadBytes(client, blockedUrl);
+  final bytes = await _downloadBytesOptional(client, blockedUrl);
+  if (bytes == null) return;
   final text = utf8.decode(bytes);
   final decoded = jsonDecode(text);
   final rules = _parseBlockRules(decoded);
@@ -747,6 +788,7 @@ Future<void> _enforceBlockedList(
 
 List<_BlockRule> _parseBlockRules(Object? decoded) {
   List<dynamic>? list;
+  Map? idMap;
   if (decoded is List) {
     list = decoded;
   } else if (decoded is Map) {
@@ -755,24 +797,139 @@ List<_BlockRule> _parseBlockRules(Object? decoded) {
       decoded['rules'],
       decoded['plugins'],
       decoded['items'],
+      decoded['blocklist'],
+      decoded['blockList'],
     ];
     for (final c in candidates) {
       if (c is List) {
         list = c;
         break;
       }
+      if (c is Map) {
+        // Support nested containers like: { "blocked": { "plugins": [ ... ] } }
+        final nestedCandidates = [
+          c['blocked'],
+          c['rules'],
+          c['plugins'],
+          c['items'],
+          c['blocklist'],
+          c['blockList'],
+        ];
+        for (final nested in nestedCandidates) {
+          if (nested is List) {
+            list = nested;
+            break;
+          }
+          if (nested is Map) {
+            idMap = nested;
+            break;
+          }
+        }
+        idMap ??= c;
+        break;
+      }
+    }
+
+    if (list == null && idMap == null) {
+      if (decoded.isEmpty) return const <_BlockRule>[];
+
+      // Support a flat map format: { "<pluginId>": <rule>, ... }
+      final looksLikeIdMap = decoded.keys.any((k) {
+        final s = k is String ? k.trim() : '';
+        return s.contains('.') && _validPluginId(s);
+      });
+      if (looksLikeIdMap) idMap = decoded;
     }
   }
-  if (list == null) {
-    // Security: if blocked.json exists but format is unknown, fail closed.
-    throw PluginInstallException('blocked.json 格式无法识别');
+
+  if (list != null) {
+    final rules = <_BlockRule>[];
+    for (final item in list) {
+      final rule = _BlockRule.tryFromJson(item);
+      if (rule != null) rules.add(rule);
+    }
+    return rules;
   }
+
+  if (idMap != null) {
+    return _parseBlockRulesFromIdMap(idMap);
+  }
+
+  // Security: if blocked.json exists but format is unknown, fail closed.
+  throw PluginInstallException('blocked.json 格式无法识别');
+}
+
+List<_BlockRule> _parseBlockRulesFromIdMap(Map decoded) {
   final rules = <_BlockRule>[];
-  for (final item in list) {
-    final rule = _BlockRule.tryFromJson(item);
-    if (rule != null) rules.add(rule);
+  for (final entry in decoded.entries) {
+    final id = entry.key is String ? entry.key.trim() : '';
+    if (id.isEmpty || !_validPluginId(id)) continue;
+    final v = entry.value;
+
+    if (v is bool) {
+      if (!v) continue;
+      rules
+          .add(_BlockRule(id: id, versions: null, targets: null, reason: null));
+      continue;
+    }
+    if (v is String) {
+      final reason = v.trim();
+      rules.add(
+        _BlockRule(
+          id: id,
+          versions: null,
+          targets: null,
+          reason: reason.isEmpty ? null : reason,
+        ),
+      );
+      continue;
+    }
+    if (v is List) {
+      final allString = v.every((e) => e is String);
+      if (allString) {
+        rules.add(_BlockRule(
+            id: id, versions: _stringSet(v), targets: null, reason: null));
+        continue;
+      }
+      var added = false;
+      for (final item in v) {
+        if (item is Map) {
+          final rule = _BlockRule.tryFromJson(_mergeBlockRuleMap(id, item));
+          if (rule != null) {
+            rules.add(rule);
+            added = true;
+          }
+        }
+      }
+      if (!added) {
+        // Unknown list type: treat as blocked-all.
+        rules.add(
+            _BlockRule(id: id, versions: null, targets: null, reason: null));
+      }
+      continue;
+    }
+    if (v is Map) {
+      final rule = _BlockRule.tryFromJson(_mergeBlockRuleMap(id, v));
+      if (rule != null) rules.add(rule);
+      continue;
+    }
+
+    // Unknown value type: treat presence as blocked-all.
+    rules.add(_BlockRule(id: id, versions: null, targets: null, reason: null));
   }
   return rules;
+}
+
+Map<String, Object?> _mergeBlockRuleMap(String id, Map raw) {
+  final out = <String, Object?>{'id': id};
+  for (final entry in raw.entries) {
+    if (entry.key is! String) continue;
+    final k = (entry.key as String).trim();
+    if (k.isEmpty) continue;
+    if (k == 'id' || k == 'pluginId') continue;
+    out[k] = entry.value;
+  }
+  return out;
 }
 
 class _BlockRule {
@@ -790,7 +947,8 @@ class _BlockRule {
       return _BlockRule(id: id, versions: null, targets: null, reason: null);
     }
     if (json is! Map) return null;
-    final id = (json['id'] as String? ?? json['pluginId'] as String? ?? '').trim();
+    final id =
+        (json['id'] as String? ?? json['pluginId'] as String? ?? '').trim();
     if (id.isEmpty) return null;
     final versions = _stringSet(json['versions'] ?? json['version']);
     final targets = _stringSet(json['targets'] ?? json['target']);
