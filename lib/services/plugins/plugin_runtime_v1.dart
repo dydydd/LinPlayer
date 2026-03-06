@@ -348,6 +348,9 @@ class PluginRuntimeV1 {
   }
 
   Future<Object?> _handleNetRequest(Object? args) async {
+    if (!manifest.permissions.network.enabled) {
+      throw PluginRuntimeException('PermissionDenied');
+    }
     if (args is! Map) throw PluginRuntimeException('net.request 参数格式错误');
     final urlRaw = (args['url'] as String? ?? '').trim();
     if (urlRaw.isEmpty) throw PluginRuntimeException('net.request.url 不能为空');

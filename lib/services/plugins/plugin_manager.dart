@@ -96,9 +96,6 @@ class PluginPermissionsV1 {
       throw PluginInstallException('manifest.permissions 格式错误（不是对象）');
     }
     final network = PluginNetworkPermissionV1.fromJson(json['network']);
-    if (!network.enabled) {
-      throw PluginInstallException('插件未声明 network.enabled=true（v1 必需）');
-    }
     return PluginPermissionsV1(network: network);
   }
 
