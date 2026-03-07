@@ -17,7 +17,7 @@ import 'package:video_player_platform_interface/video_player_platform_interface.
     as vp_platform;
 
 import 'services/app_route_observer.dart';
-import 'services/strm/strm_resolver.dart';
+import 'services/stream_resolver/stream_resolver.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
 import 'widgets/list_picker_dialog.dart';
 
@@ -2026,29 +2026,20 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     bool resetDanmaku = true,
   }) async {
     final rawPath = (file.path ?? '').trim();
-    final looksLikeStrm = StrmResolver.looksLikeStrmFileName(file.name) ||
-        StrmResolver.looksLikeStrmPathOrUrl(rawPath);
 
-    StrmResolution? strm;
-    List<StrmTarget> candidates;
-    if (looksLikeStrm) {
-      strm = await StrmResolver.resolve(
+    final resolved = await StreamResolver.resolve(
+      StreamResolveRequest(
         sourcePathOrUrl: rawPath,
         fileName: file.name,
         bytes: file.bytes,
         readStream: file.readStream,
-      );
-      if (strm.isSuccess) {
-        candidates = strm.targets;
-      } else if (strm.suggestDirectPlayFallback && rawPath.isNotEmpty) {
-        candidates = <StrmTarget>[StrmTarget(url: rawPath)];
-      } else {
-        final msg = strm.error ?? 'STRM 解析失败';
-        setState(() => _playError = msg);
-        return;
-      }
-    } else {
-      candidates = <StrmTarget>[StrmTarget(url: rawPath)];
+      ),
+    );
+    final candidates = resolved.candidates;
+    final looksLikeStrm = resolved.inputWasStrm;
+    if (candidates.isEmpty) {
+      setState(() => _playError = resolved.error?.message ?? '无法解析播放地址');
+      return;
     }
 
     final source = candidates.first.url;
@@ -2188,7 +2179,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
         final msg = looksLikeStrm
             ? (details.isNotEmpty
                 ? 'STRM 播放失败：$details'
-                : (strm?.error ?? 'STRM 播放失败'))
+                : (resolved.error?.message ?? 'STRM 播放失败'))
             : (details.isNotEmpty ? details : '播放失败');
         setState(() => _playError = msg);
         return;
