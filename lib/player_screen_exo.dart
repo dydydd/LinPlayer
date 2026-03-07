@@ -2006,6 +2006,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
       allowedExtensions: _kPickableExtensions,
       allowMultiple: true,
       withData: false,
+      withReadStream: !kIsWeb,
     );
     if (!mounted) return;
     if (result == null) return;
@@ -2025,18 +2026,36 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     bool resetDanmaku = true,
   }) async {
     final rawPath = (file.path ?? '').trim();
-    final isStrm = StrmResolver.looksLikeStrmFileName(file.name) ||
+    final looksLikeStrm = StrmResolver.looksLikeStrmFileName(file.name) ||
         StrmResolver.looksLikeStrmPathOrUrl(rawPath);
-    final resolved = isStrm
-        ? (await StrmResolver.resolveTarget(
-            sourcePathOrUrl: rawPath,
-            fileName: file.name,
-            bytes: file.bytes,
-          ))
-        : null;
-    final source = (resolved ?? rawPath).trim();
+
+    StrmResolution? strm;
+    List<StrmTarget> candidates;
+    if (looksLikeStrm) {
+      strm = await StrmResolver.resolve(
+        sourcePathOrUrl: rawPath,
+        fileName: file.name,
+        bytes: file.bytes,
+        readStream: file.readStream,
+      );
+      if (strm.isSuccess) {
+        candidates = strm.targets;
+      } else if (strm.suggestDirectPlayFallback && rawPath.isNotEmpty) {
+        candidates = <StrmTarget>[StrmTarget(url: rawPath)];
+      } else {
+        final msg = strm.error ?? 'STRM 解析失败';
+        setState(() => _playError = msg);
+        return;
+      }
+    } else {
+      candidates = <StrmTarget>[StrmTarget(url: rawPath)];
+    }
+
+    final source = candidates.first.url;
     if (source.isEmpty) {
-      setState(() => _playError = isStrm ? 'STRM 解析失败' : '无法读取文件路径');
+      setState(
+        () => _playError = looksLikeStrm ? 'STRM 解析失败' : '无法读取文件路径',
+      );
       return;
     }
 
@@ -2091,52 +2110,88 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     }
 
     try {
-      final uri = Uri.tryParse(source);
       // Use platform view on Android to avoid color issues with some HDR/Dolby Vision sources.
       // (Texture-based rendering may show green/purple tint on certain P8 files.)
       final viewType = _isAndroid ? _viewType : VideoViewType.textureView;
 
-      late final VideoPlayerController controller;
-      if (uri == null || uri.scheme.isEmpty) {
-        controller =
-            VideoPlayerController.file(File(source), viewType: viewType);
-      } else {
-        final scheme = uri.scheme.toLowerCase();
-        final isHttpUrl = (scheme == 'http' || scheme == 'https') &&
+      VideoPlayerController? controller;
+      Object? lastError;
+      for (final c in candidates) {
+        final attemptSource = c.url.trim();
+        if (attemptSource.isEmpty) continue;
+
+        final uri = Uri.tryParse(attemptSource);
+        final scheme = uri?.scheme.toLowerCase() ?? '';
+        final isHttpUrl = uri != null &&
+            (scheme == 'http' || scheme == 'https') &&
             uri.host.trim().isNotEmpty;
-        if (isHttpUrl) {
-          controller =
-              VideoPlayerController.networkUrl(uri, viewType: viewType);
-        } else if (scheme == 'content' && _isAndroid) {
-          controller =
-              VideoPlayerController.contentUri(uri, viewType: viewType);
-        } else if (scheme == 'file') {
-          controller = VideoPlayerController.file(
-            File.fromUri(uri),
-            viewType: viewType,
-          );
-        } else {
-          // Fall back to networkUrl for other non-file URI schemes (e.g. rtsp).
-          controller =
-              VideoPlayerController.networkUrl(uri, viewType: viewType);
+
+        try {
+          if (uri == null || scheme.isEmpty) {
+            controller = VideoPlayerController.file(
+              File(attemptSource),
+              viewType: viewType,
+            );
+          } else if (isHttpUrl) {
+            controller = VideoPlayerController.networkUrl(
+              uri,
+              viewType: viewType,
+              httpHeaders: c.httpHeaders,
+            );
+          } else if (scheme == 'content' && _isAndroid) {
+            controller =
+                VideoPlayerController.contentUri(uri, viewType: viewType);
+          } else if (scheme == 'file') {
+            controller = VideoPlayerController.file(
+              File.fromUri(uri),
+              viewType: viewType,
+            );
+          } else {
+            // Fall back to networkUrl for other non-file URI schemes (e.g. rtsp).
+            controller =
+                VideoPlayerController.networkUrl(uri, viewType: viewType);
+          }
+
+          _controller = controller;
+          await controller.initialize();
+          await _applyOrientationForMode();
+          await _applyExoSubtitleOptions();
+          await _maybeAutoSelectSubtitleTrack(controller);
+          if (startPosition != null && startPosition > Duration.zero) {
+            final d = controller.value.duration;
+            final target =
+                (d > Duration.zero && startPosition > d) ? d : startPosition;
+            await controller.seekTo(target);
+            _position = target;
+          }
+          if (autoPlay == false) {
+            await controller.pause();
+          } else {
+            await controller.play();
+          }
+          break;
+        } catch (e) {
+          lastError = e;
+          final failed = controller;
+          controller = null;
+          if (_controller == failed) _controller = null;
+          if (failed != null) {
+            try {
+              await failed.dispose();
+            } catch (_) {}
+          }
         }
       }
-      _controller = controller;
-      await controller.initialize();
-      await _applyOrientationForMode();
-      await _applyExoSubtitleOptions();
-      await _maybeAutoSelectSubtitleTrack(controller);
-      if (startPosition != null && startPosition > Duration.zero) {
-        final d = controller.value.duration;
-        final target =
-            (d > Duration.zero && startPosition > d) ? d : startPosition;
-        await controller.seekTo(target);
-        _position = target;
-      }
-      if (autoPlay == false) {
-        await controller.pause();
-      } else {
-        await controller.play();
+
+      if (controller == null) {
+        final details = (lastError?.toString() ?? '').trim();
+        final msg = looksLikeStrm
+            ? (details.isNotEmpty
+                ? 'STRM 播放失败：$details'
+                : (strm?.error ?? 'STRM 播放失败'))
+            : (details.isNotEmpty ? details : '播放失败');
+        setState(() => _playError = msg);
+        return;
       }
 
       _uiTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {

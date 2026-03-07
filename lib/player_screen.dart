@@ -1353,6 +1353,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       allowedExtensions: exts,
       allowMultiple: true,
       withData: kIsWeb,
+      withReadStream: !kIsWeb,
     );
     if (result == null || result.files.isEmpty) return;
 
@@ -1476,6 +1477,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       allowedExtensions: exts,
       allowMultiple: false,
       withData: kIsWeb,
+      withReadStream: !kIsWeb,
     );
     if (result == null || result.files.isEmpty) return;
     final path = (result.files.first.path ?? '').trim();
@@ -1556,18 +1558,36 @@ class _PlayerScreenState extends State<PlayerScreen>
   }) async {
     final isTv = _isTv(context);
     final rawPath = (file.path ?? '').trim();
-    final isStrm = StrmResolver.looksLikeStrmFileName(file.name) ||
+    final looksLikeStrm = StrmResolver.looksLikeStrmFileName(file.name) ||
         StrmResolver.looksLikeStrmPathOrUrl(rawPath);
-    final resolved = isStrm
-        ? (await StrmResolver.resolveTarget(
-            sourcePathOrUrl: rawPath,
-            fileName: file.name,
-            bytes: file.bytes,
-          ))
-        : null;
-    final source = (resolved ?? rawPath).trim();
+
+    StrmResolution? strm;
+    List<StrmTarget> candidates;
+    if (looksLikeStrm) {
+      strm = await StrmResolver.resolve(
+        sourcePathOrUrl: rawPath,
+        fileName: file.name,
+        bytes: file.bytes,
+        readStream: file.readStream,
+      );
+      if (strm.isSuccess) {
+        candidates = strm.targets;
+      } else if (strm.suggestDirectPlayFallback && rawPath.isNotEmpty) {
+        candidates = <StrmTarget>[StrmTarget(url: rawPath)];
+      } else {
+        final msg = strm.error ?? 'STRM 解析失败';
+        setState(() => _playError = msg);
+        return;
+      }
+    } else {
+      candidates = <StrmTarget>[StrmTarget(url: rawPath)];
+    }
+
+    final source = candidates.first.url;
     if (source.isEmpty) {
-      setState(() => _playError = isStrm ? 'STRM 解析失败' : '无法读取文件路径');
+      setState(
+        () => _playError = looksLikeStrm ? 'STRM 解析失败' : '无法读取文件路径',
+      );
       return;
     }
 
@@ -1658,31 +1678,83 @@ class _PlayerScreenState extends State<PlayerScreen>
       final proxyReady = builtInProxyEnabled &&
           builtInProxy.status.state == BuiltInProxyState.running;
 
-      final httpProxy = isNetwork
-          ? (() {
-              final uri = Uri.tryParse(source);
-              if (uri == null) return null;
-              if (proxyReady) return BuiltInProxyService.proxyUrlForUri(uri);
-              final appState = widget.appState;
-              if (appState == null) return null;
-              return resolvePlaybackHttpProxyForUri(
-                  appState: appState, uri: uri);
-            })()
-          : null;
+      String? selectedSource;
+      Map<String, String>? selectedHeaders;
+      bool selectedIsNetwork = false;
+      String? httpProxy;
+      Object? lastError;
 
-      await _playerService.initialize(
-        isNetwork ? null : source,
-        networkUrl: isNetwork ? source : null,
-        isTv: isTv,
-        hardwareDecode: _hwdecOn,
-        mpvCacheSizeMb: widget.appState?.mpvCacheSizeMb ?? 500,
-        bufferBackRatio: widget.appState?.playbackBufferBackRatio ?? 0.05,
-        unlimitedStreamCache: widget.appState?.unlimitedStreamCache ?? false,
-        networkStreamSizeBytes:
-            (isNetwork && !isStrm && file.size > 0) ? file.size : null,
-        externalMpvPath: widget.appState?.externalMpvPath,
-        httpProxy: httpProxy,
-      );
+      for (final c in candidates) {
+        final attemptSource = c.url.trim();
+        if (attemptSource.isEmpty) continue;
+
+        final attemptUri = Uri.tryParse(attemptSource);
+        final attemptIsHttpUrl = attemptUri != null &&
+            (attemptUri.scheme == 'http' || attemptUri.scheme == 'https') &&
+            attemptUri.host.isNotEmpty;
+        final attemptIsNetwork = kIsWeb || attemptIsHttpUrl;
+
+        final attemptProxy = attemptIsNetwork
+            ? (() {
+                if (attemptUri == null) return null;
+                if (proxyReady) {
+                  return BuiltInProxyService.proxyUrlForUri(attemptUri);
+                }
+                final appState = widget.appState;
+                if (appState == null) return null;
+                return resolvePlaybackHttpProxyForUri(
+                  appState: appState,
+                  uri: attemptUri,
+                );
+              })()
+            : null;
+
+        try {
+          await _playerService.initialize(
+            attemptIsNetwork ? null : attemptSource,
+            networkUrl: attemptIsNetwork ? attemptSource : null,
+            httpHeaders: c.httpHeaders.isEmpty ? null : c.httpHeaders,
+            isTv: isTv,
+            hardwareDecode: _hwdecOn,
+            mpvCacheSizeMb: widget.appState?.mpvCacheSizeMb ?? 500,
+            bufferBackRatio: widget.appState?.playbackBufferBackRatio ?? 0.05,
+            unlimitedStreamCache:
+                widget.appState?.unlimitedStreamCache ?? false,
+            networkStreamSizeBytes:
+                (attemptIsNetwork && !looksLikeStrm && file.size > 0)
+                    ? file.size
+                    : null,
+            externalMpvPath: widget.appState?.externalMpvPath,
+            httpProxy: attemptProxy,
+          );
+          selectedSource = attemptSource;
+          selectedHeaders = c.httpHeaders;
+          selectedIsNetwork = attemptIsNetwork;
+          httpProxy = attemptProxy;
+          break;
+        } catch (e) {
+          lastError = e;
+        }
+      }
+
+      if (selectedSource == null || selectedSource.trim().isEmpty) {
+        final err = (looksLikeStrm ? (strm?.error ?? '') : '').trim();
+        final details = (lastError?.toString() ?? '').trim();
+        final msg = looksLikeStrm
+            ? (details.isNotEmpty
+                ? 'STRM 播放失败：$details'
+                : (err.isNotEmpty ? err : 'STRM 播放失败'))
+            : (details.isNotEmpty ? details : '播放失败');
+        if (mounted) setState(() => _playError = msg);
+        return;
+      }
+
+      if (mounted && _isNetworkPlayback != selectedIsNetwork) {
+        setState(() => _isNetworkPlayback = selectedIsNetwork);
+      }
+
+      final resolvedSource = selectedSource;
+      final resolvedHeaders = selectedHeaders ?? const <String, String>{};
       if (!mounted) return;
       if (_playerService.isExternalPlayback) {
         setState(() => _playError =
@@ -1778,9 +1850,12 @@ class _PlayerScreenState extends State<PlayerScreen>
       });
       _applyDanmakuPauseState(_buffering || !_playerService.isPlaying);
       _duration = _playerService.duration;
-      if (!kIsWeb && rawPath.isNotEmpty) {
+      if (!kIsWeb && resolvedSource.trim().isNotEmpty) {
         _thumbnailer = MediaKitThumbnailGenerator(
-          media: Media(rawPath),
+          media: Media(
+            resolvedSource,
+            httpHeaders: resolvedHeaders.isEmpty ? null : resolvedHeaders,
+          ),
           httpProxy: httpProxy,
         );
       }
