@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -60,7 +61,8 @@ void main() {
     expect(result.contentTypeMime, 'video/mp4');
     expect(result.acceptRanges, contains('bytes'));
 
-    final finalCookie = result.effectiveRequestHeaders[HttpHeaders.cookieHeader];
+    final finalCookie =
+        result.effectiveRequestHeaders[HttpHeaders.cookieHeader];
     expect(finalCookie, isNotNull);
     expect(finalCookie, contains('a=1'));
     expect(finalCookie, contains('b=2'));
@@ -118,7 +120,99 @@ void main() {
     expect(requestCount, 2);
   });
 
-  test('StreamResolver returns resolved + original candidates on redirect', () async {
+  test('StreamRedirectResolver falls back to GET when HEAD fails', () async {
+    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await server.close();
+    });
+
+    var startHeadCount = 0;
+    var startGetCount = 0;
+
+    server.listen((Socket socket) {
+      final buffer = StringBuffer();
+      late final StreamSubscription<List<int>> sub;
+      sub = socket.listen((chunk) async {
+        buffer.write(String.fromCharCodes(chunk));
+        final raw = buffer.toString();
+        final headerEnd = raw.indexOf('\r\n\r\n');
+        if (headerEnd < 0) return;
+        await sub.cancel();
+
+        final requestLine = raw.substring(0, headerEnd).split('\r\n').first;
+        final parts = requestLine.split(' ');
+        final method = parts.isNotEmpty ? parts[0].trim().toUpperCase() : '';
+        final target = parts.length > 1 ? parts[1].trim() : '/';
+        final uri = Uri.parse(target);
+
+        if (uri.path == '/start' && method == 'HEAD') {
+          startHeadCount++;
+          socket.destroy();
+          return;
+        }
+
+        if (uri.path == '/start' && method == 'GET') {
+          startGetCount++;
+          socket.write(
+            'HTTP/1.1 302 Found\r\n'
+            'Location: /final\r\n'
+            'Content-Length: 0\r\n'
+            'Connection: close\r\n'
+            '\r\n',
+          );
+          await socket.flush();
+          await socket.close();
+          return;
+        }
+
+        if (uri.path == '/final') {
+          socket.write(
+            'HTTP/1.1 206 Partial Content\r\n'
+            'Accept-Ranges: bytes\r\n'
+            'Content-Range: bytes 0-0/10\r\n'
+            'Content-Type: video/mp4\r\n'
+            'Content-Length: 1\r\n'
+            'Connection: close\r\n'
+            '\r\n',
+          );
+          if (method != 'HEAD') {
+            socket.add(const <int>[0]);
+          }
+          await socket.flush();
+          await socket.close();
+          return;
+        }
+
+        socket.write(
+          'HTTP/1.1 404 Not Found\r\n'
+          'Content-Length: 0\r\n'
+          'Connection: close\r\n'
+          '\r\n',
+        );
+        await socket.flush();
+        await socket.close();
+      });
+    });
+
+    final startUri = Uri.parse('http://127.0.0.1:${server.port}/start');
+    final result = await StreamRedirectResolver.resolve(
+      startUri,
+      requestHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      timeout: const Duration(seconds: 2),
+      maxRedirects: 5,
+      useCache: false,
+    );
+
+    expect(result, isNotNull);
+    expect(result!.effectiveUri.path, '/final');
+    expect(result.statusCode, 206);
+    expect(result.acceptRanges, contains('bytes'));
+    expect(startHeadCount, 1);
+    expect(startGetCount, 1);
+  });
+
+  test('StreamResolver returns resolved + original candidates on redirect',
+      () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() async {
       await server.close(force: true);

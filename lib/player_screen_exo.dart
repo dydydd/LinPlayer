@@ -17,6 +17,7 @@ import 'package:video_player_platform_interface/video_player_platform_interface.
     as vp_platform;
 
 import 'services/app_route_observer.dart';
+import 'services/stream_proxy/local_http_stream_proxy.dart';
 import 'services/stream_resolver/stream_resolver.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
 import 'widgets/list_picker_dialog.dart';
@@ -819,11 +820,13 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                                 _rebuildDanmakuHeatmap();
                                 _syncDanmakuCursor(_position);
                               });
-                              if (widget.appState.danmakuRememberSelectedSource &&
+                              if (widget
+                                      .appState.danmakuRememberSelectedSource &&
                                   picked >= 0 &&
                                   picked < _danmakuSources.length) {
                                 // ignore: unawaited_futures
-                                widget.appState.setDanmakuLastSelectedSourceName(
+                                widget.appState
+                                    .setDanmakuLastSelectedSourceName(
                                   _danmakuSources[picked].name,
                                 );
                               }
@@ -2035,7 +2038,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
         readStream: file.readStream,
       ),
     );
-    final candidates = resolved.candidates;
+    final candidates =
+        await LocalHttpStreamProxy.wrapCandidates(resolved.candidates);
     final looksLikeStrm = resolved.inputWasStrm;
     if (candidates.isEmpty) {
       setState(() => _playError = resolved.error?.message ?? '无法解析播放地址');

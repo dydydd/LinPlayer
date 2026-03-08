@@ -47,10 +47,7 @@ class StreamRedirectResolver {
 
   static bool _isLocalhostLikeHost(String host) {
     final h = host.trim().toLowerCase();
-    return h == 'localhost' ||
-        h == '127.0.0.1' ||
-        h == '0.0.0.0' ||
-        h == '::1';
+    return h == 'localhost' || h == '127.0.0.1' || h == '0.0.0.0' || h == '::1';
   }
 
   static bool _isHttpUrl(Uri uri) {
@@ -111,9 +108,11 @@ class StreamRedirectResolver {
   static Uri _rewriteLocalhostToBaseHost(Uri base, Uri target) {
     if (!_isHttpUrl(target)) return target;
     if (!_isLocalhostLikeHost(target.host)) return target;
-    if (base.host.trim().isEmpty || _isLocalhostLikeHost(base.host)) return target;
+    if (base.host.trim().isEmpty || _isLocalhostLikeHost(base.host))
+      return target;
 
-    final int? port = target.hasPort ? target.port : (base.hasPort ? base.port : null);
+    final int? port =
+        target.hasPort ? target.port : (base.hasPort ? base.port : null);
     return target.replace(
       host: base.host,
       port: port,
@@ -121,16 +120,19 @@ class StreamRedirectResolver {
   }
 
   static String _cacheKey(Uri uri, Map<String, String> requestHeaders) {
-    final ua = (_getHeaderValue(requestHeaders, HttpHeaders.userAgentHeader) ?? '')
-        .trim();
-    final referer = (_getHeaderValue(requestHeaders, HttpHeaders.refererHeader) ?? '')
-        .trim();
+    final ua =
+        (_getHeaderValue(requestHeaders, HttpHeaders.userAgentHeader) ?? '')
+            .trim();
+    final referer =
+        (_getHeaderValue(requestHeaders, HttpHeaders.refererHeader) ?? '')
+            .trim();
     final origin = (_getHeaderValue(requestHeaders, 'Origin') ?? '').trim();
     final auth =
         (_getHeaderValue(requestHeaders, HttpHeaders.authorizationHeader) ?? '')
             .trim();
     final cookie =
-        (_getHeaderValue(requestHeaders, HttpHeaders.cookieHeader) ?? '').trim();
+        (_getHeaderValue(requestHeaders, HttpHeaders.cookieHeader) ?? '')
+            .trim();
 
     final raw = StringBuffer()
       ..write(uri.toString())
@@ -203,8 +205,7 @@ class StreamRedirectResolver {
       final cookies = List<Cookie>.from(response.cookies);
       final statusCode = response.statusCode;
       final contentType = response.headers.contentType?.mimeType.trim();
-      final acceptRanges =
-          response.headers.value('accept-ranges')?.trim();
+      final acceptRanges = response.headers.value('accept-ranges')?.trim();
       final contentRange =
           response.headers.value(HttpHeaders.contentRangeHeader)?.trim();
       final rawLen = response.contentLength;
@@ -214,9 +215,8 @@ class StreamRedirectResolver {
         statusCode: statusCode,
         location: location?.trim().isEmpty == true ? null : location?.trim(),
         cookies: cookies,
-        contentTypeMime: (contentType == null || contentType.isEmpty)
-            ? null
-            : contentType,
+        contentTypeMime:
+            (contentType == null || contentType.isEmpty) ? null : contentType,
         acceptRanges: (acceptRanges == null || acceptRanges.isEmpty)
             ? null
             : acceptRanges,
@@ -281,9 +281,7 @@ class StreamRedirectResolver {
         timeout: timeout,
       );
 
-      if (meta == null) return null;
-
-      if (meta.statusCode == 405 && allowGetFallback) {
+      if ((meta == null || meta.statusCode == 405) && allowGetFallback) {
         meta = await _requestMeta(
           current,
           method: 'GET',
@@ -291,17 +289,20 @@ class StreamRedirectResolver {
           cookieJar: cookieJar,
           timeout: timeout,
         );
-        if (meta == null) return null;
       }
+      if (meta == null) return null;
 
       cookieJar.storeFromResponse(current, meta.cookies);
 
       final statusCode = meta.statusCode;
       final location = meta.location;
 
-      if (_isRedirectStatus(statusCode) && location != null && i < maxRedirects) {
+      if (_isRedirectStatus(statusCode) &&
+          location != null &&
+          i < maxRedirects) {
         final next0 = _resolveLocation(current, location);
-        final next = next0 == null ? null : _rewriteLocalhostToBaseHost(origin, next0);
+        final next =
+            next0 == null ? null : _rewriteLocalhostToBaseHost(origin, next0);
         hops.add(
           StreamRedirectHop(
             uri: current,
@@ -440,7 +441,8 @@ class _CookieJar {
 
       final value = c.value;
       final rawDomain = (c.domain ?? '').trim().toLowerCase();
-      final domain = rawDomain.startsWith('.') ? rawDomain.substring(1) : rawDomain;
+      final domain =
+          rawDomain.startsWith('.') ? rawDomain.substring(1) : rawDomain;
       final hostOnly = domain.isEmpty;
 
       // Reject obviously invalid domains (avoid leaking cookies cross-site).
@@ -498,8 +500,9 @@ class _CookieJar {
   }
 
   Map<String, String> applyToHeaders(Uri uri, Map<String, String> headers) {
-    final cookieHeader =
-        cookieHeaderFor(uri, existingCookieHeader: StreamRedirectResolver._getHeaderValue(headers, HttpHeaders.cookieHeader));
+    final cookieHeader = cookieHeaderFor(uri,
+        existingCookieHeader: StreamRedirectResolver._getHeaderValue(
+            headers, HttpHeaders.cookieHeader));
     if (cookieHeader == null || cookieHeader.trim().isEmpty) return headers;
     return StreamRedirectResolver._setHeaderValue(
       headers,

@@ -12,15 +12,13 @@ class StreamBodyLinkResolver {
 
   static bool _isLocalhostLikeHost(String host) {
     final h = host.trim().toLowerCase();
-    return h == 'localhost' ||
-        h == '127.0.0.1' ||
-        h == '0.0.0.0' ||
-        h == '::1';
+    return h == 'localhost' || h == '127.0.0.1' || h == '0.0.0.0' || h == '::1';
   }
 
   static bool _isHttpUrl(Uri uri) {
     final scheme = uri.scheme.toLowerCase();
-    return (scheme == 'http' || scheme == 'https') && uri.host.trim().isNotEmpty;
+    return (scheme == 'http' || scheme == 'https') &&
+        uri.host.trim().isNotEmpty;
   }
 
   static bool _looksLikeUrl(String raw) {
@@ -131,16 +129,20 @@ class StreamBodyLinkResolver {
 
     final scheme = uri.scheme.isNotEmpty ? uri.scheme : base.scheme;
     if (!uri.hasPort && base.hasPort) {
-      return uri.replace(
-        scheme: scheme,
-        host: base.host,
-        port: base.port,
-      ).toString();
+      return uri
+          .replace(
+            scheme: scheme,
+            host: base.host,
+            port: base.port,
+          )
+          .toString();
     }
-    return uri.replace(
-      scheme: scheme,
-      host: base.host,
-    ).toString();
+    return uri
+        .replace(
+          scheme: scheme,
+          host: base.host,
+        )
+        .toString();
   }
 
   static String? _findUrlInJson(dynamic node) {
@@ -221,7 +223,8 @@ class StreamBodyLinkResolver {
 
       final response = await request.close().timeout(timeout);
       if (response.statusCode != 200) return null;
-      return _readBytesFromStream(response, limit: limit);
+      final bytes = await _readBytesFromStream(response, limit: limit);
+      return bytes;
     } catch (_) {
       return null;
     } finally {

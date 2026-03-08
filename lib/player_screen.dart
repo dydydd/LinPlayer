@@ -23,6 +23,7 @@ import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/desktop_window.dart';
 import 'services/plugins/plugin_manager.dart';
 import 'services/playback_proxy/playback_proxy.dart';
+import 'services/stream_proxy/local_http_stream_proxy.dart';
 import 'services/stream_resolver/stream_resolver.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
 import 'widgets/list_picker_dialog.dart';
@@ -1567,7 +1568,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         readStream: file.readStream,
       ),
     );
-    final candidates = resolved.candidates;
+    final candidates =
+        await LocalHttpStreamProxy.wrapCandidates(resolved.candidates);
     final looksLikeStrm = resolved.inputWasStrm;
     if (candidates.isEmpty) {
       setState(() => _playError = resolved.error?.message ?? '无法解析播放地址');
