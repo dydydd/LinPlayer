@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'dart:async';
+import 'dart:ui' show PlatformDispatcher;
+
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb;
@@ -20,6 +23,7 @@ import 'home_page.dart';
 import 'server_page.dart';
 import 'webdav_home_page.dart';
 import 'services/app_back_intent.dart';
+import 'services/app_diagnostics_log.dart';
 import 'services/app_update_flow.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/app_route_observer.dart';
@@ -82,6 +86,58 @@ final class _SnappedTextScaler implements TextScaler {
 }
 
 void main() async {
+  _installDiagnosticsHooks();
+  await runZonedGuarded(
+    () async {
+      await _bootstrapApp();
+    },
+    (error, stackTrace) {
+      AppDiagnosticsLogger.instance.error(
+        'zone',
+        'Unhandled zone error',
+        error: error,
+        stackTrace: stackTrace,
+      );
+    },
+    zoneSpecification: ZoneSpecification(
+      print: (self, parent, zone, line) {
+        AppDiagnosticsLogger.instance.debug(
+          'stdout',
+          line,
+        );
+        parent.print(zone, line);
+      },
+    ),
+  );
+}
+
+void _installDiagnosticsHooks() {
+  FlutterError.onError = (details) {
+    AppDiagnosticsLogger.instance.error(
+      'flutter',
+      details.exceptionAsString(),
+      data: <String, Object?>{
+        'library': details.library ?? '',
+        'context': details.context?.toDescription() ?? '',
+      },
+      error: details.exception,
+      stackTrace: details.stack,
+    );
+    FlutterError.presentError(details);
+  };
+
+  PlatformDispatcher.instance.onError = (error, stackTrace) {
+    AppDiagnosticsLogger.instance.error(
+      'platform',
+      'Unhandled platform error',
+      error: error,
+      stackTrace: stackTrace,
+    );
+    return false;
+  };
+}
+
+Future<void> _bootstrapApp() async {
   WidgetsFlutterBinding.ensureInitialized();
   debugPaintSizeEnabled = false;
   debugPaintBaselinesEnabled = false;
@@ -99,6 +155,14 @@ void main() async {
   // Ensure native media backends (mpv) are ready before any player is created.
   MediaKit.ensureInitialized();
   await DeviceType.init();
+  AppDiagnosticsLogger.instance.info(
+    'app',
+    'Application bootstrap started',
+    data: <String, Object?>{
+      'platform': kIsWeb ? 'web' : defaultTargetPlatform.name,
+      'isTv': DeviceType.isTv,
+    },
+  );
 
   final appConfig = AppConfig.current;
   ServerApiBootstrap.configure(
@@ -114,12 +178,29 @@ void main() async {
       defaultClientName: appConfig.displayName,
       appVersion: '${info.version}+${info.buildNumber}',
     );
+    AppDiagnosticsLogger.instance.info(
+      'app',
+      'Package info loaded',
+      data: <String, Object?>{
+        'version': '${info.version}+${info.buildNumber}',
+        'product': appConfig.displayName,
+      },
+    );
   } catch (_) {
     // PackageInfo is best-effort; keep default version if unavailable.
   }
 
   final appState = AppState();
   await appState.loadFromStorage();
+  AppDiagnosticsLogger.instance.info(
+    'app',
+    'App state loaded',
+    data: <String, Object?>{
+      'servers': appState.servers.length,
+      'playerCore': appState.playerCore.name,
+      'tvBuiltInProxyEnabled': appState.tvBuiltInProxyEnabled,
+    },
+  );
   if (DeviceType.isTv && !appState.hasTvRemoteEnabledPreference) {
     // Make phone scan/pairing available out-of-box on Android TV.
     try {

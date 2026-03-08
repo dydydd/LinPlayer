@@ -18,6 +18,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'plugins/plugin_slot_area.dart';
+import 'services/app_diagnostics_log.dart';
 import 'services/app_route_observer.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/desktop_window.dart';
@@ -1571,13 +1572,40 @@ class _PlayerScreenState extends State<PlayerScreen>
     final candidates =
         await LocalHttpStreamProxy.wrapCandidates(resolved.candidates);
     final looksLikeStrm = resolved.inputWasStrm;
+    AppDiagnosticsLogger.instance.info(
+      'player_local_mpv',
+      'Resolved local playback candidates',
+      data: <String, Object?>{
+        'fileName': file.name,
+        'looksLikeStrm': looksLikeStrm,
+        'count': candidates.length,
+        'candidates': candidates
+            .map((c) => AppDiagnosticsLogger.summarizeUrl(c.url))
+            .join(' || '),
+      },
+    );
     if (candidates.isEmpty) {
+      AppDiagnosticsLogger.instance.warn(
+        'player_local_mpv',
+        'No playable candidates for local file',
+        data: <String, Object?>{
+          'fileName': file.name,
+          'error': resolved.error?.message ?? '',
+        },
+      );
       setState(() => _playError = resolved.error?.message ?? '无法解析播放地址');
       return;
     }
 
     final source = candidates.first.url;
     if (source.isEmpty) {
+      AppDiagnosticsLogger.instance.warn(
+        'player_local_mpv',
+        'First local playback candidate is empty',
+        data: <String, Object?>{
+          'fileName': file.name,
+        },
+      );
       setState(
         () => _playError = looksLikeStrm ? 'STRM 解析失败' : '无法读取文件路径',
       );
@@ -1702,6 +1730,17 @@ class _PlayerScreenState extends State<PlayerScreen>
               })()
             : null;
 
+        AppDiagnosticsLogger.instance.info(
+          'player_local_mpv',
+          'Trying local playback candidate',
+          data: <String, Object?>{
+            'fileName': file.name,
+            'source': AppDiagnosticsLogger.summarizeUrl(attemptSource),
+            'headers': AppDiagnosticsLogger.summarizeHeaderKeys(c.httpHeaders),
+            'network': attemptIsNetwork,
+            'httpProxy': attemptProxy ?? '',
+          },
+        );
         try {
           await _playerService.initialize(
             attemptIsNetwork ? null : attemptSource,
@@ -1724,9 +1763,30 @@ class _PlayerScreenState extends State<PlayerScreen>
           selectedHeaders = c.httpHeaders;
           selectedIsNetwork = attemptIsNetwork;
           httpProxy = attemptProxy;
+          AppDiagnosticsLogger.instance.info(
+            'player_local_mpv',
+            'Selected local playback candidate',
+            data: <String, Object?>{
+              'fileName': file.name,
+              'source': AppDiagnosticsLogger.summarizeUrl(attemptSource),
+              'headers':
+                  AppDiagnosticsLogger.summarizeHeaderKeys(c.httpHeaders),
+              'network': attemptIsNetwork,
+              'httpProxy': attemptProxy ?? '',
+            },
+          );
           break;
         } catch (e) {
           lastError = e;
+          AppDiagnosticsLogger.instance.warn(
+            'player_local_mpv',
+            'Local playback candidate failed',
+            data: <String, Object?>{
+              'fileName': file.name,
+              'source': AppDiagnosticsLogger.summarizeUrl(attemptSource),
+              'error': AppDiagnosticsLogger.summarizeError(e),
+            },
+          );
         }
       }
 
@@ -1737,6 +1797,14 @@ class _PlayerScreenState extends State<PlayerScreen>
                 ? 'STRM 播放失败：$details'
                 : (resolved.error?.message ?? 'STRM 播放失败'))
             : (details.isNotEmpty ? details : '播放失败');
+        AppDiagnosticsLogger.instance.warn(
+          'player_local_mpv',
+          'All local playback candidates failed',
+          data: <String, Object?>{
+            'fileName': file.name,
+            'error': msg,
+          },
+        );
         if (mounted) setState(() => _playError = msg);
         return;
       }
@@ -1749,6 +1817,14 @@ class _PlayerScreenState extends State<PlayerScreen>
       final resolvedHeaders = selectedHeaders ?? const <String, String>{};
       if (!mounted) return;
       if (_playerService.isExternalPlayback) {
+        AppDiagnosticsLogger.instance.info(
+          'player_local_mpv',
+          'External MPV playback launched',
+          data: <String, Object?>{
+            'fileName': file.name,
+            'source': AppDiagnosticsLogger.summarizeUrl(resolvedSource),
+          },
+        );
         setState(() => _playError =
             _playerService.externalPlaybackMessage ?? '已使用外部播放器播放');
         return;
@@ -1776,6 +1852,15 @@ class _PlayerScreenState extends State<PlayerScreen>
       });
       _errorSub?.cancel();
       _errorSub = _playerService.player.stream.error.listen((message) {
+        AppDiagnosticsLogger.instance.warn(
+          'player_local_mpv',
+          'Player emitted error',
+          data: <String, Object?>{
+            'fileName': file.name,
+            'source': AppDiagnosticsLogger.summarizeUrl(resolvedSource),
+            'message': message,
+          },
+        );
         if (!mounted) return;
         final lower = message.toLowerCase();
         final isShaderError =
@@ -1895,6 +1980,14 @@ class _PlayerScreenState extends State<PlayerScreen>
       });
       _scheduleControlsHide();
     } catch (e) {
+      AppDiagnosticsLogger.instance.error(
+        'player_local_mpv',
+        'Unhandled local playback error',
+        data: <String, Object?>{
+          'fileName': file.name,
+        },
+        error: e,
+      );
       setState(() => _playError = e.toString());
     }
     setState(() {});

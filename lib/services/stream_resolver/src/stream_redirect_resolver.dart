@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:lin_player_server_api/network/lin_http_client.dart';
 
+import '../../app_diagnostics_log.dart';
+
 class StreamRedirectHop {
   const StreamRedirectHop({
     required this.uri,
@@ -282,6 +284,14 @@ class StreamRedirectResolver {
       );
 
       if ((meta == null || meta.statusCode == 405) && allowGetFallback) {
+        AppDiagnosticsLogger.instance.info(
+          'redirect',
+          'HEAD probe unavailable, falling back to GET',
+          data: <String, Object?>{
+            'url': AppDiagnosticsLogger.summarizeUrl(current.toString()),
+            'reason': meta == null ? 'head_failed' : 'status_405',
+          },
+        );
         meta = await _requestMeta(
           current,
           method: 'GET',

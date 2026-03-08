@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:lin_player_server_api/services/http_stream_proxy.dart';
 
+import '../app_diagnostics_log.dart';
 import '../stream_resolver/stream_models.dart';
 
 class LocalHttpStreamProxy {
@@ -34,6 +35,16 @@ class LocalHttpStreamProxy {
         remoteUri: uri,
         httpHeaders: candidate.httpHeaders,
         fileName: _suggestFileName(uri),
+      );
+      AppDiagnosticsLogger.instance.info(
+        'loopback_proxy',
+        'Wrapped STRM HTTP candidate with loopback proxy',
+        data: <String, Object?>{
+          'remote': AppDiagnosticsLogger.summarizeUrl(candidate.url),
+          'proxy': AppDiagnosticsLogger.summarizeUrl(proxyUri.toString()),
+          'headers':
+              AppDiagnosticsLogger.summarizeHeaderKeys(candidate.httpHeaders),
+        },
       );
       return PlayableSource(
         url: proxyUri.toString(),

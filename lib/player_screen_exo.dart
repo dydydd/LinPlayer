@@ -16,6 +16,7 @@ import 'package:video_player_android/exo_tracks.dart' as vp_android;
 import 'package:video_player_platform_interface/video_player_platform_interface.dart'
     as vp_platform;
 
+import 'services/app_diagnostics_log.dart';
 import 'services/app_route_observer.dart';
 import 'services/stream_proxy/local_http_stream_proxy.dart';
 import 'services/stream_resolver/stream_resolver.dart';
@@ -2041,13 +2042,40 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     final candidates =
         await LocalHttpStreamProxy.wrapCandidates(resolved.candidates);
     final looksLikeStrm = resolved.inputWasStrm;
+    AppDiagnosticsLogger.instance.info(
+      'player_local_exo',
+      'Resolved local playback candidates',
+      data: <String, Object?>{
+        'fileName': file.name,
+        'looksLikeStrm': looksLikeStrm,
+        'count': candidates.length,
+        'candidates': candidates
+            .map((c) => AppDiagnosticsLogger.summarizeUrl(c.url))
+            .join(' || '),
+      },
+    );
     if (candidates.isEmpty) {
+      AppDiagnosticsLogger.instance.warn(
+        'player_local_exo',
+        'No playable candidates for local file',
+        data: <String, Object?>{
+          'fileName': file.name,
+          'error': resolved.error?.message ?? '',
+        },
+      );
       setState(() => _playError = resolved.error?.message ?? '无法解析播放地址');
       return;
     }
 
     final source = candidates.first.url;
     if (source.isEmpty) {
+      AppDiagnosticsLogger.instance.warn(
+        'player_local_exo',
+        'First local playback candidate is empty',
+        data: <String, Object?>{
+          'fileName': file.name,
+        },
+      );
       setState(
         () => _playError = looksLikeStrm ? 'STRM 解析失败' : '无法读取文件路径',
       );
@@ -2121,6 +2149,16 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
             (scheme == 'http' || scheme == 'https') &&
             uri.host.trim().isNotEmpty;
 
+        AppDiagnosticsLogger.instance.info(
+          'player_local_exo',
+          'Trying local playback candidate',
+          data: <String, Object?>{
+            'fileName': file.name,
+            'source': AppDiagnosticsLogger.summarizeUrl(attemptSource),
+            'headers': AppDiagnosticsLogger.summarizeHeaderKeys(c.httpHeaders),
+            'network': isHttpUrl,
+          },
+        );
         try {
           if (uri == null || scheme.isEmpty) {
             controller = VideoPlayerController.file(
@@ -2164,9 +2202,29 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
           } else {
             await controller.play();
           }
+          AppDiagnosticsLogger.instance.info(
+            'player_local_exo',
+            'Selected local playback candidate',
+            data: <String, Object?>{
+              'fileName': file.name,
+              'source': AppDiagnosticsLogger.summarizeUrl(attemptSource),
+              'headers':
+                  AppDiagnosticsLogger.summarizeHeaderKeys(c.httpHeaders),
+              'network': isHttpUrl,
+            },
+          );
           break;
         } catch (e) {
           lastError = e;
+          AppDiagnosticsLogger.instance.warn(
+            'player_local_exo',
+            'Local playback candidate failed',
+            data: <String, Object?>{
+              'fileName': file.name,
+              'source': AppDiagnosticsLogger.summarizeUrl(attemptSource),
+              'error': AppDiagnosticsLogger.summarizeError(e),
+            },
+          );
           final failed = controller;
           controller = null;
           if (_controller == failed) _controller = null;
@@ -2185,6 +2243,14 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                 ? 'STRM 播放失败：$details'
                 : (resolved.error?.message ?? 'STRM 播放失败'))
             : (details.isNotEmpty ? details : '播放失败');
+        AppDiagnosticsLogger.instance.warn(
+          'player_local_exo',
+          'All local playback candidates failed',
+          data: <String, Object?>{
+            'fileName': file.name,
+            'error': msg,
+          },
+        );
         setState(() => _playError = msg);
         return;
       }
@@ -2271,6 +2337,14 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
       _scheduleControlsHide();
       if (mounted) setState(() {});
     } catch (e) {
+      AppDiagnosticsLogger.instance.error(
+        'player_local_exo',
+        'Unhandled local playback error',
+        data: <String, Object?>{
+          'fileName': file.name,
+        },
+        error: e,
+      );
       setState(() => _playError = e.toString());
     }
   }

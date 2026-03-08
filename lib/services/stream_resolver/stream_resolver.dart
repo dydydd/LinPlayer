@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 
+import '../app_diagnostics_log.dart';
 import '../strm/strm_resolver.dart';
 export 'stream_models.dart';
 import 'src/stream_body_link_resolver.dart';
@@ -172,6 +173,22 @@ class StreamResolver {
     return out;
   }
 
+  static String _summarizeCandidate(PlayableSource candidate) {
+    final parts = <String>[
+      'url=${AppDiagnosticsLogger.summarizeUrl(candidate.url)}',
+      'media=${candidate.mediaTypeHint.name}',
+      'headers=${AppDiagnosticsLogger.summarizeHeaderKeys(candidate.httpHeaders)}',
+    ];
+    if (candidate.supportsByteRange != null) {
+      parts.add('range=${candidate.supportsByteRange}');
+    }
+    final mime = (candidate.contentTypeHint ?? '').trim();
+    if (mime.isNotEmpty) {
+      parts.add('mime=$mime');
+    }
+    return parts.join(';');
+  }
+
   static Future<StreamResolveResult> resolve(
     StreamResolveRequest request, {
     StreamResolveOptions options = const StreamResolveOptions(),
@@ -181,6 +198,17 @@ class StreamResolver {
 
     final looksLikeStrm = StrmResolver.looksLikeStrmFileName(fileName) ||
         StrmResolver.looksLikeStrmPathOrUrl(source);
+
+    if (looksLikeStrm) {
+      AppDiagnosticsLogger.instance.info(
+        'strm',
+        'Resolving STRM input',
+        data: <String, Object?>{
+          'source': AppDiagnosticsLogger.summarizeUrl(source),
+          'fileName': fileName,
+        },
+      );
+    }
 
     if (!looksLikeStrm) {
       final headers = _mergeHeaders(request.httpHeaders, null);
@@ -288,6 +316,18 @@ class StreamResolver {
                 fromStrm: true,
               ),
             );
+            AppDiagnosticsLogger.instance.info(
+              'strm',
+              'Resolved STRM body link',
+              data: <String, Object?>{
+                'from': AppDiagnosticsLogger.summarizeUrl(
+                  r.effectiveUri.toString(),
+                ),
+                'to': AppDiagnosticsLogger.summarizeUrl(link.url.trim()),
+                'headers':
+                    AppDiagnosticsLogger.summarizeHeaderKeys(link.httpHeaders),
+              },
+            );
           }
         }
 
@@ -336,9 +376,19 @@ class StreamResolver {
       }
 
       final msg = (strm.error ?? 'STRM 解析失败').trim();
+      AppDiagnosticsLogger.instance.warn(
+        'strm',
+        'STRM resolution failed',
+        data: <String, Object?>{
+          'source': AppDiagnosticsLogger.summarizeUrl(source),
+          'error': msg,
+        },
+      );
       final code = msg.contains('无法读取')
           ? StreamErrorCode.strmReadFailed
-          : (msg.contains('未找到') ? StreamErrorCode.strmParseFailed : StreamErrorCode.unknown);
+          : (msg.contains('未找到')
+              ? StreamErrorCode.strmParseFailed
+              : StreamErrorCode.unknown);
       return StreamResolveResult.failure(
         error: StreamError(code: code, message: msg),
         inputWasStrm: true,
@@ -401,7 +451,8 @@ class StreamResolver {
         if (link != null && link.url.trim().isNotEmpty) {
           final bodyUri = Uri.tryParse(link.url.trim());
           final fromUri = r.effectiveUri;
-          final merged = _mergeHeaders(r.effectiveRequestHeaders, link.httpHeaders);
+          final merged =
+              _mergeHeaders(r.effectiveRequestHeaders, link.httpHeaders);
           final safe = bodyUri == null
               ? merged
               : _stripSensitiveHeadersIfCrossOrigin(
@@ -417,6 +468,16 @@ class StreamResolver {
               fromStrm: true,
             ),
           );
+          AppDiagnosticsLogger.instance.info(
+            'strm',
+            'Resolved STRM body link',
+            data: <String, Object?>{
+              'from': AppDiagnosticsLogger.summarizeUrl(fromUri.toString()),
+              'to': AppDiagnosticsLogger.summarizeUrl(link.url.trim()),
+              'headers':
+                  AppDiagnosticsLogger.summarizeHeaderKeys(link.httpHeaders),
+            },
+          );
         }
       }
 
@@ -428,7 +489,8 @@ class StreamResolver {
             (_getHeaderValue(effectiveHeaders, 'Cookie') ?? '').trim();
         final cookieAfter =
             (_getHeaderValue(r.effectiveRequestHeaders, 'Cookie') ?? '').trim();
-        final cookieChanged = cookieAfter.isNotEmpty && cookieAfter != cookieBefore;
+        final cookieChanged =
+            cookieAfter.isNotEmpty && cookieAfter != cookieBefore;
         return urlChanged || cookieChanged || r.hops.isNotEmpty;
       })();
 
@@ -458,6 +520,13 @@ class StreamResolver {
     }
 
     if (out.isEmpty) {
+      AppDiagnosticsLogger.instance.warn(
+        'strm',
+        'STRM resolved zero playable candidates',
+        data: <String, Object?>{
+          'source': AppDiagnosticsLogger.summarizeUrl(source),
+        },
+      );
       return StreamResolveResult.failure(
         error: const StreamError(
           code: StreamErrorCode.noCandidates,
@@ -467,6 +536,15 @@ class StreamResolver {
         usedDirectPlayFallback: false,
       );
     }
+
+    AppDiagnosticsLogger.instance.info(
+      'strm',
+      'Resolved STRM playable candidates',
+      data: <String, Object?>{
+        'count': out.length,
+        'candidates': out.map(_summarizeCandidate).join(' || '),
+      },
+    );
 
     return StreamResolveResult.success(
       candidates: out,
