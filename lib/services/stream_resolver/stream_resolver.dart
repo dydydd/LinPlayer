@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../strm/strm_resolver.dart';
 export 'stream_models.dart';
+import 'src/stream_body_link_resolver.dart';
 import 'src/stream_redirect_resolver.dart';
 import 'stream_models.dart';
 
@@ -62,6 +63,61 @@ class StreamResolver {
     final cr = (resolved.contentRange ?? '').trim();
     if (cr.isNotEmpty) return true;
     return null;
+  }
+
+  static bool _shouldResolveBodyLink(
+    StreamRedirectResolveResult resolved, {
+    required StreamResolveOptions options,
+  }) {
+    if (!options.resolveBodyLinkForStrmTargets) return false;
+
+    final status = resolved.statusCode;
+    if (status == 206) return false;
+    if (status != 200) return false;
+
+    final mime = (resolved.contentTypeMime ?? '').trim().toLowerCase();
+    if (mime.contains('mpegurl') || mime.contains('m3u8')) return false;
+    if (mime.contains('dash+xml')) return false;
+    if (mime.startsWith('video/') || mime.startsWith('audio/')) return false;
+
+    if (mime.startsWith('text/') || mime.contains('json')) return true;
+
+    final len = resolved.contentLength ?? -1;
+    final looksSmall = len > 0 && len <= options.bodyLinkResolveMaxBytes;
+    if (looksSmall && (mime.isEmpty || mime == 'application/octet-stream')) {
+      return true;
+    }
+
+    return false;
+  }
+
+  static bool _sameOrigin(Uri a, Uri b) {
+    int portOf(Uri u) => u.hasPort ? u.port : (u.scheme == 'https' ? 443 : 80);
+    return a.scheme == b.scheme && a.host == b.host && portOf(a) == portOf(b);
+  }
+
+  static Map<String, String> _stripSensitiveHeadersIfCrossOrigin(
+    Map<String, String> headers, {
+    required Uri from,
+    required Uri to,
+  }) {
+    if (_sameOrigin(from, to)) return headers;
+
+    final out = <String, String>{...headers};
+
+    void removeHeader(String name) {
+      final lower = name.toLowerCase();
+      final keys = out.keys.toList(growable: false);
+      for (final k in keys) {
+        if (k.toLowerCase() == lower) {
+          out.remove(k);
+        }
+      }
+    }
+
+    removeHeader('Cookie');
+    removeHeader('Authorization');
+    return out;
   }
 
   static List<String> _redirectChainFor(
@@ -206,6 +262,35 @@ class StreamResolver {
         final r = resolved;
         final effectiveUrl = (r?.effectiveUri.toString() ?? '').trim();
 
+        if (r != null && _shouldResolveBodyLink(r, options: options)) {
+          final link = await StreamBodyLinkResolver.resolve(
+            r.effectiveUri,
+            requestHeaders: r.effectiveRequestHeaders,
+            maxBytes: options.bodyLinkResolveMaxBytes,
+            timeout: options.bodyLinkResolveTimeout,
+          );
+          if (link != null && link.url.trim().isNotEmpty) {
+            final bodyUri = Uri.tryParse(link.url.trim());
+            final merged =
+                _mergeHeaders(r.effectiveRequestHeaders, link.httpHeaders);
+            final safe = bodyUri == null
+                ? merged
+                : _stripSensitiveHeadersIfCrossOrigin(
+                    merged,
+                    from: r.effectiveUri,
+                    to: bodyUri,
+                  );
+            out.add(
+              PlayableSource(
+                url: link.url.trim(),
+                httpHeaders: safe,
+                mediaTypeHint: _mediaTypeHintForUrl(link.url.trim()),
+                fromStrm: true,
+              ),
+            );
+          }
+        }
+
         final improved = (() {
           if (r == null) return false;
           if (effectiveUrl.isEmpty) return false;
@@ -305,6 +390,35 @@ class StreamResolver {
 
       final r = resolved;
       final effectiveUrl = (r?.effectiveUri.toString() ?? '').trim();
+
+      if (r != null && _shouldResolveBodyLink(r, options: options)) {
+        final link = await StreamBodyLinkResolver.resolve(
+          r.effectiveUri,
+          requestHeaders: r.effectiveRequestHeaders,
+          maxBytes: options.bodyLinkResolveMaxBytes,
+          timeout: options.bodyLinkResolveTimeout,
+        );
+        if (link != null && link.url.trim().isNotEmpty) {
+          final bodyUri = Uri.tryParse(link.url.trim());
+          final fromUri = r.effectiveUri;
+          final merged = _mergeHeaders(r.effectiveRequestHeaders, link.httpHeaders);
+          final safe = bodyUri == null
+              ? merged
+              : _stripSensitiveHeadersIfCrossOrigin(
+                  merged,
+                  from: fromUri,
+                  to: bodyUri,
+                );
+          out.add(
+            PlayableSource(
+              url: link.url.trim(),
+              httpHeaders: safe,
+              mediaTypeHint: _mediaTypeHintForUrl(link.url.trim()),
+              fromStrm: true,
+            ),
+          );
+        }
+      }
 
       final improved = (() {
         if (r == null) return false;

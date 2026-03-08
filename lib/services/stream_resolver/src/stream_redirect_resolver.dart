@@ -23,6 +23,7 @@ class StreamRedirectResolveResult {
     this.contentTypeMime,
     this.acceptRanges,
     this.contentRange,
+    this.contentLength,
     required this.hops,
     required this.effectiveRequestHeaders,
   });
@@ -32,6 +33,7 @@ class StreamRedirectResolveResult {
   final String? contentTypeMime;
   final String? acceptRanges;
   final String? contentRange;
+  final int? contentLength;
   final List<StreamRedirectHop> hops;
 
   /// Headers to use for requests to [effectiveUri] (includes merged cookies).
@@ -42,6 +44,14 @@ class StreamRedirectResolver {
   const StreamRedirectResolver._();
 
   static final Map<String, _CacheEntry> _cache = <String, _CacheEntry>{};
+
+  static bool _isLocalhostLikeHost(String host) {
+    final h = host.trim().toLowerCase();
+    return h == 'localhost' ||
+        h == '127.0.0.1' ||
+        h == '0.0.0.0' ||
+        h == '::1';
+  }
 
   static bool _isHttpUrl(Uri uri) {
     final s = uri.scheme.toLowerCase();
@@ -96,6 +106,18 @@ class StreamRedirectResolver {
     } catch (_) {
       return null;
     }
+  }
+
+  static Uri _rewriteLocalhostToBaseHost(Uri base, Uri target) {
+    if (!_isHttpUrl(target)) return target;
+    if (!_isLocalhostLikeHost(target.host)) return target;
+    if (base.host.trim().isEmpty || _isLocalhostLikeHost(base.host)) return target;
+
+    final int? port = target.hasPort ? target.port : (base.hasPort ? base.port : null);
+    return target.replace(
+      host: base.host,
+      port: port,
+    );
   }
 
   static String _cacheKey(Uri uri, Map<String, String> requestHeaders) {
@@ -185,6 +207,8 @@ class StreamRedirectResolver {
           response.headers.value('accept-ranges')?.trim();
       final contentRange =
           response.headers.value(HttpHeaders.contentRangeHeader)?.trim();
+      final rawLen = response.contentLength;
+      final contentLength = rawLen >= 0 ? rawLen : null;
 
       return _ResponseMeta(
         statusCode: statusCode,
@@ -199,6 +223,7 @@ class StreamRedirectResolver {
         contentRange: (contentRange == null || contentRange.isEmpty)
             ? null
             : contentRange,
+        contentLength: contentLength,
       );
     } on Exception {
       return null;
@@ -220,6 +245,8 @@ class StreamRedirectResolver {
     int cacheMaxEntries = 128,
   }) async {
     if (!_isHttpUrl(uri)) return null;
+
+    final origin = uri;
 
     final shouldCache =
         useCache && cacheTtl > Duration.zero && cacheMaxEntries > 0;
@@ -273,7 +300,8 @@ class StreamRedirectResolver {
       final location = meta.location;
 
       if (_isRedirectStatus(statusCode) && location != null && i < maxRedirects) {
-        final next = _resolveLocation(current, location);
+        final next0 = _resolveLocation(current, location);
+        final next = next0 == null ? null : _rewriteLocalhostToBaseHost(origin, next0);
         hops.add(
           StreamRedirectHop(
             uri: current,
@@ -297,6 +325,7 @@ class StreamRedirectResolver {
         contentTypeMime: meta.contentTypeMime,
         acceptRanges: meta.acceptRanges,
         contentRange: meta.contentRange,
+        contentLength: meta.contentLength,
         hops: List<StreamRedirectHop>.unmodifiable(hops),
         effectiveRequestHeaders: mergedHeaders,
       );
@@ -329,6 +358,7 @@ class StreamRedirectResolver {
       contentTypeMime: null,
       acceptRanges: null,
       contentRange: null,
+      contentLength: null,
       hops: List<StreamRedirectHop>.unmodifiable(hops),
       effectiveRequestHeaders: mergedHeaders,
     );
@@ -355,6 +385,7 @@ class _ResponseMeta {
     required this.contentTypeMime,
     required this.acceptRanges,
     required this.contentRange,
+    required this.contentLength,
   });
 
   final int statusCode;
@@ -363,6 +394,7 @@ class _ResponseMeta {
   final String? contentTypeMime;
   final String? acceptRanges;
   final String? contentRange;
+  final int? contentLength;
 }
 
 class _StoredCookie {

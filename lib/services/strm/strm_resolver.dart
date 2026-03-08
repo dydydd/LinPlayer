@@ -189,6 +189,17 @@ class StrmResolver {
     return StrmTargetParser.parseFirstTargetLine(raw);
   }
 
+  /// Parse the first valid target entry from STRM-like text and keep any
+  /// associated HTTP header options (pipe options / `#EXTVLCOPT`).
+  static StrmTarget? parseFirstTarget(String raw) {
+    final targets = StrmTargetParser.parse(raw, maxTargets: 1);
+    if (targets.isEmpty) return null;
+    final t = targets.first;
+    final url = t.url.trim();
+    if (url.isEmpty) return null;
+    return StrmTarget(url: url, httpHeaders: t.httpHeaders);
+  }
+
   static Future<StrmTextReadResult?> _readStrmText(
     String source, {
     List<int>? bytes,

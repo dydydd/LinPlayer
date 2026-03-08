@@ -138,6 +138,9 @@ class StreamResolveOptions {
     this.cacheRedirectResolution = true,
     this.redirectCacheTtl = const Duration(minutes: 1),
     this.redirectCacheMaxEntries = 128,
+    this.resolveBodyLinkForStrmTargets = true,
+    this.bodyLinkResolveMaxBytes = 16 * 1024,
+    this.bodyLinkResolveTimeout = const Duration(seconds: 4),
   });
 
   final bool preferBrowserUserAgentForStrm;
@@ -166,6 +169,17 @@ class StreamResolveOptions {
 
   /// Max number of redirect cache entries.
   final int redirectCacheMaxEntries;
+
+  /// Some STRM targets are not media URLs themselves, but an API endpoint that
+  /// returns a real playable URL (plain text / JSON). If enabled, the resolver
+  /// will fetch a small response body to extract that URL.
+  final bool resolveBodyLinkForStrmTargets;
+
+  /// Maximum bytes to read when resolving a "body link" endpoint.
+  final int bodyLinkResolveMaxBytes;
+
+  /// Per-request timeout when resolving a "body link" endpoint.
+  final Duration bodyLinkResolveTimeout;
 }
 
 class StreamResolverUserAgents {
