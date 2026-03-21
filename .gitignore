@@ -19,6 +19,7 @@
 .android/
 .gradle-dist/
 .gradle-home/
+.tmp/
 
 # API clients
 *.postman_collection.json
