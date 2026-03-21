@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
 
+import 'plugin_webview_node.dart';
 import '../tv/tv_focusable.dart';
 
 typedef PluginEventCallback = FutureOr<void> Function(
@@ -15,11 +16,15 @@ class PluginSchemaRenderer extends StatelessWidget {
     required this.schema,
     required this.onEvent,
     this.scrollable = true,
+    this.allowWebView = false,
+    this.allowedWebViewDomains = const <String>[],
   });
 
   final Object? schema;
   final PluginEventCallback onEvent;
   final bool scrollable;
+  final bool allowWebView;
+  final List<String> allowedWebViewDomains;
 
   @override
   Widget build(BuildContext context) {
@@ -28,6 +33,8 @@ class PluginSchemaRenderer extends StatelessWidget {
       schema,
       onEvent: onEvent,
       scrollable: scrollable,
+      allowWebView: allowWebView,
+      allowedWebViewDomains: allowedWebViewDomains,
     );
   }
 }
@@ -37,6 +44,8 @@ Widget _renderNode(
   Object? node, {
   required PluginEventCallback onEvent,
   required bool scrollable,
+  required bool allowWebView,
+  required List<String> allowedWebViewDomains,
 }) {
   if (node == null) {
     return const Center(child: Text('插件未返回 UI Schema'));
@@ -48,6 +57,8 @@ Widget _renderNode(
               e,
               onEvent: onEvent,
               scrollable: scrollable,
+              allowWebView: allowWebView,
+              allowedWebViewDomains: allowedWebViewDomains,
             ))
         .toList(growable: false);
     if (!scrollable) {
@@ -83,6 +94,8 @@ Widget _renderNode(
         props,
         onEvent: onEvent,
         scrollable: scrollable,
+        allowWebView: allowWebView,
+        allowedWebViewDomains: allowedWebViewDomains,
       );
       final effectivePadding =
           padding ?? const EdgeInsets.fromLTRB(16, 12, 16, 24);
@@ -99,6 +112,8 @@ Widget _renderNode(
           props,
           onEvent: onEvent,
           scrollable: scrollable,
+          allowWebView: allowWebView,
+          allowedWebViewDomains: allowedWebViewDomains,
         ),
       );
     case 'row':
@@ -110,6 +125,8 @@ Widget _renderNode(
           props,
           onEvent: onEvent,
           scrollable: scrollable,
+          allowWebView: allowWebView,
+          allowedWebViewDomains: allowedWebViewDomains,
         ),
       );
     case 'list':
@@ -121,6 +138,8 @@ Widget _renderNode(
           props,
           onEvent: onEvent,
           scrollable: scrollable,
+          allowWebView: allowWebView,
+          allowedWebViewDomains: allowedWebViewDomains,
         ),
       );
     case 'section':
@@ -132,6 +151,8 @@ Widget _renderNode(
           props,
           onEvent: onEvent,
           scrollable: scrollable,
+          allowWebView: allowWebView,
+          allowedWebViewDomains: allowedWebViewDomains,
         ),
       );
     case 'card':
@@ -147,6 +168,8 @@ Widget _renderNode(
                   props,
                   onEvent: onEvent,
                   scrollable: scrollable,
+                  allowWebView: allowWebView,
+                  allowedWebViewDomains: allowedWebViewDomains,
                 ),
         ),
       );
@@ -159,6 +182,8 @@ Widget _renderNode(
           props,
           onEvent: onEvent,
           scrollable: scrollable,
+          allowWebView: allowWebView,
+          allowedWebViewDomains: allowedWebViewDomains,
         ),
       );
     case 'divider':
@@ -211,6 +236,17 @@ Widget _renderNode(
           ),
         ),
       );
+    case 'webview':
+      if (!allowWebView) {
+        return _renderNodeNotice(context, '当前区域不支持 webview');
+      }
+      return Padding(
+        padding: padding ?? EdgeInsets.zero,
+        child: PluginWebViewNode(
+          props: props,
+          allowedDomains: allowedWebViewDomains,
+        ),
+      );
     case 'button':
       return _renderButton(context, props, onEvent: onEvent);
     case 'iconbutton':
@@ -245,11 +281,20 @@ Widget _renderColumnLike(
   Map<String, Object?> props, {
   required PluginEventCallback onEvent,
   required bool scrollable,
+  required bool allowWebView,
+  required List<String> allowedWebViewDomains,
 }) {
   final gap = _asDouble(props['gap']);
   final rendered = children
       .map((e) =>
-          _renderNode(context, e, onEvent: onEvent, scrollable: scrollable))
+          _renderNode(
+            context,
+            e,
+            onEvent: onEvent,
+            scrollable: scrollable,
+            allowWebView: allowWebView,
+            allowedWebViewDomains: allowedWebViewDomains,
+          ))
       .toList(growable: false);
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
@@ -263,6 +308,8 @@ Widget _renderSection(
   Map<String, Object?> props, {
   required PluginEventCallback onEvent,
   required bool scrollable,
+  required bool allowWebView,
+  required List<String> allowedWebViewDomains,
 }) {
   final title = (props['title'] as String? ?? '').trim();
   final subtitle = (props['subtitle'] as String? ?? '').trim();
@@ -274,6 +321,8 @@ Widget _renderSection(
     props,
     onEvent: onEvent,
     scrollable: scrollable,
+    allowWebView: allowWebView,
+    allowedWebViewDomains: allowedWebViewDomains,
   );
 
   if (title.isEmpty && subtitle.isEmpty) return body;
@@ -310,12 +359,21 @@ Widget _renderGrid(
   Map<String, Object?> props, {
   required PluginEventCallback onEvent,
   required bool scrollable,
+  required bool allowWebView,
+  required List<String> allowedWebViewDomains,
 }) {
   final columns = (_asDouble(props['columns']) ?? 1).round().clamp(1, 6);
   final gap = _asDouble(props['gap']) ?? 12;
   final rendered = children
       .map((e) =>
-          _renderNode(context, e, onEvent: onEvent, scrollable: scrollable))
+          _renderNode(
+            context,
+            e,
+            onEvent: onEvent,
+            scrollable: scrollable,
+            allowWebView: allowWebView,
+            allowedWebViewDomains: allowedWebViewDomains,
+          ))
       .toList(growable: false);
 
   return LayoutBuilder(
@@ -351,15 +409,35 @@ Widget _renderRowLike(
   Map<String, Object?> props, {
   required PluginEventCallback onEvent,
   required bool scrollable,
+  required bool allowWebView,
+  required List<String> allowedWebViewDomains,
 }) {
   final gap = _asDouble(props['gap']);
   final rendered = children
       .map((e) =>
-          _renderNode(context, e, onEvent: onEvent, scrollable: scrollable))
+          _renderNode(
+            context,
+            e,
+            onEvent: onEvent,
+            scrollable: scrollable,
+            allowWebView: allowWebView,
+            allowedWebViewDomains: allowedWebViewDomains,
+          ))
       .toList(growable: false);
   return Row(
     crossAxisAlignment: CrossAxisAlignment.center,
     children: _withGap(rendered, gap, axis: Axis.horizontal),
+  );
+}
+
+Widget _renderNodeNotice(BuildContext context, String message) {
+  return Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Text(message),
   );
 }
 

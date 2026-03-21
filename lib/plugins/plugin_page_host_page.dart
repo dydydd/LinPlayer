@@ -195,6 +195,8 @@ class _PluginPageHostPageState extends State<PluginPageHostPage> {
             : PluginSchemaRenderer(
                 schema: _schema,
                 onEvent: _onEvent,
+                allowWebView: true,
+                allowedWebViewDomains: widget.manifest.permissions.network.domains,
               ));
 
     final rt = _runtime;

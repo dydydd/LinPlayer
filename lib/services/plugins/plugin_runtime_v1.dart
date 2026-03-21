@@ -13,6 +13,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_windows/webview_windows.dart' as webview_windows;
 
 import 'plugin_manager.dart';
+import 'plugin_runtime_policy_v1.dart';
 
 class PluginRuntimeException implements Exception {
   PluginRuntimeException(this.message);
@@ -475,22 +476,7 @@ class PluginRuntimeV1 {
   }
 
   bool _domainAllowed(String host) {
-    final domains = manifest.permissions.network.domains;
-    if (domains.any((d) => d.trim() == '*')) return true;
-    final h = host.toLowerCase();
-    for (final raw in domains) {
-      final d = raw.trim().toLowerCase();
-      if (d.isEmpty) continue;
-      if (d == h) return true;
-      if (h.endsWith('.$d')) return true;
-      if (d.startsWith('*.')) {
-        final suffix = d.substring(2);
-        if (suffix.isNotEmpty && (h == suffix || h.endsWith('.$suffix'))) {
-          return true;
-        }
-      }
-    }
-    return false;
+    return pluginDomainAllowedV1(manifest.permissions.network.domains, host);
   }
 
   Future<Object?> _handleNetRequest(Object? args) async {

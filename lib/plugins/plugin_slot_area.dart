@@ -370,6 +370,8 @@ class _PluginSlotHostState extends State<_PluginSlotHost> {
       schema: _schema,
       onEvent: _onEvent,
       scrollable: false,
+      allowWebView: false,
+      allowedWebViewDomains: widget.manifest.permissions.network.domains,
     );
     if (rt == null) return body;
 
