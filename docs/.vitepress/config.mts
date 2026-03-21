@@ -55,6 +55,7 @@ export default defineConfig({
           text: '开发',
           items: [
             { text: '开发者文档', link: '/dev/' },
+            { text: '最近更新日志（2026-03）', link: '/dev/RECENT_CHANGELOG' },
             { text: '插件宿主清单（V1）', link: '/dev/PLUGIN_HOST_V1' },
             { text: '插件作者规范（V1）', link: '/dev/PLUGIN_SPEC_V1' },
             { text: '源码导览 / 架构', link: '/dev/ARCHITECTURE' },

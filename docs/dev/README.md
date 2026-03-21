@@ -57,6 +57,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tool/fetch_tv_proxy_assets.p
 桌面端 UI 专项重构说明：`docs/dev/DESKTOP_UI_ARCHITECTURE.md`
 播放内核优化建议：`docs/dev/PLAYER_CORE_OPTIMIZATION.md`
 
+## 维护记录
+
+最近更新日志（2026-03）：`docs/dev/RECENT_CHANGELOG.md`
+
 ## CI / 发布
 
 - Nightly 构建：`.github/workflows/build-all.yml`

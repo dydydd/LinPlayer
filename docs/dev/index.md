@@ -62,6 +62,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tool/fetch_tv_proxy_assets.p
 - 宿主开发清单：`/dev/PLUGIN_HOST_V1`
 - 插件作者规范：`/dev/PLUGIN_SPEC_V1`
 
+## 维护记录
+
+- 最近更新日志（2026-03）：`/dev/RECENT_CHANGELOG`
+
 ## CI / 发布
 
 - Nightly 构建：`.github/workflows/build-all.yml`
