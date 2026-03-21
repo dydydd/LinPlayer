@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'plugin_manager.dart';
+import 'plugin_remote_url_v1.dart';
 
 class PluginRegistryEntryV1 {
   const PluginRegistryEntryV1({
@@ -44,7 +45,12 @@ class PluginRegistryServiceV1 {
     final client = http.Client();
     try {
       final bytes = await _downloadBytes(client, uri);
-      final decoded = jsonDecode(utf8.decode(bytes));
+      Object? decoded;
+      try {
+        decoded = jsonDecode(utf8.decode(bytes));
+      } on FormatException {
+        throw PluginInstallException('registry.json 格式错误，链接可能不是原始 JSON 文件');
+      }
       final parsed = _parseRegistryEntries(decoded, registryUri: uri);
       if (parsed.isEmpty) {
         throw PluginInstallException('registry.json 未发现可安装插件');
@@ -159,11 +165,9 @@ PluginRegistryEntryV1? _parseRegistryEntry(
   String? forcedId,
 }) {
   if (raw is! Map) return null;
-  final id = (forcedId ??
-          _readString(raw['id']) ??
-          _readString(raw['pluginId']) ??
-          '')
-      .trim();
+  final id =
+      (forcedId ?? _readString(raw['id']) ?? _readString(raw['pluginId']) ?? '')
+          .trim();
   if (id.isEmpty) return null;
 
   final name = (_readString(raw['name']) ??
@@ -193,8 +197,7 @@ PluginRegistryEntryV1? _parseRegistryEntry(
         inheritedTargets: baseTargets,
       );
       if (info == null) continue;
-      if (version.isEmpty ||
-          comparePluginSemVerV1(info.version, version) > 0) {
+      if (version.isEmpty || comparePluginSemVerV1(info.version, version) > 0) {
         version = info.version;
         manifestUrl = info.manifestUrl;
         targets = info.targets;
@@ -248,8 +251,9 @@ _RegistryVersionInfo? _parseRegistryVersionInfo(
     if (_isEmptyOrInvalidVersion(version)) return null;
     return _RegistryVersionInfo(
       version: version,
-      manifestUrl:
-          registryRoot.resolve('plugins/$pluginId/$version/manifest.json').toString(),
+      manifestUrl: registryRoot
+          .resolve('plugins/$pluginId/$version/manifest.json')
+          .toString(),
       targets: inheritedTargets,
     );
   }
@@ -269,7 +273,9 @@ _RegistryVersionInfo? _parseRegistryVersionInfo(
           '')
       .trim();
   final manifestUrl = manifestRaw.isEmpty
-      ? registryRoot.resolve('plugins/$pluginId/$version/manifest.json').toString()
+      ? registryRoot
+          .resolve('plugins/$pluginId/$version/manifest.json')
+          .toString()
       : _resolveUrl(registryRoot, manifestRaw);
   final targets = _parseTargets(raw['targets'] ?? raw['platforms']);
 
@@ -322,7 +328,7 @@ Uri _parseAbsoluteUrl(
   if (!uri.isAbsolute) {
     throw PluginInstallException(error);
   }
-  return uri;
+  return normalizePluginRemoteUriV1(uri);
 }
 
 Uri? _deriveRegistryUrl(Uri manifestUrl) {

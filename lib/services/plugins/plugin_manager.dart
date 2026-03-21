@@ -9,6 +9,8 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'plugin_remote_url_v1.dart';
+
 enum PluginTarget { tv, mobile, pc }
 
 const Set<String> pluginAllowedSlotIdsV1 = <String>{
@@ -475,8 +477,14 @@ class PluginManifestV1 {
   });
 
   factory PluginManifestV1.fromBytes(List<int> bytes) {
-    final rawText = utf8.decode(bytes);
-    final decoded = jsonDecode(rawText);
+    late final String rawText;
+    Object? decoded;
+    try {
+      rawText = utf8.decode(bytes);
+      decoded = jsonDecode(rawText);
+    } on FormatException {
+      throw PluginInstallException('manifest.json 格式错误，链接可能不是原始 JSON 文件');
+    }
     if (decoded is! Map) {
       throw PluginInstallException('manifest.json 顶层格式错误（不是对象）');
     }
@@ -755,11 +763,12 @@ class PluginManagerV1 {
     if (url.isEmpty) throw PluginInstallException('下载链接不能为空');
     Uri uri;
     try {
-      uri = Uri.parse(url);
+      uri = normalizePluginRemoteUriV1(Uri.parse(url));
     } catch (_) {
       throw PluginInstallException('下载链接不是合法 URL');
     }
     if (!uri.isAbsolute) throw PluginInstallException('下载链接必须是绝对 URL');
+    final normalizedManifestUrl = uri.toString();
 
     final client = http.Client();
     try {
@@ -838,7 +847,7 @@ class PluginManagerV1 {
           InstalledPluginV1(
             id: manifest.id,
             version: manifest.version,
-            manifestUrl: url,
+            manifestUrl: normalizedManifestUrl,
             enabled: true,
             installedAtMs: nowMs,
           ),
