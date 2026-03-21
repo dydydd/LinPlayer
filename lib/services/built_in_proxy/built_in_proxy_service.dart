@@ -1181,22 +1181,6 @@ class BuiltInProxyService extends ChangeNotifier {
     return false;
   }
 
-  Future<void> _ensureMihomoInstalled(File exe) async {
-    if (await exe.exists()) return;
-
-    final ok = await _installBundledMihomo(exe);
-    if (!ok) {
-      _lastError = '未安装 mihomo（缺少内置资源，或 ABI 不支持）';
-      await refresh();
-      throw StateError(_lastError!);
-    }
-  }
-
-  Future<bool> _installBundledMihomo(File exe) async {
-    final _ = exe;
-    return false;
-  }
-
   Future<Directory> _uiBaseDir() async {
     final root = await getApplicationSupportDirectory();
     final dir = Directory('${root.path}/built_in_proxy/ui');
