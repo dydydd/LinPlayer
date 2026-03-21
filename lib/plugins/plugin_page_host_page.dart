@@ -188,19 +188,6 @@ class _PluginPageHostPageState extends State<PluginPageHostPage> {
 
     final title = _pageTitle ?? widget.page.title;
 
-    final body = _loading
-        ? const Center(child: CircularProgressIndicator())
-        : (_error != null
-            ? Center(child: Text(_error!))
-            : PluginSchemaRenderer(
-                schema: _schema,
-                onEvent: _onEvent,
-                allowWebView: true,
-                allowedWebViewDomains: widget.manifest.permissions.network.domains,
-              ));
-
-    final rt = _runtime;
-
     return Scaffold(
       appBar: GlassAppBar(
         enableBlur: enableBlur,
@@ -209,23 +196,17 @@ class _PluginPageHostPageState extends State<PluginPageHostPage> {
           centerTitle: true,
         ),
       ),
-      body: Stack(
-        children: [
-          if (rt != null) ...[
-            IgnorePointer(
-              child: SizedBox(
-                width: 1,
-                height: 1,
-                child: Opacity(
-                  opacity: 0,
-                  child: rt.buildView(),
-                ),
-              ),
-            ),
-          ],
-          Positioned.fill(child: body),
-        ],
-      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : (_error != null
+              ? Center(child: Text(_error!))
+              : PluginSchemaRenderer(
+                  schema: _schema,
+                  onEvent: _onEvent,
+                  allowWebView: true,
+                  allowedWebViewDomains:
+                      widget.manifest.permissions.network.domains,
+                )),
     );
   }
 }

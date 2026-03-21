@@ -161,7 +161,7 @@ class _PluginsPageState extends State<PluginsPage> {
       );
       if (!runtimeSupported) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('注意：当前平台暂不支持脚本插件运行（需要 WebView 支持）')),
+          const SnackBar(content: Text('注意：当前平台暂不支持脚本插件运行')),
         );
       }
       await _reload();
@@ -238,12 +238,14 @@ class _PluginsPageState extends State<PluginsPage> {
                 final installed = _findInstalledById(entry.id);
                 final stateText = installed == null
                     ? '未安装'
-                    : comparePluginSemVerV1(entry.version, installed.version) > 0
+                    : comparePluginSemVerV1(entry.version, installed.version) >
+                            0
                         ? '可更新：${installed.version} -> ${entry.version}'
                         : '已安装：${installed.version}';
                 return ListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: Text(entry.name.trim().isEmpty ? entry.id : entry.name),
+                  title:
+                      Text(entry.name.trim().isEmpty ? entry.id : entry.name),
                   subtitle: Text(
                     [
                       if (entry.description.trim().isNotEmpty)
@@ -399,7 +401,7 @@ class _PluginsPageState extends State<PluginsPage> {
   ) async {
     if (!pluginRuntimeSupportedV1()) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('当前平台暂不支持脚本插件运行（需要 WebView 支持）')),
+        const SnackBar(content: Text('当前平台暂不支持脚本插件运行')),
       );
       return;
     }
@@ -528,8 +530,8 @@ class _PluginsPageState extends State<PluginsPage> {
                                 ),
                                 TextButton.icon(
                                   onPressed: () => _checkUpdate(context, p),
-                                  icon:
-                                      const Icon(Icons.system_update_alt_outlined),
+                                  icon: const Icon(
+                                      Icons.system_update_alt_outlined),
                                   label: const Text('更新'),
                                 ),
                                 TextButton.icon(

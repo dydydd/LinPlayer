@@ -1634,7 +1634,7 @@ class _PluginEntryActionsState extends State<_PluginEntryActions> {
   Future<void> _open(_PluginEntryPage entry) async {
     if (!pluginRuntimeSupportedV1()) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('当前平台暂不支持脚本插件运行（需要 WebView 支持）')),
+        const SnackBar(content: Text('当前平台暂不支持脚本插件运行')),
       );
       return;
     }

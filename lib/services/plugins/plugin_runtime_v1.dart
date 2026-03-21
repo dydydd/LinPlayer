@@ -1,16 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
-import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/widgets.dart';
 import 'package:flutter_js/flutter_js.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_windows/webview_windows.dart' as webview_windows;
 
 import 'plugin_manager.dart';
 import 'plugin_runtime_policy_v1.dart';
@@ -24,107 +20,41 @@ class PluginRuntimeException implements Exception {
   String toString() => 'PluginRuntimeException: $message';
 }
 
-bool pluginRuntimeSupportedV1() {
-  if (kIsWeb) return false;
-  return switch (defaultTargetPlatform) {
-    TargetPlatform.android => true,
-    TargetPlatform.iOS => true,
-    TargetPlatform.macOS => true,
-    TargetPlatform.windows => true,
-    TargetPlatform.linux => true,
-    _ => false,
+enum PluginRuntimeBackendKindV1 { unsupported, flutterJs }
+
+@visibleForTesting
+PluginRuntimeBackendKindV1 selectPluginRuntimeBackendKindV1({
+  required bool isWeb,
+  required TargetPlatform platform,
+}) {
+  if (isWeb) return PluginRuntimeBackendKindV1.unsupported;
+  return switch (platform) {
+    TargetPlatform.android => PluginRuntimeBackendKindV1.flutterJs,
+    TargetPlatform.iOS => PluginRuntimeBackendKindV1.flutterJs,
+    TargetPlatform.macOS => PluginRuntimeBackendKindV1.flutterJs,
+    TargetPlatform.windows => PluginRuntimeBackendKindV1.flutterJs,
+    TargetPlatform.linux => PluginRuntimeBackendKindV1.flutterJs,
+    _ => PluginRuntimeBackendKindV1.unsupported,
   };
 }
 
-abstract class _PluginWebBackendV1 {
+bool pluginRuntimeSupportedV1() {
+  return selectPluginRuntimeBackendKindV1(
+        isWeb: kIsWeb,
+        platform: defaultTargetPlatform,
+      ) !=
+      PluginRuntimeBackendKindV1.unsupported;
+}
+
+abstract class _PluginScriptBackendV1 {
   Future<void> init({required ValueChanged<Object?> onMessage});
 
   Future<void> runJavaScript(String js);
 
-  Widget buildView();
-
   Future<void> dispose();
 }
 
-class _FlutterWebBackendV1 implements _PluginWebBackendV1 {
-  _FlutterWebBackendV1({required this.channelName});
-
-  static const String _blankHtml =
-      '<!DOCTYPE html><html><head><meta charset="utf-8" /></head><body></body></html>';
-
-  final String channelName;
-
-  final WebViewController _controller = WebViewController();
-
-  @override
-  Future<void> init({required ValueChanged<Object?> onMessage}) async {
-    await _controller.setJavaScriptMode(JavaScriptMode.unrestricted);
-    await _controller.setBackgroundColor(const Color(0x00000000));
-    _controller.setNavigationDelegate(
-      NavigationDelegate(
-        onNavigationRequest: (req) => NavigationDecision.prevent,
-      ),
-    );
-    _controller.addJavaScriptChannel(
-      channelName,
-      onMessageReceived: (msg) => onMessage(msg.message),
-    );
-    await _controller.loadHtmlString(_blankHtml);
-  }
-
-  @override
-  Future<void> runJavaScript(String js) => _controller.runJavaScript(js);
-
-  @override
-  Widget buildView() => WebViewWidget(controller: _controller);
-
-  @override
-  Future<void> dispose() async {}
-}
-
-class _WindowsWebBackendV1 implements _PluginWebBackendV1 {
-  static const String _blankHtml =
-      '<!DOCTYPE html><html><head><meta charset="utf-8" /></head><body></body></html>';
-
-  final webview_windows.WebviewController _controller =
-      webview_windows.WebviewController();
-
-  StreamSubscription? _sub;
-
-  @override
-  Future<void> init({required ValueChanged<Object?> onMessage}) async {
-    final version = await webview_windows.WebviewController.getWebViewVersion();
-    if (version == null || version.trim().isEmpty) {
-      throw PluginRuntimeException(
-        '未检测到 WebView2 Runtime，请先安装后重启软件：'
-        'https://developer.microsoft.com/microsoft-edge/webview2/',
-      );
-    }
-
-    await _controller.initialize();
-    await _controller
-        .setPopupWindowPolicy(webview_windows.WebviewPopupWindowPolicy.deny);
-    await _controller.setBackgroundColor(const Color(0x00000000));
-    _sub = _controller.webMessage.listen(onMessage, onError: (_) {});
-    await _controller.loadStringContent(_blankHtml);
-  }
-
-  @override
-  Future<void> runJavaScript(String js) async {
-    await _controller.executeScript(js);
-  }
-
-  @override
-  Widget buildView() => webview_windows.Webview(_controller);
-
-  @override
-  Future<void> dispose() async {
-    await _sub?.cancel();
-    await _controller.dispose();
-  }
-}
-
-class _FlutterJsBackendV1 implements _PluginWebBackendV1 {
+class _FlutterJsBackendV1 implements _PluginScriptBackendV1 {
   _FlutterJsBackendV1({required this.channelName});
 
   final String channelName;
@@ -160,9 +90,6 @@ class _FlutterJsBackendV1 implements _PluginWebBackendV1 {
   }
 
   @override
-  Widget buildView() => const SizedBox.shrink();
-
-  @override
   Future<void> dispose() async {
     _runtime?.dispose();
     _runtime = null;
@@ -183,13 +110,7 @@ class PluginRuntimeV1 {
   final PluginManifestV1 manifest;
   final PluginTarget target;
 
-  _PluginWebBackendV1? _backend;
-
-  Widget buildView() {
-    final backend = _backend;
-    if (backend == null) return const SizedBox.shrink();
-    return backend.buildView();
-  }
+  _PluginScriptBackendV1? _backend;
 
   final Completer<void> _ready = Completer<void>();
   final Map<String, Completer<Object?>> _pendingHostCalls = {};
@@ -199,16 +120,19 @@ class PluginRuntimeV1 {
   bool _disposed = false;
 
   Future<void> init() async {
-    if (!pluginRuntimeSupportedV1()) {
-      throw PluginRuntimeException(
-        '当前平台暂不支持脚本插件运行（需要 WebView 支持）',
-      );
+    final backendKind = selectPluginRuntimeBackendKindV1(
+      isWeb: kIsWeb,
+      platform: defaultTargetPlatform,
+    );
+    if (backendKind == PluginRuntimeBackendKindV1.unsupported) {
+      throw PluginRuntimeException('当前平台暂不支持脚本插件运行');
     }
 
-    final backend = switch (defaultTargetPlatform) {
-      TargetPlatform.windows => _WindowsWebBackendV1(),
-      TargetPlatform.linux => _FlutterJsBackendV1(channelName: _channelName),
-      _ => _FlutterWebBackendV1(channelName: _channelName),
+    final backend = switch (backendKind) {
+      PluginRuntimeBackendKindV1.flutterJs =>
+        _FlutterJsBackendV1(channelName: _channelName),
+      PluginRuntimeBackendKindV1.unsupported =>
+        throw StateError('unsupported backend should have been rejected'),
     };
     _backend = backend;
 

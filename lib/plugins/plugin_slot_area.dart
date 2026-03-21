@@ -117,7 +117,8 @@ class _PluginSlotAreaState extends State<PluginSlotArea> {
         final children = items
             .map(
               (it) => _PluginSlotHost(
-                key: ValueKey('${it.plugin.id}@${it.plugin.version}@${it.slot.id}'),
+                key: ValueKey(
+                    '${it.plugin.id}@${it.plugin.version}@${it.slot.id}'),
                 appState: widget.appState,
                 plugin: it.plugin,
                 manifest: it.manifest,
@@ -170,7 +171,7 @@ class _PluginRuntimeUnsupportedHint extends StatelessWidget {
         ),
       ),
       child: Text(
-        '当前平台暂不支持脚本插件运行（需要 WebView 支持）。',
+        '当前平台暂不支持脚本插件运行。',
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: scheme.onSurfaceVariant,
               height: 1.3,
@@ -365,7 +366,6 @@ class _PluginSlotHostState extends State<_PluginSlotHost> {
         ),
       );
     }
-    final rt = _runtime;
     final body = PluginSchemaRenderer(
       schema: _schema,
       onEvent: _onEvent,
@@ -373,23 +373,7 @@ class _PluginSlotHostState extends State<_PluginSlotHost> {
       allowWebView: false,
       allowedWebViewDomains: widget.manifest.permissions.network.domains,
     );
-    if (rt == null) return body;
-
-    return Stack(
-      children: [
-        IgnorePointer(
-          child: SizedBox(
-            width: 1,
-            height: 1,
-            child: Opacity(
-              opacity: 0,
-              child: rt.buildView(),
-            ),
-          ),
-        ),
-        body,
-      ],
-    );
+    return body;
   }
 }
 
