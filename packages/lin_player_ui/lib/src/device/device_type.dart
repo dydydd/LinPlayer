@@ -50,6 +50,25 @@ class DeviceType {
     }
   }
 
+  static Future<bool> copyBundledAsset({
+    required String assetPath,
+    required String destinationPath,
+  }) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return false;
+    final asset = assetPath.trim();
+    final destination = destinationPath.trim();
+    if (asset.isEmpty || destination.isEmpty) return false;
+    try {
+      final ok = await _channel.invokeMethod<bool>('copyBundledAsset', {
+        'assetPath': asset,
+        'destinationPath': destination,
+      });
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Future<bool> setHttpProxy({
     required String host,
     required int port,

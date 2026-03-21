@@ -67,6 +67,19 @@ class MainActivity : FlutterActivity() {
                 "totalRxBytes" -> result.success(totalRxBytes())
                 "primaryAbi" -> result.success(primaryAbi())
                 "nativeLibraryDir" -> result.success(applicationInfo.nativeLibraryDir)
+                "copyBundledAsset" -> {
+                    val assetPath = call.argument<String>("assetPath") ?: ""
+                    val destinationPath = call.argument<String>("destinationPath") ?: ""
+                    if (assetPath.isBlank() || destinationPath.isBlank()) {
+                        result.success(false)
+                        return@setMethodCallHandler
+                    }
+                    try {
+                        result.success(copyBundledAsset(assetPath, destinationPath))
+                    } catch (e: Exception) {
+                        result.error("copy_bundled_asset_failed", e.message, null)
+                    }
+                }
                 "setExecutable" -> {
                     val path = call.argument<String>("path") ?: ""
                     if (path.isBlank()) {
@@ -226,6 +239,31 @@ class MainActivity : FlutterActivity() {
         if (v == TrafficStats.UNSUPPORTED.toLong()) return null
         if (v < 0) return null
         return v
+    }
+
+    private fun copyBundledAsset(assetPath: String, destinationPath: String): Boolean {
+        val asset = assetPath.trim().removePrefix("/")
+        val destination = destinationPath.trim()
+        if (asset.isEmpty() || destination.isEmpty()) return false
+
+        val outFile = File(destination)
+        outFile.parentFile?.mkdirs()
+
+        return try {
+            applicationContext.assets.open(asset).use { input ->
+                outFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            true
+        } catch (_: IOException) {
+            try {
+                outFile.delete()
+            } catch (_: Exception) {
+                // Ignore cleanup failures.
+            }
+            false
+        }
     }
 
     private fun primaryAbi(): String? {

@@ -92,12 +92,6 @@ flutter:
     - assets/images/TMDB.png
     - assets/images/trakt.png
     - assets/shaders/anime4k/
-    - assets/tv_proxy/
-    - assets/tv_proxy/mihomo/android/arm64-v8a/
-    - assets/tv_proxy/mihomo/android/armeabi-v7a/
-    - assets/tv_proxy/mihomo/android/x86_64/
-    - assets/tv_proxy/mihomo/android/x86/
-    - assets/tv_proxy/metacubexd/
     - assets/tv_remote/
     - assets/tv_remote/images/
   fonts:

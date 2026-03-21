@@ -2,9 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:archive/archive.dart';
+import 'package:flutter/foundation.dart';
 import 'package:lin_player_server_api/network/lin_http_client.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:path_provider/path_provider.dart';
@@ -71,8 +70,11 @@ class BuiltInProxyService extends ChangeNotifier {
   static const int mixedPort = 7890;
   static const int controllerPort = 9090;
   static const String _nativeMihomoSoName = 'libmihomo.so';
+  static const String _bundledMetacubexdAssetPath =
+      'tv_proxy/metacubexd/compressed-dist.tgz';
   static const String _kSubscriptionUrlKey = 'tvBuiltInProxySubscriptionUrl_v1';
-  static const String _kMediaServerLinesKey = 'tvBuiltInProxyMediaServerLines_v1';
+  static const String _kMediaServerLinesKey =
+      'tvBuiltInProxyMediaServerLines_v1';
   static const String _kExcludeHighMultiplierNodesKey =
       'tvBuiltInProxyExcludeHighMultiplierNodes_v1';
   static const String _highMultiplierNodeExcludeRegex =
@@ -186,7 +188,8 @@ class BuiltInProxyService extends ChangeNotifier {
 
     final prefs = await SharedPreferences.getInstance();
     final current = prefs.getStringList(_kMediaServerLinesKey) ?? const [];
-    final next = current.where((e) => e.trim() != target).toList(growable: false);
+    final next =
+        current.where((e) => e.trim() != target).toList(growable: false);
     if (next.length == current.length) return false;
 
     if (next.isEmpty) {
@@ -271,9 +274,8 @@ class BuiltInProxyService extends ChangeNotifier {
       if (map == null) return null;
 
       final nowRaw = map['now'];
-      final now = nowRaw is String && nowRaw.trim().isNotEmpty
-          ? nowRaw.trim()
-          : null;
+      final now =
+          nowRaw is String && nowRaw.trim().isNotEmpty ? nowRaw.trim() : null;
 
       final allRaw = map['all'];
       final all = <String>[];
@@ -315,9 +317,8 @@ class BuiltInProxyService extends ChangeNotifier {
       ..connectionTimeout = _controllerTimeout
       ..findProxy = (_) => 'DIRECT';
     try {
-      final request = await client
-          .openUrl('PUT', uri)
-          .timeout(_controllerTimeout);
+      final request =
+          await client.openUrl('PUT', uri).timeout(_controllerTimeout);
       request.headers.contentType = ContentType.json;
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
       request.write(jsonEncode({'name': proxy}));
@@ -401,14 +402,17 @@ class BuiltInProxyService extends ChangeNotifier {
 
     final concurrency = maxConcurrency.clamp(1, 12);
     for (var i = 0; i < names.length; i += concurrency) {
-      final end = (i + concurrency) > names.length ? names.length : i + concurrency;
+      final end =
+          (i + concurrency) > names.length ? names.length : i + concurrency;
       final batch = names.sublist(i, end);
       final results = await Future.wait(
-        batch.map((n) async => MapEntry(n, await fetchProxyDelayMs(
-          n,
-          url: url,
-          timeout: timeout,
-        ))),
+        batch.map((n) async => MapEntry(
+            n,
+            await fetchProxyDelayMs(
+              n,
+              url: url,
+              timeout: timeout,
+            ))),
       );
       for (final e in results) {
         out[e.key] = e.value;
@@ -507,13 +511,13 @@ class BuiltInProxyService extends ChangeNotifier {
     final uiRoot = await _ensureMetacubexdReady();
     await _ensureConfigPatched(externalUiDir: uiRoot);
 
-     _lastError = null;
-     _lastExitCode = null;
-     _logTail.clear();
-     _status = BuiltInProxyStatus(
-       state: BuiltInProxyState.starting,
-       message: '启动中…',
-       executablePath: exe.path,
+    _lastError = null;
+    _lastExitCode = null;
+    _logTail.clear();
+    _status = BuiltInProxyStatus(
+      state: BuiltInProxyState.starting,
+      message: '启动中…',
+      executablePath: exe.path,
       configPath: (await _configFile()).path,
       uiPath: uiRoot?.path,
       mixedPort: mixedPort,
@@ -576,14 +580,14 @@ class BuiltInProxyService extends ChangeNotifier {
           .transform(const LineSplitter())
           .listen(_onLogLine);
 
-       unawaited(
-         process.exitCode.then((code) async {
-           _lastExitCode = code;
-           _process = null;
-           _lastError ??= _pickLastErrorFromLogTail() ?? 'mihomo 已退出：$code';
-           await refresh();
-         }),
-       );
+      unawaited(
+        process.exitCode.then((code) async {
+          _lastExitCode = code;
+          _process = null;
+          _lastError ??= _pickLastErrorFromLogTail() ?? 'mihomo 已退出：$code';
+          await refresh();
+        }),
+      );
 
       await _waitForPort(
         InternetAddress.loopbackIPv4,
@@ -696,7 +700,8 @@ class BuiltInProxyService extends ChangeNotifier {
             ? (bytes[18] | (bytes[19] << 8))
             : ((bytes[18] << 8) | bytes[19]);
 
-        final cls = switch (elfClass) { 1 => 'ELF32', 2 => 'ELF64', _ => 'ELF?' };
+        final cls =
+            switch (elfClass) { 1 => 'ELF32', 2 => 'ELF64', _ => 'ELF?' };
         final endian = switch (data) { 1 => 'LE', 2 => 'BE', _ => '?' };
         return '$cls ${_elfMachineName(eMachine)} ($endian)';
       } finally {
@@ -756,9 +761,12 @@ class BuiltInProxyService extends ChangeNotifier {
       ..writeln('');
 
     b.writeln('executables:');
-    b.writeln('  user: ${userExists ? await fileLine(userExe) : '${userExe.path} (missing)'}');
-    b.writeln('  native: ${nativeExe == null ? '(none)' : nativeExists ? await fileLine(nativeExe) : '${nativeExe.path} (missing)'}');
-    b.writeln('  effective: ${effective == null ? '(none)' : await fileLine(effective)}');
+    b.writeln(
+        '  user: ${userExists ? await fileLine(userExe) : '${userExe.path} (missing)'}');
+    b.writeln(
+        '  native: ${nativeExe == null ? '(none)' : nativeExists ? await fileLine(nativeExe) : '${nativeExe.path} (missing)'}');
+    b.writeln(
+        '  effective: ${effective == null ? '(none)' : await fileLine(effective)}');
 
     final tail = _logTail;
     if (tail.isNotEmpty) {
@@ -899,9 +907,7 @@ class BuiltInProxyService extends ChangeNotifier {
     final nativeExe = await _nativeMihomoFile();
     if (nativeExe != null && await nativeExe.exists()) return nativeExe;
 
-    // 3) Fallback: extract from Flutter assets.
-    await _ensureMihomoInstalled(exe);
-    return exe;
+    throw StateError('未安装 mihomo（当前构建未内置 TV 内核，可手动导入）');
   }
 
   Future<File> _configFile() async {
@@ -1187,40 +1193,8 @@ class BuiltInProxyService extends ChangeNotifier {
   }
 
   Future<bool> _installBundledMihomo(File exe) async {
-    final primaryAbi = await DeviceType.primaryAbi();
-    final abi = _normalizeAndroidAbi(primaryAbi);
-    if (abi == null) return false;
-
-    final assetPath = 'assets/tv_proxy/mihomo/android/$abi/mihomo.gz';
-    ByteData data;
-    try {
-      data = await rootBundle.load(assetPath);
-    } catch (_) {
-      return false;
-    }
-    final gzBytes = data.buffer.asUint8List();
-
-    late final Uint8List bytes;
-    try {
-      bytes = Uint8List.fromList(gzip.decode(gzBytes));
-    } catch (_) {
-      return false;
-    }
-
-    await exe.parent.create(recursive: true);
-    await exe.writeAsBytes(bytes, flush: true);
-    await _chmodExecutable(exe.path);
-    return true;
-  }
-
-  static String? _normalizeAndroidAbi(String? abi) {
-    final v = (abi ?? '').trim().toLowerCase();
-    if (v.isEmpty) return null;
-    if (v.contains('arm64')) return 'arm64-v8a';
-    if (v.contains('armeabi') || v.contains('armv7')) return 'armeabi-v7a';
-    if (v.contains('x86_64') || v.contains('amd64')) return 'x86_64';
-    if (v.contains('x86') || v.contains('386')) return 'x86';
-    return null;
+    final _ = exe;
+    return false;
   }
 
   Future<Directory> _uiBaseDir() async {
@@ -1241,16 +1215,27 @@ class BuiltInProxyService extends ChangeNotifier {
       return uiRoot ?? root;
     }
 
-    ByteData data;
-    try {
-      data = await rootBundle
-          .load('assets/tv_proxy/metacubexd/compressed-dist.tgz');
-    } catch (_) {
+    final archiveFile = File('${base.path}/compressed-dist.tgz');
+    final copied = await DeviceType.copyBundledAsset(
+      assetPath: _bundledMetacubexdAssetPath,
+      destinationPath: archiveFile.path,
+    );
+    if (!copied) {
       // UI assets are optional; proxy can still run without panel.
       return null;
     }
 
-    final tgz = data.buffer.asUint8List();
+    late final List<int> tgz;
+    try {
+      tgz = await archiveFile.readAsBytes();
+    } catch (_) {
+      return null;
+    } finally {
+      try {
+        await archiveFile.delete();
+      } catch (_) {}
+    }
+
     late final Archive tar;
     try {
       final gz = GZipDecoder().decodeBytes(tgz, verify: false);
@@ -1385,7 +1370,8 @@ class _MediaServerRule {
     if (e.startsWith('domain:')) {
       final v = e.substring('domain:'.length).trim();
       if (v.isEmpty) return null;
-      return _MediaServerRule(type: _MediaServerRuleType.domainSuffix, value: v);
+      return _MediaServerRule(
+          type: _MediaServerRuleType.domainSuffix, value: v);
     }
     if (e.startsWith('ip:')) {
       final v = e.substring('ip:'.length).trim();

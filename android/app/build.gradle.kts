@@ -1,5 +1,7 @@
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.nio.charset.StandardCharsets
+import java.util.Base64
 import java.util.Properties
 import java.util.zip.GZIPInputStream
 
@@ -10,26 +12,59 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+fun isEnabledFlag(value: String?): Boolean =
+    value?.trim()?.lowercase()?.let { it == "1" || it == "true" || it == "yes" } ?: false
+
+fun decodeDartDefines(raw: String?): Map<String, String> {
+    val source = raw?.trim().orEmpty()
+    if (source.isEmpty()) return emptyMap()
+
+    return source
+        .split(',')
+        .mapNotNull { encoded ->
+            val token = encoded.trim()
+            if (token.isEmpty()) return@mapNotNull null
+
+            val decoded =
+                runCatching {
+                    String(Base64.getUrlDecoder().decode(token), StandardCharsets.UTF_8)
+                }.recoverCatching {
+                    String(Base64.getDecoder().decode(token), StandardCharsets.UTF_8)
+                }.getOrNull() ?: return@mapNotNull null
+
+            val splitAt = decoded.indexOf('=')
+            if (splitAt <= 0) return@mapNotNull null
+
+            decoded.substring(0, splitAt) to decoded.substring(splitAt + 1)
+        }.toMap()
+}
+
+val targetAbis =
+    (project.findProperty("target-platform")?.toString() ?: "")
+        .split(',')
+        .map { it.trim().lowercase() }
+        .filter { it.isNotEmpty() }
+        .mapNotNull { platform ->
+            when (platform) {
+                "android-arm" -> "armeabi-v7a"
+                "android-arm64" -> "arm64-v8a"
+                "android-x86" -> "x86"
+                "android-x64", "android-x86_64" -> "x86_64"
+                else -> null
+            }
+        }
+        .distinct()
+
+val dartDefines = decodeDartDefines(project.findProperty("dart-defines")?.toString())
+val bundleTvProxy =
+    isEnabledFlag(project.findProperty("linplayer.bundleTvProxy")?.toString()) ||
+        isEnabledFlag(System.getenv("LINPLAYER_BUNDLE_TV_PROXY")) ||
+        isEnabledFlag(dartDefines["LINPLAYER_FORCE_TV"])
+
 android {
     namespace = "com.example.lin_player"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
-
-    val targetAbis =
-        (project.findProperty("target-platform")?.toString() ?: "")
-            .split(',')
-            .map { it.trim().lowercase() }
-            .filter { it.isNotEmpty() }
-            .mapNotNull { platform ->
-                when (platform) {
-                    "android-arm" -> "armeabi-v7a"
-                    "android-arm64" -> "arm64-v8a"
-                    "android-x86" -> "x86"
-                    "android-x64", "android-x86_64" -> "x86_64"
-                    else -> null
-                }
-            }
-            .distinct()
 
     val isCi = System.getenv("CI")?.trim()?.lowercase() == "true"
     val allowCiDebugSigning =
@@ -125,36 +160,65 @@ flutter {
     source = "../.."
 }
 
-// Bundle mihomo as a native library executable (libmihomo.so) so it can run on ROMs that mount
-// app-private storage as "noexec" (executing binaries from filesDir will fail with Permission denied).
 val repoRootDir = project.rootDir.parentFile
 val mihomoAssetsDir = File(repoRootDir, "assets/tv_proxy/mihomo/android")
+val metacubexdAssetFile = File(repoRootDir, "assets/tv_proxy/metacubexd/compressed-dist.tgz")
 val generatedMihomoJniLibsDir = File(project.buildDir, "generated/mihomoJniLibs")
+val generatedTvProxyAssetsDir = File(project.buildDir, "generated/tvProxyAssets")
+val bundledMihomoAbis =
+    if (targetAbis.isNotEmpty()) {
+        targetAbis
+    } else {
+        listOf(
+            "arm64-v8a",
+            "armeabi-v7a",
+            "x86_64",
+            "x86",
+        )
+    }
 
-tasks.register("prepareMihomoJniLibs") {
-    inputs.dir(mihomoAssetsDir)
-    outputs.dir(generatedMihomoJniLibsDir)
-    doLast {
-        val mappings =
-            listOf(
-                "arm64-v8a",
-                "armeabi-v7a",
-                "x86_64",
-                "x86",
-            )
-        for (abi in mappings) {
-            val src = File(mihomoAssetsDir, "$abi/mihomo.gz")
-            if (!src.exists()) continue
-            val dst = File(generatedMihomoJniLibsDir, "$abi/libmihomo.so")
+if (bundleTvProxy) {
+    // TV-only payloads should never leak into phone/tablet Android builds.
+    tasks.register("prepareTvProxyAndroidAssets") {
+        inputs.file(metacubexdAssetFile)
+        outputs.dir(generatedTvProxyAssetsDir)
+        doLast {
+            generatedTvProxyAssetsDir.deleteRecursively()
+            if (!metacubexdAssetFile.exists()) return@doLast
+
+            val dst = File(generatedTvProxyAssetsDir, "tv_proxy/metacubexd/compressed-dist.tgz")
             dst.parentFile.mkdirs()
-            GZIPInputStream(FileInputStream(src)).use { input ->
-                FileOutputStream(dst).use { output ->
-                    input.copyTo(output)
+            metacubexdAssetFile.copyTo(dst, overwrite = true)
+        }
+    }
+
+    // Bundle mihomo as a native library executable (libmihomo.so) so it can run on ROMs that mount
+    // app-private storage as "noexec" (executing binaries from filesDir will fail with Permission denied).
+    tasks.register("prepareMihomoJniLibs") {
+        inputs.dir(mihomoAssetsDir)
+        outputs.dir(generatedMihomoJniLibsDir)
+        doLast {
+            generatedMihomoJniLibsDir.deleteRecursively()
+
+            for (abi in bundledMihomoAbis) {
+                val src = File(mihomoAssetsDir, "$abi/mihomo.gz")
+                if (!src.exists()) continue
+
+                val dst = File(generatedMihomoJniLibsDir, "$abi/libmihomo.so")
+                dst.parentFile.mkdirs()
+                GZIPInputStream(FileInputStream(src)).use { input ->
+                    FileOutputStream(dst).use { output ->
+                        input.copyTo(output)
+                    }
                 }
             }
         }
     }
-}
 
-android.sourceSets.getByName("main").jniLibs.srcDir(generatedMihomoJniLibsDir)
-tasks.named("preBuild").configure { dependsOn("prepareMihomoJniLibs") }
+    android.sourceSets.getByName("main").assets.srcDir(generatedTvProxyAssetsDir)
+    android.sourceSets.getByName("main").jniLibs.srcDir(generatedMihomoJniLibsDir)
+    tasks.named("preBuild").configure {
+        dependsOn("prepareTvProxyAndroidAssets")
+        dependsOn("prepareMihomoJniLibs")
+    }
+}
