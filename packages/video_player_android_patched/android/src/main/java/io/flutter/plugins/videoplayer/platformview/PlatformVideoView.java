@@ -5,17 +5,16 @@
 package io.flutter.plugins.videoplayer.platformview;
 
 import android.content.Context;
-import android.graphics.Color;
 import android.os.Build;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
 import android.widget.FrameLayout;
-import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.annotation.OptIn;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.ui.SubtitleView;
 import io.flutter.plugin.platform.PlatformView;
 import io.flutter.plugins.videoplayer.VideoPlayer;
 
@@ -28,7 +27,7 @@ public final class PlatformVideoView implements PlatformView {
   @NonNull private final ExoPlayer exoPlayer;
   @NonNull private final FrameLayout containerView;
   @NonNull private final SurfaceView surfaceView;
-  @NonNull private final TextView subtitleView;
+  @NonNull private final SubtitleView subtitleView;
 
   /**
    * Constructs a new PlatformVideoView.
@@ -47,19 +46,13 @@ public final class PlatformVideoView implements PlatformView {
         new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-    subtitleView = new TextView(context);
-    subtitleView.setTextColor(Color.WHITE);
-    subtitleView.setShadowLayer(6f, 2f, 2f, Color.BLACK);
-    subtitleView.setTextSize(18);
-    subtitleView.setGravity(android.view.Gravity.CENTER);
-    subtitleView.setPadding(24, 8, 24, 24);
+    subtitleView = new SubtitleView(context);
     subtitleView.setVisibility(View.GONE);
     containerView.addView(
         subtitleView,
         new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            android.view.Gravity.BOTTOM | android.view.Gravity.CENTER_HORIZONTAL));
+            FrameLayout.LayoutParams.MATCH_PARENT));
     videoPlayer.setPlatformSubtitleView(subtitleView);
 
     if (Build.VERSION.SDK_INT == Build.VERSION_CODES.P) {

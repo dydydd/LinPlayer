@@ -151,7 +151,8 @@ class AppState extends ChangeNotifier {
   static const _kUnlimitedStreamCacheKey = 'unlimitedStreamCache_v1';
   static const _kAutoSkipIntroKey = 'autoSkipIntro_v1';
   static const _kPreloadEnabledKey = 'preloadEnabled_v1';
-  static const _kMarkPlayedThresholdPercentKey = 'markPlayedThresholdPercent_v1';
+  static const _kMarkPlayedThresholdPercentKey =
+      'markPlayedThresholdPercent_v1';
   static const _kPlaybackProxyModeKey = 'playbackProxyMode_v1';
   static const _kPlaybackProxyUrlKey = 'playbackProxyUrl_v1';
   // Legacy key (<= 1.0.0): was used for "unlimited cover cache", but the intent
@@ -817,7 +818,8 @@ class AppState extends ChangeNotifier {
   int get seekBackwardSeconds => _seekBackwardSeconds;
   int get seekForwardSeconds => _seekForwardSeconds;
   bool get forceRemoteControlKeys => _forceRemoteControlKeys;
-  DesktopShortcutBindings get desktopShortcutBindings => _desktopShortcutBindings;
+  DesktopShortcutBindings get desktopShortcutBindings =>
+      _desktopShortcutBindings;
   bool get tvRemoteEnabled => _tvRemoteEnabled;
   bool get hasTvRemoteEnabledPreference => _tvRemoteEnabledPreferenceSet;
   bool get tvBuiltInProxyEnabled => _tvBuiltInProxyEnabled;
@@ -967,8 +969,7 @@ class AppState extends ChangeNotifier {
     _preloadEnabled = prefs.getBool(_kPreloadEnabledKey) ?? false;
     final rawMarkPlayedThresholdPercent =
         prefs.getInt(_kMarkPlayedThresholdPercentKey) ?? 90;
-    _markPlayedThresholdPercent =
-        rawMarkPlayedThresholdPercent.clamp(75, 100);
+    _markPlayedThresholdPercent = rawMarkPlayedThresholdPercent.clamp(75, 100);
     if (_markPlayedThresholdPercent != rawMarkPlayedThresholdPercent) {
       await prefs.setInt(
         _kMarkPlayedThresholdPercentKey,
@@ -1999,7 +2000,8 @@ class AppState extends ChangeNotifier {
       _kShowHomeRandomRecommendationsKey,
       _showHomeRandomRecommendations,
     );
-    await prefs.setBool(_kLibraryFilterPanelPinnedKey, _libraryFilterPanelPinned);
+    await prefs.setBool(
+        _kLibraryFilterPanelPinnedKey, _libraryFilterPanelPinned);
     await prefs.setBool(
       _kLibraryCustomPrefixFiltersEnabledKey,
       _libraryCustomPrefixFiltersEnabled,
@@ -2942,12 +2944,11 @@ class AppState extends ChangeNotifier {
         serverType: serverType,
         deviceId: _deviceId,
       );
-      _domains = await api
-          .fetchDomains(token!, baseUrl!, allowFailure: true)
-          .timeout(
-            const Duration(seconds: 8),
-            onTimeout: () => const <DomainInfo>[],
-          );
+      _domains =
+          await api.fetchDomains(token!, baseUrl!, allowFailure: true).timeout(
+                const Duration(seconds: 8),
+                onTimeout: () => const <DomainInfo>[],
+              );
       _error = null;
     } catch (e) {
       _error = e.toString();
@@ -3249,8 +3250,7 @@ class AppState extends ChangeNotifier {
     List<MediaItem> remoteItems, {
     required bool keepLocalOnly,
     required bool remotePreferredForEpisodes,
-  }
-  ) {
+  }) {
     MediaItem pick(MediaItem remote, MediaItem local) {
       final remoteType = remote.type.toLowerCase().trim();
       final localType = local.type.toLowerCase().trim();
@@ -3263,7 +3263,8 @@ class AppState extends ChangeNotifier {
           remoteId.isNotEmpty &&
           localId.isNotEmpty &&
           remoteId != localId) {
-        if (remote.playbackPositionTicks > 0 || local.playbackPositionTicks > 0) {
+        if (remote.playbackPositionTicks > 0 ||
+            local.playbackPositionTicks > 0) {
           return remote;
         }
       }
@@ -3398,11 +3399,11 @@ class AppState extends ChangeNotifier {
     // Make sure any in-flight refresh doesn't override this explicit user action.
     _continueWatchingRequestId += 1;
 
-    final snapshot = (_continueWatching ?? const <MediaItem>[])
-        .toList(growable: true);
+    final snapshot =
+        (_continueWatching ?? const <MediaItem>[]).toList(growable: true);
 
-    final indexOfKey =
-        snapshot.indexWhere((entry) => _isSameContinueWatchingEntry(entry, item));
+    final indexOfKey = snapshot
+        .indexWhere((entry) => _isSameContinueWatchingEntry(entry, item));
 
     List<MediaItem> normalize(List<MediaItem> items) {
       final usedIds = <String>{};
@@ -3470,14 +3471,14 @@ class AppState extends ChangeNotifier {
           if (_isSameContinueWatchingEntry(entry, next)) continue;
           cleaned.add(entry);
         }
-        final insertAt = indexOfKey >= 0
-            ? indexOfKey.clamp(0, cleaned.length)
-            : 0;
+        final insertAt =
+            indexOfKey >= 0 ? indexOfKey.clamp(0, cleaned.length) : 0;
         cleaned.insert(insertAt, next);
         await commit(cleaned);
         return;
       }
-      snapshot.removeWhere((entry) => _isSameContinueWatchingEntry(entry, item));
+      snapshot
+          .removeWhere((entry) => _isSameContinueWatchingEntry(entry, item));
       await commit(snapshot);
       return;
     }
@@ -3719,9 +3720,8 @@ class AppState extends ChangeNotifier {
       // otherwise end up with too few unique shows.
       limit: 60,
     );
-    final resumeItems = resumeRes.items
-        .where((item) => !item.played)
-        .toList(growable: false);
+    final resumeItems =
+        resumeRes.items.where((item) => !item.played).toList(growable: false);
 
     List<MediaItem> nextUpItems = const <MediaItem>[];
     try {
@@ -5207,7 +5207,8 @@ class AppState extends ChangeNotifier {
 
   Future<void> _persistDesktopShortcutBindings(SharedPreferences prefs) async {
     final encoded = jsonEncode(_desktopShortcutBindings.toJson());
-    final defaultsEncoded = jsonEncode(DesktopShortcutBindings.defaults.toJson());
+    final defaultsEncoded =
+        jsonEncode(DesktopShortcutBindings.defaults.toJson());
     if (encoded == defaultsEncoded) {
       await prefs.remove(_kDesktopShortcutBindingsKey);
       return;

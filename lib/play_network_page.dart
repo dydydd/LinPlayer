@@ -24,6 +24,7 @@ import 'services/app_route_observer.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/desktop_window.dart';
 import 'services/playback_proxy/playback_proxy.dart';
+import 'services/subtitle_support.dart';
 import 'tv/tv_focusable.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
 import 'widgets/list_picker_dialog.dart';
@@ -2452,7 +2453,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
     final externalSubtitleStreams = subtitleStreams
         .where((s) => _isEmbyExternalSubtitleStream(s))
-        .where((s) => _isTextSubtitleStream(s))
+        .where((s) => _isSupportedMpvSubtitleStream(s))
         .toList(growable: false);
     if (externalSubtitleStreams.isEmpty) return false;
 
@@ -2624,21 +2625,25 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     return false;
   }
 
-  static bool _isTextSubtitleStream(Map<String, dynamic> stream) {
-    if (stream['IsTextSubtitleStream'] == true) return true;
-    if (stream['IsTextSubtitleStream'] == false) return false;
-
+  static bool _isSupportedMpvSubtitleStream(Map<String, dynamic> stream) {
     final codec = (stream['Codec']?.toString() ?? '').trim().toLowerCase();
     if (codec.isEmpty) return true; // Assume text; mpv will validate.
-    const knownText = <String>[
+    const knownFormats = <String>[
       'srt',
       'subrip',
       'ass',
       'ssa',
       'vtt',
       'webvtt',
+      'pgs',
+      'sup',
+      'hdmv_pgs_subtitle',
+      'vobsub',
+      'dvd_subtitle',
+      'dvb_subtitle',
+      'xsub',
     ];
-    return knownText.any((k) => codec.contains(k));
+    return knownFormats.any((k) => codec.contains(k));
   }
 
   static String _preferredSubtitleFormat(String codec) {
@@ -2648,6 +2653,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     if (c.contains('ssa')) return 'ssa';
     if (c.contains('vtt')) return 'vtt';
     if (c.contains('subrip') || c == 'srt') return 'srt';
+    if (c.contains('pgs') || c.contains('sup') || c.contains('hdmv')) {
+      return 'sup';
+    }
+    if (c.contains('vobsub') || c.contains('dvd_subtitle')) return 'sub';
+    if (c.contains('dvb')) return 'sub';
     // Fallback: keep server-provided codec if it looks safe; otherwise prefer srt.
     final safe = RegExp(r'^[a-z0-9]{1,8}$');
     return safe.hasMatch(c) ? c : 'srt';
@@ -2660,6 +2670,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     if (c.contains('webvtt') || c.contains('vtt')) return 'vtt';
     if (c.contains('ass')) return 'ass';
     if (c.contains('ssa')) return 'ssa';
+    if (c.contains('pgs') || c.contains('sup') || c.contains('hdmv')) {
+      return 'sup';
+    }
+    if (c.contains('vobsub') || c.contains('dvd_subtitle')) return 'sub';
+    if (c.contains('dvb')) return 'dvb';
     return c;
   }
 
@@ -7983,7 +7998,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     Future<void> pickAndAddSubtitle() async {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: const ['srt', 'ass', 'ssa', 'vtt', 'sub'],
+        allowedExtensions: kSupportedExternalSubtitleExtensions,
       );
       if (result == null || result.files.isEmpty) return;
       final f = result.files.first;
@@ -9436,7 +9451,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
             Future<void> pickAndAddSubtitle() async {
               final result = await FilePicker.platform.pickFiles(
                 type: FileType.custom,
-                allowedExtensions: const ['srt', 'ass', 'ssa', 'vtt', 'sub'],
+                allowedExtensions: kSupportedExternalSubtitleExtensions,
               );
               if (result == null || result.files.isEmpty) return;
               final f = result.files.first;

@@ -20,6 +20,7 @@ import 'package:video_player_platform_interface/video_player_platform_interface.
 import 'play_network_page.dart';
 import 'server_adapters/server_access.dart';
 import 'services/app_route_observer.dart';
+import 'services/subtitle_support.dart';
 import 'tv/tv_focusable.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
 import 'widgets/list_picker_dialog.dart';
@@ -3682,9 +3683,12 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       final pathUri = (sourcePath == null || sourcePath.isEmpty)
           ? null
           : Uri.tryParse(sourcePath);
-      if (pathUri != null && pathUri.scheme.isNotEmpty && pathUri.host.isNotEmpty) {
-        final isHttp = (pathUri.scheme == 'http' || pathUri.scheme == 'https') &&
-            pathUri.host.isNotEmpty;
+      if (pathUri != null &&
+          pathUri.scheme.isNotEmpty &&
+          pathUri.host.isNotEmpty) {
+        final isHttp =
+            (pathUri.scheme == 'http' || pathUri.scheme == 'https') &&
+                pathUri.host.isNotEmpty;
         if (isHttp) {
           final url = shouldApplyServerParams(pathUri)
               ? applyQueryPrefs(pathUri.toString())
@@ -4679,7 +4683,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
             Future<void> pickAndAddSubtitle() async {
               final result = await FilePicker.platform.pickFiles(
                 type: FileType.custom,
-                allowedExtensions: const ['srt', 'ass', 'ssa', 'vtt', 'sub'],
+                allowedExtensions: kSupportedExternalSubtitleExtensions,
               );
               if (result == null || result.files.isEmpty) return;
               final f = result.files.first;
@@ -4691,7 +4695,12 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                 return;
               }
               try {
-                await api.addSubtitleSource(path, null, null, f.name);
+                await api.addSubtitleSource(
+                  path,
+                  externalSubtitleMimeTypeForPath(path),
+                  null,
+                  f.name,
+                );
                 await refreshTracks();
               } catch (e) {
                 messenger.showSnackBar(

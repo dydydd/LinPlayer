@@ -23,6 +23,7 @@ import 'services/app_route_observer.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/desktop_window.dart';
 import 'services/playback_proxy/playback_proxy.dart';
+import 'services/subtitle_support.dart';
 import 'services/stream_proxy/local_http_stream_proxy.dart';
 import 'services/stream_resolver/stream_resolver.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
@@ -4643,7 +4644,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     Future<void> pickAndAddSubtitle() async {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: const ['srt', 'ass', 'ssa', 'vtt', 'sub'],
+        allowedExtensions: kSupportedExternalSubtitleExtensions,
       );
       if (result == null || result.files.isEmpty) return;
       final f = result.files.first;
@@ -6006,7 +6007,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             Future<void> pickAndAddSubtitle() async {
               final result = await FilePicker.platform.pickFiles(
                 type: FileType.custom,
-                allowedExtensions: const ['srt', 'ass', 'ssa', 'vtt', 'sub'],
+                allowedExtensions: kSupportedExternalSubtitleExtensions,
               );
               if (result == null || result.files.isEmpty) return;
               final f = result.files.first;

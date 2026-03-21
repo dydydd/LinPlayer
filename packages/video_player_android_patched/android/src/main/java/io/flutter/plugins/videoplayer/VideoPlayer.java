@@ -7,13 +7,13 @@ package io.flutter.plugins.videoplayer;
 import static androidx.media3.common.Player.REPEAT_MODE_ALL;
 import static androidx.media3.common.Player.REPEAT_MODE_OFF;
 
+import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.TypedValue;
 import android.view.View;
-import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.media3.common.AudioAttributes;
@@ -29,6 +29,8 @@ import androidx.media3.common.text.CueGroup;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
+import androidx.media3.ui.CaptionStyleCompat;
+import androidx.media3.ui.SubtitleView;
 import io.flutter.view.TextureRegistry.SurfaceProducer;
 import java.io.File;
 import java.util.ArrayList;
@@ -49,7 +51,8 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
 
   // Subtitle state for LinPlayer.
   @NonNull private final Handler mainHandler = new Handler(Looper.getMainLooper());
-  @Nullable private TextView platformSubtitleView;
+  @Nullable private SubtitleView platformSubtitleView;
+  @NonNull private List<Cue> subtitleCues = new ArrayList<>();
   @NonNull private String subtitleText = "";
   @Nullable private Runnable pendingSubtitleUpdate;
   private long subtitleDelayMs = 0;
@@ -64,7 +67,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
         @Override
         public void onCues(@NonNull CueGroup cueGroup) {
           final String text = cueGroupToText(cueGroup);
-          scheduleSubtitleUpdate(text);
+          scheduleSubtitleUpdate(new ArrayList<>(cueGroup.cues), text);
         }
       };
 
@@ -389,7 +392,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     subtitleFontSize = Math.max(8.0, Math.min(96.0, style.getFontSize()));
     subtitleBottomPadding = Math.max(0.0, Math.min(500.0, style.getBottomPadding()));
     subtitleBold = style.getBold();
-    final TextView view = platformSubtitleView;
+    final SubtitleView view = platformSubtitleView;
     if (view != null) {
       mainHandler.post(() -> applySubtitleStyle(view));
     }
@@ -442,20 +445,20 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     }
   }
 
-  public void setPlatformSubtitleView(@Nullable TextView view) {
+  public void setPlatformSubtitleView(@Nullable SubtitleView view) {
     platformSubtitleView = view;
     if (view == null) return;
     mainHandler.post(
         () -> {
           applySubtitleStyle(view);
-          updateSubtitleText(subtitleText);
+          updateSubtitles(subtitleCues, subtitleText);
         });
   }
 
-  private void scheduleSubtitleUpdate(@NonNull String text) {
+  private void scheduleSubtitleUpdate(@NonNull List<Cue> cues, @NonNull String text) {
     if (disposed) return;
     final long delay = Math.max(0, subtitleDelayMs);
-    final Runnable task = () -> updateSubtitleText(text);
+    final Runnable task = () -> updateSubtitles(cues, text);
     final Runnable prev = pendingSubtitleUpdate;
     pendingSubtitleUpdate = task;
     if (prev != null) {
@@ -468,19 +471,31 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     }
   }
 
-  private void updateSubtitleText(@NonNull String text) {
+  private void updateSubtitles(@NonNull List<Cue> cues, @NonNull String text) {
     if (disposed) return;
+    subtitleCues = new ArrayList<>(cues);
     subtitleText = text;
-    final TextView view = platformSubtitleView;
+    final SubtitleView view = platformSubtitleView;
     if (view == null) return;
-    view.setText(text);
-    view.setVisibility(text.isEmpty() ? View.GONE : View.VISIBLE);
+    view.setCues(subtitleCues);
+    view.setVisibility(subtitleCues.isEmpty() ? View.GONE : View.VISIBLE);
   }
 
-  private void applySubtitleStyle(@NonNull TextView view) {
+  private void applySubtitleStyle(@NonNull SubtitleView view) {
     final float sizeSp = (float) subtitleFontSize;
-    view.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp);
-    view.setTypeface(view.getTypeface(), subtitleBold ? Typeface.BOLD : Typeface.NORMAL);
+    final Typeface typeface = subtitleBold ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT;
+    view.setApplyEmbeddedStyles(true);
+    view.setApplyEmbeddedFontSizes(true);
+    view.setFixedTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp);
+    view.setStyle(
+        new CaptionStyleCompat(
+            Color.WHITE,
+            Color.TRANSPARENT,
+            Color.TRANSPARENT,
+            CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+            Color.BLACK,
+            typeface));
+    view.setBottomPaddingFraction(0f);
 
     final float density = view.getResources().getDisplayMetrics().density;
     final int left = Math.round(24f * density);
@@ -507,6 +522,8 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     if (lower.endsWith(".vtt")) return "text/vtt";
     if (lower.endsWith(".ass") || lower.endsWith(".ssa")) return "text/x-ssa";
     if (lower.endsWith(".ttml") || lower.endsWith(".xml")) return "application/ttml+xml";
+    if (lower.endsWith(".sup") || lower.endsWith(".pgs")) return "application/pgs";
+    if (lower.endsWith(".sub")) return "application/vobsub";
     return null;
   }
 
@@ -534,6 +551,7 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
     mainHandler.removeCallbacksAndMessages(null);
     exoPlayer.removeListener(subtitleListener);
     platformSubtitleView = null;
+    subtitleCues = new ArrayList<>();
     if (disposeHandler != null) {
       disposeHandler.onDispose();
     }

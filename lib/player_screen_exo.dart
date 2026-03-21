@@ -18,6 +18,7 @@ import 'package:video_player_platform_interface/video_player_platform_interface.
 
 import 'services/app_diagnostics_log.dart';
 import 'services/app_route_observer.dart';
+import 'services/subtitle_support.dart';
 import 'services/stream_proxy/local_http_stream_proxy.dart';
 import 'services/stream_resolver/stream_resolver.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
@@ -1618,7 +1619,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
             Future<void> pickAndAddSubtitle() async {
               final result = await FilePicker.platform.pickFiles(
                 type: FileType.custom,
-                allowedExtensions: const ['srt', 'ass', 'ssa', 'vtt', 'sub'],
+                allowedExtensions: kSupportedExternalSubtitleExtensions,
               );
               if (result == null || result.files.isEmpty) return;
               final f = result.files.first;
@@ -1630,7 +1631,12 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                 return;
               }
               try {
-                await api.addSubtitleSource(path, null, null, f.name);
+                await api.addSubtitleSource(
+                  path,
+                  externalSubtitleMimeTypeForPath(path),
+                  null,
+                  f.name,
+                );
                 await refreshTracks();
               } catch (e) {
                 messenger.showSnackBar(
