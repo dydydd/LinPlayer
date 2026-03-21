@@ -11,6 +11,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 enum PluginTarget { tv, mobile, pc }
 
+const Set<String> pluginAllowedSlotIdsV1 = <String>{
+  'home.feed.beforeSections',
+  'home.feed.afterSections',
+  'detail.hero.actions',
+  'detail.sections.bottom',
+  'player.appbar.trailing',
+};
+
 PluginTarget currentPluginTarget() {
   if (DeviceType.isTv) return PluginTarget.tv;
   if (!kIsWeb &&
@@ -30,6 +38,17 @@ class PluginInstallException implements Exception {
   @override
   String toString() => 'PluginInstallException: $message';
 }
+
+int comparePluginSemVerV1(String a, String b) {
+  final va = _SemVer.tryParse(a);
+  final vb = _SemVer.tryParse(b);
+  if (!va.isValid && !vb.isValid) return 0;
+  if (!va.isValid) return -1;
+  if (!vb.isValid) return 1;
+  return va.compareTo(vb);
+}
+
+bool isPluginSemVerV1(String raw) => _SemVer.tryParse(raw).isValid;
 
 class PluginFileEntryV1 {
   PluginFileEntryV1({
@@ -70,7 +89,10 @@ class PluginNetworkPermissionV1 {
 
   factory PluginNetworkPermissionV1.fromJson(Object? json) {
     if (json is! Map) {
-      throw PluginInstallException('manifest.permissions.network 格式错误（不是对象）');
+      return PluginNetworkPermissionV1(
+        enabled: false,
+        domains: const <String>[],
+      );
     }
     final enabled = json['enabled'] as bool? ?? false;
     final domainsRaw = json['domains'];
@@ -93,7 +115,12 @@ class PluginPermissionsV1 {
 
   factory PluginPermissionsV1.fromJson(Object? json) {
     if (json is! Map) {
-      throw PluginInstallException('manifest.permissions 格式错误（不是对象）');
+      return PluginPermissionsV1(
+        network: PluginNetworkPermissionV1(
+          enabled: false,
+          domains: const <String>[],
+        ),
+      );
     }
     final network = PluginNetworkPermissionV1.fromJson(json['network']);
     return PluginPermissionsV1(network: network);
@@ -194,9 +221,9 @@ class PluginPageContributionV1 {
     if (route.isEmpty) {
       throw PluginInstallException('manifest.contributions.pages[].route 不能为空');
     }
-    if (!route.startsWith('/')) {
+    if (!route.startsWith('/plugin/')) {
       throw PluginInstallException(
-          'manifest.contributions.pages[].route 必须以 / 开头');
+          'manifest.contributions.pages[].route 必须以 /plugin/ 开头');
     }
     if (render.isEmpty) {
       throw PluginInstallException(
@@ -303,6 +330,11 @@ class PluginSlotContributionV1 {
       throw PluginInstallException(
           'manifest.contributions.slots[].slotId 不能为空');
     }
+    if (!pluginAllowedSlotIdsV1.contains(slotId)) {
+      throw PluginInstallException(
+        'manifest.contributions.slots[].slotId 不受宿主 V1 支持：$slotId',
+      );
+    }
     if (render.isEmpty) {
       throw PluginInstallException(
           'manifest.contributions.slots[].render 不能为空');
@@ -394,6 +426,30 @@ class PluginContributionsV1 {
             .toList(growable: false)
         : const <PluginSlotContributionV1>[];
 
+    final pageIds = <String>{};
+    final pageRoutes = <String>{};
+    for (final page in pages) {
+      if (!pageIds.add(page.id)) {
+        throw PluginInstallException(
+          'manifest.contributions.pages[].id 不能重复：${page.id}',
+        );
+      }
+      if (!pageRoutes.add(page.route)) {
+        throw PluginInstallException(
+          'manifest.contributions.pages[].route 不能重复：${page.route}',
+        );
+      }
+    }
+
+    final slotIds = <String>{};
+    for (final slot in slots) {
+      if (!slotIds.add(slot.id)) {
+        throw PluginInstallException(
+          'manifest.contributions.slots[].id 不能重复：${slot.id}',
+        );
+      }
+    }
+
     return PluginContributionsV1(pages: pages, slots: slots);
   }
 
@@ -480,10 +536,28 @@ class PluginManifestV1 {
     }
     final files =
         filesRaw.map(PluginFileEntryV1.fromJson).toList(growable: false);
+    final filePaths = files.map((e) => e.path).toSet();
 
     final contributions = PluginContributionsV1.fromJson(
         decoded['contributions'],
         defaultTargets: targets);
+
+    final entryScripts = <String>{
+      if (entry.tv != null) entry.tv!.script,
+      if (entry.mobile != null) entry.mobile!.script,
+      if (entry.pc != null) entry.pc!.script,
+    };
+    for (final script in entryScripts) {
+      if (!filePaths.contains(script)) {
+        throw PluginInstallException('入口脚本未出现在 files[]：$script');
+      }
+    }
+    for (final page in contributions.pages) {
+      final icon = page.icon;
+      if (icon != null && !filePaths.contains(icon)) {
+        throw PluginInstallException('页面图标未出现在 files[]：$icon');
+      }
+    }
 
     return PluginManifestV1(
       schemaVersion: schemaVersion,
@@ -562,6 +636,22 @@ class InstalledPluginV1 {
   final int installedAtMs;
 }
 
+class BlockedInstalledPluginV1 {
+  const BlockedInstalledPluginV1({
+    required this.id,
+    required this.version,
+    required this.reason,
+    required this.manifestUrl,
+    required this.wasEnabled,
+  });
+
+  final String id;
+  final String version;
+  final String? reason;
+  final String manifestUrl;
+  final bool wasEnabled;
+}
+
 class PluginManagerV1 {
   PluginManagerV1._();
 
@@ -638,6 +728,7 @@ class PluginManagerV1 {
     final next =
         installed.where((e) => e.id != pluginId).toList(growable: false);
     await _saveInstalled(next);
+    await _purgePluginPrefs(pluginId);
   }
 
   Future<void> setEnabled(String pluginId, bool enabled) async {
@@ -785,6 +876,111 @@ class PluginManagerV1 {
         await d.delete(recursive: true);
       } catch (_) {}
     }
+  }
+
+  Future<void> _purgePluginPrefs(String pluginId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('linplayer.plugins.storage.v1.$pluginId');
+    await prefs.remove('linplayer.plugins.settings.v1.$pluginId');
+  }
+
+  Future<List<BlockedInstalledPluginV1>> auditInstalledBlockedPlugins() async {
+    final installed = await listInstalled();
+    if (installed.isEmpty) return const <BlockedInstalledPluginV1>[];
+
+    final target = currentPluginTarget();
+    final blockedCache = <String, List<_BlockRule>?>{};
+    final next = <InstalledPluginV1>[];
+    final blocked = <BlockedInstalledPluginV1>[];
+    var changed = false;
+
+    final client = http.Client();
+    try {
+      for (final plugin in installed) {
+        final blockedPlugin = await _checkBlockedInstalledPlugin(
+          client,
+          plugin,
+          target: target,
+          cache: blockedCache,
+        );
+        if (blockedPlugin == null) {
+          next.add(plugin);
+          continue;
+        }
+
+        blocked.add(
+          BlockedInstalledPluginV1(
+            id: plugin.id,
+            version: plugin.version,
+            reason: blockedPlugin.reason,
+            manifestUrl: plugin.manifestUrl,
+            wasEnabled: plugin.enabled,
+          ),
+        );
+
+        if (!plugin.enabled) {
+          next.add(plugin);
+          continue;
+        }
+
+        changed = true;
+        next.add(
+          InstalledPluginV1(
+            id: plugin.id,
+            version: plugin.version,
+            manifestUrl: plugin.manifestUrl,
+            enabled: false,
+            installedAtMs: plugin.installedAtMs,
+          ),
+        );
+      }
+    } finally {
+      client.close();
+    }
+
+    if (changed) {
+      await _saveInstalled(next);
+    }
+    return blocked;
+  }
+
+  Future<_BlockedInstalledPluginMatch?> _checkBlockedInstalledPlugin(
+    http.Client client,
+    InstalledPluginV1 plugin, {
+    required PluginTarget target,
+    required Map<String, List<_BlockRule>?> cache,
+  }) async {
+    Uri uri;
+    try {
+      uri = Uri.parse(plugin.manifestUrl);
+    } catch (_) {
+      return null;
+    }
+    final blockedUrl = _deriveBlockedUrl(uri);
+    if (blockedUrl == null) return null;
+
+    final cacheKey = blockedUrl.toString();
+    List<_BlockRule>? rules = cache[cacheKey];
+    if (!cache.containsKey(cacheKey)) {
+      try {
+        final bytes = await _downloadBytesOptional(client, blockedUrl);
+        if (bytes == null) {
+          rules = const <_BlockRule>[];
+        } else {
+          final decoded = jsonDecode(utf8.decode(bytes));
+          rules = _parseBlockRules(decoded);
+        }
+      } catch (_) {
+        rules = const <_BlockRule>[];
+      }
+      cache[cacheKey] = rules;
+    }
+
+    for (final rule in rules ?? const <_BlockRule>[]) {
+      if (!rule.matches(plugin.id, plugin.version, target)) continue;
+      return _BlockedInstalledPluginMatch(reason: rule.reason);
+    }
+    return null;
   }
 }
 
@@ -1096,6 +1292,12 @@ Map<String, Object?> _mergeBlockRuleMap(String id, Map raw) {
     out[k] = entry.value;
   }
   return out;
+}
+
+class _BlockedInstalledPluginMatch {
+  const _BlockedInstalledPluginMatch({required this.reason});
+
+  final String? reason;
 }
 
 class _BlockRule {

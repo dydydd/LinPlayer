@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -175,6 +176,7 @@ class PluginRuntimeV1 {
 
   static const String _channelName = 'LinPlayerPluginBridgeV1';
   static const Duration _defaultHostCallTimeout = Duration(seconds: 25);
+  static const int _maxResponseBytes = 4 * 1024 * 1024;
 
   final InstalledPluginV1 plugin;
   final PluginManifestV1 manifest;
@@ -548,7 +550,18 @@ class PluginRuntimeV1 {
     }
 
     final streamed = await _client.send(request).timeout(timeout);
-    final bytes = await streamed.stream.toBytes();
+    final contentLength = streamed.contentLength;
+    if (contentLength != null && contentLength > _maxResponseBytes) {
+      throw PluginRuntimeException('net.request 响应体过大');
+    }
+    final builder = BytesBuilder(copy: false);
+    await for (final chunk in streamed.stream) {
+      builder.add(chunk);
+      if (builder.length > _maxResponseBytes) {
+        throw PluginRuntimeException('net.request 响应体过大');
+      }
+    }
+    final bytes = builder.takeBytes();
     final outHeaders = <String, String>{};
     streamed.headers.forEach((k, v) => outHeaders[k] = v);
 

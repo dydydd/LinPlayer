@@ -1378,13 +1378,28 @@ class _DesktopHomePageState extends State<DesktopHomePage> with RouteAware {
                                   22,
                                 ),
                                 params: const <String, Object?>{
-                                  'page': 'desktop.home',
+                                  'page': 'home',
+                                  'source': 'desktop.home',
                                 },
                               ),
                               _buildMediaLibrarySection(
                                 horizontalPadding: horizontalPadding,
                                 libraries: visibleLibraries,
                                 access: access,
+                              ),
+                              PluginSlotArea(
+                                appState: widget.appState,
+                                slotId: 'home.feed.afterSections',
+                                padding: EdgeInsets.fromLTRB(
+                                  horizontalPadding,
+                                  0,
+                                  horizontalPadding,
+                                  22,
+                                ),
+                                params: const <String, Object?>{
+                                  'page': 'home',
+                                  'source': 'desktop.home',
+                                },
                               ),
                               const SizedBox(height: 26),
                             ],
@@ -1632,7 +1647,8 @@ class _PluginEntryActionsState extends State<_PluginEntryActions> {
           manifest: entry.manifest,
           page: entry.page,
           params: const <String, Object?>{
-            'page': 'desktop.home',
+            'page': 'home',
+            'source': 'desktop.home',
           },
         ),
       ),

@@ -110,8 +110,9 @@ class StreamRedirectResolver {
   static Uri _rewriteLocalhostToBaseHost(Uri base, Uri target) {
     if (!_isHttpUrl(target)) return target;
     if (!_isLocalhostLikeHost(target.host)) return target;
-    if (base.host.trim().isEmpty || _isLocalhostLikeHost(base.host))
+    if (base.host.trim().isEmpty || _isLocalhostLikeHost(base.host)) {
       return target;
+    }
 
     final int? port =
         target.hasPort ? target.port : (base.hasPort ? base.port : null);

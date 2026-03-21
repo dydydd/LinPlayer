@@ -13,7 +13,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'plugins/plugin_slot_area.dart';
 import 'server_adapters/server_access.dart';
-import 'services/plugins/plugin_manager.dart';
 import 'services/playback_proxy/playback_proxy.dart';
 import 'person_page.dart';
 import 'play_network_page.dart';
@@ -31,6 +30,15 @@ class _DetailUiTokens {
   static const horizontalGap = 12.0;
   static const horizontalEpisodeCardWidth = 288.0;
   static const horizontalEpisodeStripHeight = 206.0;
+}
+
+String _mediaYearText(MediaItem item) {
+  final date = (item.premiereDate ?? '').trim();
+  if (date.isEmpty) return '';
+  final parsed = DateTime.tryParse(date);
+  if (parsed != null) return parsed.year.toString();
+  if (date.length >= 4) return date.substring(0, 4);
+  return '';
 }
 
 Widget _sectionTitle(
@@ -736,12 +744,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
   }
 
   String _yearText(MediaItem item) {
-    final date = (item.premiereDate ?? '').trim();
-    if (date.isEmpty) return '';
-    final parsed = DateTime.tryParse(date);
-    if (parsed != null) return parsed.year.toString();
-    if (date.length >= 4) return date.substring(0, 4);
-    return '';
+    return _mediaYearText(item);
   }
 
   String _episodeTitle(MediaItem ep) {
@@ -930,6 +933,28 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     );
   }
 
+  Map<String, Object?> _buildDetailPluginParams(MediaItem item) {
+    final yearText = _mediaYearText(item);
+    final year = int.tryParse(yearText);
+    return <String, Object?>{
+      'page': 'detail',
+      'itemId': item.id,
+      'title': item.name,
+      'media': <String, Object?>{
+        'id': item.id,
+        'type': item.type,
+        'title': item.name,
+        if (year != null) 'year': year,
+      },
+      'item': <String, Object?>{
+        'id': item.id,
+        'name': item.name,
+        'type': item.type,
+        if (year != null) 'year': year,
+      },
+    };
+  }
+
   Widget _detailHeroSection(
     BuildContext context, {
     required MediaItem item,
@@ -1114,6 +1139,13 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
               onTap: () => _showTopActionHint('更多'),
             ),
           ],
+        ),
+        PluginSlotArea(
+          appState: widget.appState,
+          slotId: 'detail.hero.actions',
+          axis: Axis.horizontal,
+          gap: 8,
+          params: _buildDetailPluginParams(item),
         ),
         if (featuredLabel.isNotEmpty) ...[
           const SizedBox(height: 16),
@@ -4054,23 +4086,12 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                         ],
                         const SizedBox(height: 16),
                         _externalLinksSection(context, item, widget.appState),
-                        if (currentPluginTarget() == PluginTarget.pc) ...[
-                          const SizedBox(height: _DetailUiTokens.sectionGap),
-                          PluginSlotArea(
-                            appState: widget.appState,
-                            slotId: 'detail.sections.bottom',
-                            params: <String, Object?>{
-                              'page': 'detail',
-                              'itemId': item.id,
-                              'title': item.name,
-                              'item': <String, Object?>{
-                                'id': item.id,
-                                'name': item.name,
-                                'type': item.type,
-                              },
-                            },
-                          ),
-                        ],
+                        const SizedBox(height: _DetailUiTokens.sectionGap),
+                        PluginSlotArea(
+                          appState: widget.appState,
+                          slotId: 'detail.sections.bottom',
+                          params: _buildDetailPluginParams(item),
+                        ),
                         if (showFloatingSettings) const SizedBox(height: 88),
                       ],
                     ),
@@ -4378,6 +4399,33 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   bool _markBusy = false;
   bool _localFavorite = false;
   bool _favoriteLoaded = false;
+
+  Map<String, Object?> _buildDetailPluginParams(MediaItem item) {
+    final yearText = _mediaYearText(item);
+    final year = int.tryParse(yearText);
+    return <String, Object?>{
+      'page': 'detail',
+      'itemId': item.id,
+      'title': item.name,
+      'media': <String, Object?>{
+        'id': item.id,
+        'type': item.type,
+        'title': item.name,
+        if (year != null) 'year': year,
+      },
+      'item': <String, Object?>{
+        'id': item.id,
+        'name': item.name,
+        'type': item.type,
+        if (year != null) 'year': year,
+      },
+      if ((_seriesId ?? '').trim().isNotEmpty)
+        'series': <String, Object?>{
+          'id': _seriesId!,
+          'name': _seriesName,
+        },
+    };
+  }
 
   Future<void> _switchEpisode(MediaItem episode) async {
     final id = episode.id.trim();
@@ -5889,6 +5937,15 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                     ),
                                   ],
                                 ),
+                                PluginSlotArea(
+                                  appState: widget.appState,
+                                  slotId: 'detail.hero.actions',
+                                  axis: Axis.horizontal,
+                                  gap: buttonGap,
+                                  params: _buildDetailPluginParams(
+                                    _detail ?? _episode,
+                                  ),
+                                ),
                                 if (playInfo != null) ...[
                                   SizedBox(
                                       height: (14 * uiScale).clamp(10.0, 18.0)),
@@ -6716,24 +6773,12 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                       selectedMediaSourceId: _selectedMediaSourceId,
                     ),
                   ],
-                  if (currentPluginTarget() == PluginTarget.pc) ...[
-                    const SizedBox(height: _DetailUiTokens.sectionGap),
-                    PluginSlotArea(
-                      appState: widget.appState,
-                      slotId: 'detail.sections.bottom',
-                      params: <String, Object?>{
-                        'page': 'detail',
-                        'itemId': _episode.id,
-                        'title': _episode.name,
-                        if (_detail != null)
-                          'item': <String, Object?>{
-                            'id': _detail!.id,
-                            'name': _detail!.name,
-                            'type': _detail!.type,
-                          },
-                      },
-                    ),
-                  ],
+                  const SizedBox(height: _DetailUiTokens.sectionGap),
+                  PluginSlotArea(
+                    appState: widget.appState,
+                    slotId: 'detail.sections.bottom',
+                    params: _buildDetailPluginParams(_detail ?? _episode),
+                  ),
                 ],
               ),
             ),

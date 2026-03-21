@@ -1,6 +1,4 @@
 import 'dart:async';
-
-import 'dart:async';
 import 'dart:ui' show PlatformDispatcher;
 
 import 'package:dynamic_color/dynamic_color.dart';
@@ -27,6 +25,7 @@ import 'services/app_diagnostics_log.dart';
 import 'services/app_update_flow.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/app_route_observer.dart';
+import 'services/plugins/plugin_governance_flow.dart';
 import 'services/tv_remote/tv_remote_command_dispatcher.dart';
 import 'services/tv_remote/tv_remote_service.dart';
 import 'tv/tv_background.dart';
@@ -520,11 +519,13 @@ class _LinPlayerAppState extends State<LinPlayerApp>
                       data: effectiveTheme,
                       child: AppUpdateAutoChecker(
                         appState: appState,
-                        child: DefaultTextStyle.merge(
-                          style: const TextStyle(
-                            decoration: TextDecoration.none,
+                        child: PluginGovernanceAutoChecker(
+                          child: DefaultTextStyle.merge(
+                            style: const TextStyle(
+                              decoration: TextDecoration.none,
+                            ),
+                            child: shortcutWrappedChild,
                           ),
-                          child: shortcutWrappedChild,
                         ),
                       ),
                     ),

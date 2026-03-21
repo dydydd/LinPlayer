@@ -18,6 +18,7 @@ import 'player_screen_exo.dart';
 import 'search_page.dart';
 import 'server_page.dart';
 import 'settings_page.dart';
+import 'plugins/plugin_slot_area.dart';
 import 'server_adapters/server_access.dart';
 import 'services/app_route_observer.dart';
 import 'show_detail_page.dart';
@@ -1468,6 +1469,16 @@ class _HomeBody extends StatelessWidget {
               padding: EdgeInsets.only(bottom: bottomPadding),
               children: [
                 const SizedBox(height: 8),
+                if (!isTv)
+                  PluginSlotArea(
+                    appState: appState,
+                    slotId: 'home.feed.beforeSections',
+                    padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+                    params: const <String, Object?>{
+                      'page': 'home',
+                      'source': 'mobile.home',
+                    },
+                  ),
                 if (isTv) ...[
                   _ContinueWatchingSection(appState: appState, isTv: true),
                 ] else ...[
@@ -1512,6 +1523,16 @@ class _HomeBody extends StatelessWidget {
                   const Padding(
                     padding: EdgeInsets.all(24),
                     child: Center(child: Text('暂无可展示内容')),
+                  ),
+                if (!isTv)
+                  PluginSlotArea(
+                    appState: appState,
+                    slotId: 'home.feed.afterSections',
+                    padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+                    params: const <String, Object?>{
+                      'page': 'home',
+                      'source': 'mobile.home',
+                    },
                   ),
                 const SizedBox(height: 8),
                 if (!isTv) _MediaStatsSection(appState: appState, isTv: isTv),

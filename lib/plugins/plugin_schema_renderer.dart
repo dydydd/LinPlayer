@@ -123,20 +123,42 @@ Widget _renderNode(
           scrollable: scrollable,
         ),
       );
+    case 'section':
+      return Padding(
+        padding: padding ?? EdgeInsets.zero,
+        child: _renderSection(
+          context,
+          children,
+          props,
+          onEvent: onEvent,
+          scrollable: scrollable,
+        ),
+      );
     case 'card':
-      final child = children.isEmpty ? null : children.first;
       return Card(
         margin: EdgeInsets.zero,
         child: Padding(
           padding: padding ?? const EdgeInsets.all(12),
-          child: child == null
+          child: children.isEmpty
               ? const SizedBox.shrink()
-              : _renderNode(
+              : _renderColumnLike(
                   context,
-                  child,
+                  children,
+                  props,
                   onEvent: onEvent,
                   scrollable: scrollable,
                 ),
+        ),
+      );
+    case 'grid':
+      return Padding(
+        padding: padding ?? EdgeInsets.zero,
+        child: _renderGrid(
+          context,
+          children,
+          props,
+          onEvent: onEvent,
+          scrollable: scrollable,
         ),
       );
     case 'divider':
@@ -191,6 +213,12 @@ Widget _renderNode(
       );
     case 'button':
       return _renderButton(context, props, onEvent: onEvent);
+    case 'iconbutton':
+      return _renderIconButton(context, props, onEvent: onEvent);
+    case 'chip':
+      return _renderChip(context, props, onEvent: onEvent);
+    case 'badge':
+      return _renderBadge(context, props);
     case 'loading':
       return const Center(child: CircularProgressIndicator());
     case 'empty':
@@ -200,7 +228,14 @@ Widget _renderNode(
       final message = (props['message'] as String? ?? '发生错误').trim();
       return Center(child: Text(message));
     default:
-      return Center(child: Text('不支持的组件：$type'));
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text('不支持的组件：$type'),
+      );
   }
 }
 
@@ -219,6 +254,94 @@ Widget _renderColumnLike(
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: _withGap(rendered, gap, axis: Axis.vertical),
+  );
+}
+
+Widget _renderSection(
+  BuildContext context,
+  List children,
+  Map<String, Object?> props, {
+  required PluginEventCallback onEvent,
+  required bool scrollable,
+}) {
+  final title = (props['title'] as String? ?? '').trim();
+  final subtitle = (props['subtitle'] as String? ?? '').trim();
+  final gap = _asDouble(props['gap']) ?? 10;
+
+  final body = _renderColumnLike(
+    context,
+    children,
+    props,
+    onEvent: onEvent,
+    scrollable: scrollable,
+  );
+
+  if (title.isEmpty && subtitle.isEmpty) return body;
+
+  final theme = Theme.of(context);
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      if (title.isNotEmpty)
+        Text(
+          title,
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      if (subtitle.isNotEmpty) ...[
+        const SizedBox(height: 4),
+        Text(
+          subtitle,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+      SizedBox(height: gap),
+      body,
+    ],
+  );
+}
+
+Widget _renderGrid(
+  BuildContext context,
+  List children,
+  Map<String, Object?> props, {
+  required PluginEventCallback onEvent,
+  required bool scrollable,
+}) {
+  final columns = (_asDouble(props['columns']) ?? 1).round().clamp(1, 6);
+  final gap = _asDouble(props['gap']) ?? 12;
+  final rendered = children
+      .map((e) =>
+          _renderNode(context, e, onEvent: onEvent, scrollable: scrollable))
+      .toList(growable: false);
+
+  return LayoutBuilder(
+    builder: (context, constraints) {
+      final width = constraints.maxWidth;
+      if (!width.isFinite || width <= 0) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: _withGap(rendered, gap, axis: Axis.vertical),
+        );
+      }
+      final itemWidth = ((width - gap * (columns - 1)) / columns)
+          .clamp(0.0, double.infinity);
+      return Wrap(
+        spacing: gap,
+        runSpacing: gap,
+        children: rendered
+            .map(
+              (child) => SizedBox(
+                width: itemWidth,
+                child: child,
+              ),
+            )
+            .toList(growable: false),
+      );
+    },
   );
 }
 
@@ -265,14 +388,7 @@ Widget _renderButton(
 }) {
   final text = (props['text'] as String? ?? '按钮').trim();
   final enabled = props['enabled'] as bool? ?? true;
-  final eventRaw = props['event'];
-  Map<String, Object?>? event;
-  if (eventRaw is Map) {
-    event = Map<String, Object?>.from(eventRaw);
-  } else if (eventRaw is String) {
-    final name = eventRaw.trim();
-    if (name.isNotEmpty) event = {'name': name};
-  }
+  final event = _readEvent(props['event']);
 
   void fire() {
     if (event == null) return;
@@ -293,6 +409,103 @@ Widget _renderButton(
     onPressed: (enabled && event != null) ? fire : null,
     child: Text(text),
   );
+}
+
+Widget _renderIconButton(
+  BuildContext context,
+  Map<String, Object?> props, {
+  required PluginEventCallback onEvent,
+}) {
+  final event = _readEvent(props['event']);
+  final enabled = props['enabled'] as bool? ?? true;
+  final tooltip = (props['tooltip'] as String? ?? '').trim();
+  final iconName = _normalizeIconName(props['icon']);
+  final icon = _iconWhitelist[iconName] ?? Icons.extension_outlined;
+
+  void fire() {
+    if (event == null) return;
+    onEvent(event);
+  }
+
+  if (DeviceType.isTv) {
+    return TvFocusable(
+      enabled: enabled && event != null,
+      onPressed: fire,
+      padding: const EdgeInsets.all(10),
+      child: Icon(icon),
+    );
+  }
+
+  return IconButton(
+    tooltip: tooltip.isEmpty ? null : tooltip,
+    onPressed: (enabled && event != null) ? fire : null,
+    icon: Icon(icon),
+  );
+}
+
+Widget _renderChip(
+  BuildContext context,
+  Map<String, Object?> props, {
+  required PluginEventCallback onEvent,
+}) {
+  final text = (props['text'] as String? ?? '标签').trim();
+  final event = _readEvent(props['event']);
+  final enabled = props['enabled'] as bool? ?? true;
+
+  void fire() {
+    if (event == null) return;
+    onEvent(event);
+  }
+
+  return ActionChip(
+    label: Text(text),
+    onPressed: (enabled && event != null) ? fire : null,
+  );
+}
+
+Widget _renderBadge(BuildContext context, Map<String, Object?> props) {
+  final text = (props['text'] as String? ?? '').trim();
+  if (text.isEmpty) return const SizedBox.shrink();
+  final tone = (props['tone'] as String? ?? 'neutral').trim().toLowerCase();
+  final theme = Theme.of(context);
+  final scheme = theme.colorScheme;
+  final (bg, fg) = switch (tone) {
+    'success' => (scheme.tertiaryContainer, scheme.onTertiaryContainer),
+    'warning' => (scheme.secondaryContainer, scheme.onSecondaryContainer),
+    'danger' => (scheme.errorContainer, scheme.onErrorContainer),
+    'info' => (scheme.primaryContainer, scheme.onPrimaryContainer),
+    _ => (scheme.surfaceContainerHighest, scheme.onSurfaceVariant),
+  };
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(
+      color: bg,
+      borderRadius: BorderRadius.circular(999),
+    ),
+    child: Text(
+      text,
+      style: theme.textTheme.labelSmall?.copyWith(
+        color: fg,
+        fontWeight: FontWeight.w700,
+      ),
+    ),
+  );
+}
+
+Map<String, Object?>? _readEvent(Object? eventRaw) {
+  if (eventRaw is Map) {
+    return Map<String, Object?>.from(eventRaw);
+  }
+  if (eventRaw is String) {
+    final name = eventRaw.trim();
+    if (name.isNotEmpty) return {'name': name};
+  }
+  return null;
+}
+
+String _normalizeIconName(Object? raw) {
+  final text = (raw as String? ?? '').trim().toLowerCase();
+  return text.replaceAll(RegExp(r'[^a-z0-9]'), '');
 }
 
 Map<String, Object?> _asMap(Object? raw) {
@@ -359,3 +572,35 @@ BoxFit? _parseBoxFit(Object? raw) {
     _ => BoxFit.cover,
   };
 }
+
+const Map<String, IconData> _iconWhitelist = <String, IconData>{
+  'add': Icons.add,
+  'arrowback': Icons.arrow_back,
+  'arrowforward': Icons.arrow_forward,
+  'calendar': Icons.calendar_today_outlined,
+  'check': Icons.check,
+  'chevronleft': Icons.chevron_left,
+  'chevronright': Icons.chevron_right,
+  'close': Icons.close,
+  'delete': Icons.delete_outline,
+  'download': Icons.download_outlined,
+  'favorite': Icons.favorite_border_outlined,
+  'filter': Icons.filter_list,
+  'home': Icons.home_outlined,
+  'info': Icons.info_outline,
+  'link': Icons.link,
+  'menu': Icons.menu,
+  'more': Icons.more_horiz,
+  'movie': Icons.movie_outlined,
+  'open': Icons.open_in_new,
+  'pause': Icons.pause,
+  'person': Icons.person_outline,
+  'play': Icons.play_arrow,
+  'refresh': Icons.refresh,
+  'search': Icons.search,
+  'settings': Icons.settings_outlined,
+  'share': Icons.share_outlined,
+  'star': Icons.star_border_outlined,
+  'tv': Icons.live_tv_outlined,
+  'upload': Icons.upload_outlined,
+};

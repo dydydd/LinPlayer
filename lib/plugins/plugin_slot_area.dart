@@ -1,11 +1,12 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 
 import '../services/plugins/plugin_manager.dart';
 import '../services/plugins/plugin_runtime_v1.dart';
-import 'plugin_page_host_page.dart';
+import 'plugin_host_actions.dart';
 import 'plugin_schema_renderer.dart';
 
 class PluginSlotArea extends StatefulWidget {
@@ -32,6 +33,7 @@ class PluginSlotArea extends StatefulWidget {
 
 class _PluginSlotAreaState extends State<PluginSlotArea> {
   final _manager = PluginManagerV1.instance;
+  static const int _defaultMaxItems = 6;
 
   Future<List<_SlotInstance>>? _future;
 
@@ -40,6 +42,14 @@ class _PluginSlotAreaState extends State<PluginSlotArea> {
     super.initState();
     PluginManagerV1.revision.addListener(_onRevisionChanged);
     _future = _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant PluginSlotArea oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.slotId != widget.slotId) {
+      _future = _load();
+    }
   }
 
   @override
@@ -81,7 +91,12 @@ class _PluginSlotAreaState extends State<PluginSlotArea> {
       return '${a.plugin.id}@${a.slot.id}'
           .compareTo('${b.plugin.id}@${b.slot.id}');
     });
-    return out;
+    final maxItems = switch (widget.slotId) {
+      'detail.hero.actions' => 3,
+      'player.appbar.trailing' => 3,
+      _ => _defaultMaxItems,
+    };
+    return out.take(maxItems).toList(growable: false);
   }
 
   @override
@@ -102,6 +117,7 @@ class _PluginSlotAreaState extends State<PluginSlotArea> {
         final children = items
             .map(
               (it) => _PluginSlotHost(
+                key: ValueKey('${it.plugin.id}@${it.plugin.version}@${it.slot.id}'),
                 appState: widget.appState,
                 plugin: it.plugin,
                 manifest: it.manifest,
@@ -114,9 +130,12 @@ class _PluginSlotAreaState extends State<PluginSlotArea> {
         if (widget.axis == Axis.horizontal) {
           return Padding(
             padding: widget.padding,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: _withGap(children, widget.gap, axis: Axis.horizontal),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: _withGap(children, widget.gap, axis: Axis.horizontal),
+              ),
             ),
           );
         }
@@ -175,6 +194,7 @@ class _SlotInstance {
 
 class _PluginSlotHost extends StatefulWidget {
   const _PluginSlotHost({
+    super.key,
     required this.appState,
     required this.plugin,
     required this.manifest,
@@ -207,6 +227,14 @@ class _PluginSlotHostState extends State<_PluginSlotHost> {
   void initState() {
     super.initState();
     unawaited(_init());
+  }
+
+  @override
+  void didUpdateWidget(covariant _PluginSlotHost oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!mapEquals(oldWidget.params, widget.params)) {
+      unawaited(_render());
+    }
   }
 
   @override
@@ -308,90 +336,12 @@ class _PluginSlotHostState extends State<_PluginSlotHost> {
   }
 
   Future<void> _handleActions(Object? actionsRaw) async {
-    if (actionsRaw is! List || actionsRaw.isEmpty) return;
-    for (final a in actionsRaw) {
-      if (a is! Map) continue;
-      final type = (a['type'] as String? ?? '').trim().toLowerCase();
-      switch (type) {
-        case 'toast':
-          final message = (a['message'] as String? ?? '').trim();
-          if (!mounted || message.isEmpty) continue;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(message)),
-          );
-          break;
-        case 'navigate':
-          final route = (a['route'] as String? ?? '').trim();
-          final paramsRaw = a['params'];
-          final params = paramsRaw is Map
-              ? Map<String, Object?>.from(paramsRaw)
-              : const <String, Object?>{};
-          if (route.isEmpty) continue;
-          await _navigateTo(route, params);
-          break;
-        default:
-          break;
-      }
-    }
-  }
-
-  Future<void> _navigateTo(String route, Map<String, Object?> params) async {
-    if (!mounted) return;
-    if (!route.startsWith('/')) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('不支持的路由：$route')),
-      );
-      return;
-    }
-
-    final manager = PluginManagerV1.instance;
-    final target = currentPluginTarget();
-
-    final installed = await manager.listInstalled();
-    if (!mounted) return;
-    final candidates = <InstalledPluginV1>[
-      widget.plugin,
-      ...installed.where((p) => p.id != widget.plugin.id),
-    ];
-
-    for (final p in candidates) {
-      if (!p.enabled) continue;
-      PluginManifestV1 manifest;
-      if (p.id == widget.plugin.id && p.version == widget.plugin.version) {
-        manifest = widget.manifest;
-      } else {
-        try {
-          manifest = await manager.loadManifest(p);
-        } catch (_) {
-          continue;
-        }
-      }
-      PluginPageContributionV1? page;
-      for (final pg in manifest.contributions.pages) {
-        if (pg.route == route && pg.targets.contains(target)) {
-          page = pg;
-          break;
-        }
-      }
-      if (page == null) continue;
-      if (!mounted) return;
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => PluginPageHostPage(
-            appState: widget.appState,
-            plugin: p,
-            manifest: manifest,
-            page: page!,
-            params: params,
-          ),
-        ),
-      );
-      return;
-    }
-
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('找不到路由：$route')),
+    await executePluginActionsV1(
+      context,
+      appState: widget.appState,
+      plugin: widget.plugin,
+      manifest: widget.manifest,
+      actionsRaw: actionsRaw,
     );
   }
 

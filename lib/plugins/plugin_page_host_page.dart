@@ -6,6 +6,7 @@ import 'package:lin_player_ui/lin_player_ui.dart';
 
 import '../services/plugins/plugin_manager.dart';
 import '../services/plugins/plugin_runtime_v1.dart';
+import 'plugin_host_actions.dart';
 import 'plugin_schema_renderer.dart';
 
 class PluginPageHostPage extends StatefulWidget {
@@ -43,15 +44,41 @@ class _PluginPageHostPageState extends State<PluginPageHostPage> {
   @override
   void initState() {
     super.initState();
+    PluginManagerV1.revision.addListener(_onManagerRevision);
     unawaited(_init());
   }
 
   @override
   void dispose() {
+    PluginManagerV1.revision.removeListener(_onManagerRevision);
     final rt = _runtime;
     _runtime = null;
     unawaited(rt?.dispose());
     super.dispose();
+  }
+
+  void _onManagerRevision() {
+    unawaited(_refreshPluginAvailability());
+  }
+
+  Future<void> _refreshPluginAvailability() async {
+    final installed = await PluginManagerV1.instance.listInstalled();
+    if (!mounted) return;
+    final available = installed.any(
+      (p) =>
+          p.id == widget.plugin.id &&
+          p.version == widget.plugin.version &&
+          p.enabled,
+    );
+    if (available) return;
+    final rt = _runtime;
+    _runtime = null;
+    unawaited(rt?.dispose());
+    setState(() {
+      _schema = null;
+      _error = '插件已被禁用或卸载';
+      _loading = false;
+    });
   }
 
   Future<void> _init() async {
@@ -144,90 +171,12 @@ class _PluginPageHostPageState extends State<PluginPageHostPage> {
   }
 
   Future<void> _handleActions(Object? actionsRaw) async {
-    if (actionsRaw is! List || actionsRaw.isEmpty) return;
-    for (final a in actionsRaw) {
-      if (a is! Map) continue;
-      final type = (a['type'] as String? ?? '').trim().toLowerCase();
-      switch (type) {
-        case 'toast':
-          final message = (a['message'] as String? ?? '').trim();
-          if (!mounted || message.isEmpty) continue;
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text(message)));
-          break;
-        case 'navigate':
-          final route = (a['route'] as String? ?? '').trim();
-          final paramsRaw = a['params'];
-          final params = paramsRaw is Map
-              ? Map<String, Object?>.from(paramsRaw)
-              : const <String, Object?>{};
-          if (route.isEmpty) continue;
-          await _navigateTo(route, params);
-          break;
-        default:
-          // Ignore unsupported actions.
-          break;
-      }
-    }
-  }
-
-  Future<void> _navigateTo(String route, Map<String, Object?> params) async {
-    if (!mounted) return;
-    if (!route.startsWith('/')) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('不支持的路由：$route')),
-      );
-      return;
-    }
-
-    final manager = PluginManagerV1.instance;
-    final target = currentPluginTarget();
-
-    final installed = await manager.listInstalled();
-    if (!mounted) return;
-    final candidates = <InstalledPluginV1>[
-      widget.plugin,
-      ...installed.where((p) => p.id != widget.plugin.id),
-    ];
-
-    for (final p in candidates) {
-      if (!p.enabled) continue;
-      PluginManifestV1 manifest;
-      if (p.id == widget.plugin.id && p.version == widget.plugin.version) {
-        manifest = widget.manifest;
-      } else {
-        try {
-          manifest = await manager.loadManifest(p);
-        } catch (_) {
-          continue;
-        }
-      }
-      PluginPageContributionV1? page;
-      for (final pg in manifest.contributions.pages) {
-        if (pg.route == route && pg.targets.contains(target)) {
-          page = pg;
-          break;
-        }
-      }
-      if (page == null) continue;
-      if (!mounted) return;
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => PluginPageHostPage(
-            appState: widget.appState,
-            plugin: p,
-            manifest: manifest,
-            page: page!,
-            params: params,
-          ),
-        ),
-      );
-      return;
-    }
-
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('找不到路由：$route')),
+    await executePluginActionsV1(
+      context,
+      appState: widget.appState,
+      plugin: widget.plugin,
+      manifest: widget.manifest,
+      actionsRaw: actionsRaw,
     );
   }
 

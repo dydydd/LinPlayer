@@ -23,7 +23,6 @@ import 'server_adapters/server_access.dart';
 import 'services/app_route_observer.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/desktop_window.dart';
-import 'services/plugins/plugin_manager.dart';
 import 'services/playback_proxy/playback_proxy.dart';
 import 'tv/tv_focusable.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
@@ -5461,18 +5460,22 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                               icon: Icon(_orientationIcon),
                               onPressed: _cycleOrientationMode,
                             ),
-                            if (currentPluginTarget() == PluginTarget.pc)
-                              PluginSlotArea(
-                                appState: widget.appState,
-                                slotId: 'player.appbar.trailing',
-                                axis: Axis.horizontal,
-                                gap: 6,
-                                params: <String, Object?>{
-                                  'page': 'player',
+                            PluginSlotArea(
+                              appState: widget.appState,
+                              slotId: 'player.appbar.trailing',
+                              axis: Axis.horizontal,
+                              gap: 6,
+                              params: <String, Object?>{
+                                'page': 'player',
+                                'source': 'network',
+                                'itemId': widget.itemId,
+                                'title': widget.title,
+                                'playback': <String, Object?>{
                                   'itemId': widget.itemId,
                                   'title': widget.title,
                                 },
-                              ),
+                              },
+                            ),
                             PopupMenuButton<_PlayerMenuAction>(
                               tooltip: '更多',
                               icon: const Icon(Icons.more_vert),
