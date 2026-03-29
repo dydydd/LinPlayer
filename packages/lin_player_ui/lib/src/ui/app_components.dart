@@ -221,6 +221,9 @@ class MediaPosterTile extends StatefulWidget {
     this.badgeText,
     this.topRightBadge,
     this.titleMaxLines = 1,
+    this.showOverlayRating = true,
+    this.combineMetaLine = false,
+    this.posterAspectRatio,
   });
 
   final String title;
@@ -231,6 +234,9 @@ class MediaPosterTile extends StatefulWidget {
   final String? badgeText;
   final Widget? topRightBadge;
   final int titleMaxLines;
+  final bool showOverlayRating;
+  final bool combineMetaLine;
+  final double? posterAspectRatio;
 
   @override
   State<MediaPosterTile> createState() => _MediaPosterTileState();
@@ -320,22 +326,67 @@ class _MediaPosterTileState extends State<MediaPosterTile> {
     };
 
     final image = widget.imageUrl != null
-          ? CachedNetworkImage(
-              imageUrl: widget.imageUrl!,
-              cacheManager: CoverCacheManager.instance,
-              httpHeaders: {'User-Agent': LinHttpClientFactory.userAgent},
-              fit: BoxFit.cover,
-              placeholder: (_, __) => const ColoredBox(color: Colors.black12),
-              errorWidget: (_, __, ___) =>
-                  const ColoredBox(color: Colors.black26),
-              useOldImageOnUrlChange: true,
-              fadeInDuration: Duration.zero,
-              fadeOutDuration: Duration.zero,
-              placeholderFadeInDuration: Duration.zero,
-            )
-          : const ColoredBox(color: Colors.black26, child: Icon(Icons.image));
+        ? CachedNetworkImage(
+            imageUrl: widget.imageUrl!,
+            cacheManager: CoverCacheManager.instance,
+            httpHeaders: {'User-Agent': LinHttpClientFactory.userAgent},
+            fit: BoxFit.cover,
+            placeholder: (_, __) => const ColoredBox(color: Colors.black12),
+            errorWidget: (_, __, ___) =>
+                const ColoredBox(color: Colors.black26),
+            useOldImageOnUrlChange: true,
+            fadeInDuration: Duration.zero,
+            fadeOutDuration: Duration.zero,
+            placeholderFadeInDuration: Duration.zero,
+          )
+        : const ColoredBox(color: Colors.black26, child: Icon(Icons.image));
 
     final badge = (widget.badgeText ?? '').trim();
+    final yearText = (widget.year ?? '').trim();
+    final hasYear = yearText.isNotEmpty;
+    final hasRating = widget.rating != null && widget.rating! > 0;
+    final metaStyle = theme.textTheme.labelSmall?.copyWith(
+          color: scheme.onSurfaceVariant,
+          fontWeight: FontWeight.w600,
+          letterSpacing: style.template == UiTemplate.neonHud ? 0.25 : null,
+        ) ??
+        TextStyle(
+          color: scheme.onSurfaceVariant,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+        );
+    final showOverlayRating = widget.showOverlayRating && hasRating;
+
+    Widget? metaLine;
+    if (widget.combineMetaLine) {
+      if (hasYear || hasRating) {
+        metaLine = Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (hasYear) Text(yearText, style: metaStyle),
+            if (hasRating) ...[
+              if (hasYear) const SizedBox(width: 6),
+              const Icon(
+                Icons.star_rounded,
+                size: 14,
+                color: Colors.amber,
+              ),
+              const SizedBox(width: 2),
+              Text(widget.rating!.toStringAsFixed(1), style: metaStyle),
+            ],
+          ],
+        );
+      }
+    } else if (hasYear) {
+      metaLine = Text(
+        yearText,
+        style: metaStyle,
+        textAlign: TextAlign.center,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      );
+    }
 
     final poster = DecoratedBox(
       decoration: BoxDecoration(
@@ -366,16 +417,15 @@ class _MediaPosterTileState extends State<MediaPosterTile> {
                   child: CustomPaint(painter: framePainter),
                 ),
               ),
-            if (widget.rating != null || badge.isNotEmpty)
+            if (showOverlayRating || badge.isNotEmpty)
               Positioned(
                 left: 6,
                 top: 6,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (widget.rating != null)
-                      RatingBadge(rating: widget.rating!),
-                    if (widget.rating != null && badge.isNotEmpty)
+                    if (showOverlayRating) RatingBadge(rating: widget.rating!),
+                    if (showOverlayRating && badge.isNotEmpty)
                       const SizedBox(width: 6),
                     if (badge.isNotEmpty) MediaLabelBadge(text: badge),
                   ],
@@ -392,6 +442,13 @@ class _MediaPosterTileState extends State<MediaPosterTile> {
       ),
     );
 
+    final posterContent = widget.posterAspectRatio == null
+        ? Expanded(child: poster)
+        : AspectRatio(
+            aspectRatio: widget.posterAspectRatio!,
+            child: poster,
+          );
+
     final tile = Material(
       color: Colors.transparent,
       child: InkWell(
@@ -401,7 +458,7 @@ class _MediaPosterTileState extends State<MediaPosterTile> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Expanded(child: poster),
+            posterContent,
             const SizedBox(height: 6),
             Text(
               widget.title,
@@ -414,20 +471,9 @@ class _MediaPosterTileState extends State<MediaPosterTile> {
               maxLines: math.max(1, widget.titleMaxLines),
               overflow: TextOverflow.ellipsis,
             ),
-            if ((widget.year ?? '').trim().isNotEmpty) ...[
+            if (metaLine != null) ...[
               const SizedBox(height: 2),
-              Text(
-                widget.year!.trim(),
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing:
-                      style.template == UiTemplate.neonHud ? 0.25 : null,
-                ),
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+              metaLine,
             ],
           ],
         ),

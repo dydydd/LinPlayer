@@ -583,8 +583,7 @@ class _HomePageState extends State<HomePage> {
                   child: MediaQuery.removePadding(
                     context: context,
                     removeTop: true,
-                    child:
-                        IndexedStack(index: tvIndex, children: tvPages),
+                    child: IndexedStack(index: tvIndex, children: tvPages),
                   ),
                 ),
               ],
@@ -1927,9 +1926,11 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection>
             const spacing = 10.0;
             final access = resolveServerAccess(appState: widget.appState);
             final compact = constraints.maxWidth < 600;
+            final compactMobile = !widget.isTv && compact;
             final titleMaxLines = widget.isTv ? 1 : (compact ? 2 : 1);
             final uiScale = context.uiScale;
-            final baseWidth = widget.isTv ? (280 * uiScale) : 280.0;
+            final baseWidth =
+                widget.isTv ? (280 * uiScale) : (compactMobile ? 182.0 : 280.0);
             final visible = (constraints.maxWidth / baseWidth).clamp(1.4, 7.0);
             final maxCount = widget.isTv
                 ? items.length
@@ -1939,7 +1940,10 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection>
                 (constraints.maxWidth - padding * 2 - spacing * (visible - 1)) /
                     visible;
             final imageHeight = itemWidth * 9 / 16;
-            final listHeight = imageHeight + (titleMaxLines == 2 ? 64 : 46);
+            final listHeight = imageHeight +
+                (titleMaxLines == 2
+                    ? (compactMobile ? 56.0 : 64.0)
+                    : (compactMobile ? 44.0 : 46.0));
             final totalContentWidth =
                 maxCount * itemWidth + (maxCount - 1) * spacing;
             final viewportWidth = constraints.maxWidth - padding * 2;
@@ -3039,7 +3043,9 @@ class _HomeSectionCarousel extends StatelessWidget {
         const padding = 14.0;
         const spacing = 8.0;
         final uiScale = context.uiScale;
-        final baseWidth = isTv ? (180 * uiScale) : 180.0;
+        final compactMobile = !isTv && constraints.maxWidth < 600;
+        final baseWidth =
+            isTv ? (180 * uiScale) : (compactMobile ? 143.0 : 180.0);
         final visible = (constraints.maxWidth / baseWidth).clamp(2.2, 12.0);
         final cap = isTv ? 10 : _maxItems;
         final maxCount = items.length < cap ? items.length : cap;
@@ -3048,8 +3054,10 @@ class _HomeSectionCarousel extends StatelessWidget {
             (constraints.maxWidth - padding * 2 - spacing * (visible - 1)) /
                 visible;
         final imageHeight = itemWidth * 3 / 2;
-        final listHeight =
-            imageHeight + (isTv ? (62 * uiScale).clamp(52.0, 72.0) : 56.0);
+        final listHeight = imageHeight +
+            (isTv
+                ? (62 * uiScale).clamp(52.0, 72.0)
+                : (compactMobile ? 44.0 : 56.0));
 
         return Padding(
           padding: const EdgeInsets.only(bottom: 6),
@@ -3117,6 +3125,8 @@ class _HomeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compactMobile =
+        !isTv && MediaQuery.sizeOf(context).shortestSide < 600;
     final access = resolveServerAccess(appState: appState);
     final image = item.hasImage && access != null
         ? access.adapter.imageUrl(
@@ -3231,8 +3241,9 @@ class _HomeCard extends StatelessWidget {
           )
         : null;
 
-    final badge =
-        item.type == 'Movie' ? '电影' : (item.type == 'Series' ? '剧集' : '');
+    final badge = compactMobile
+        ? ''
+        : (item.type == 'Movie' ? '电影' : (item.type == 'Series' ? '剧集' : ''));
 
     return MediaPosterTile(
       title: item.name,
@@ -3241,6 +3252,9 @@ class _HomeCard extends StatelessWidget {
       rating: rating,
       badgeText: badge,
       topRightBadge: topRightBadge,
+      showOverlayRating: !compactMobile,
+      combineMetaLine: compactMobile,
+      posterAspectRatio: compactMobile ? (2 / 3) : null,
       onTap: onTap,
     );
   }

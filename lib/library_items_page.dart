@@ -58,6 +58,8 @@ class _GridItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compactMobile =
+        !DeviceType.isTv && MediaQuery.sizeOf(context).shortestSide < 600;
     final access = this.access;
     final image = item.hasImage && access != null
         ? access.adapter.imageUrl(
@@ -72,9 +74,9 @@ class _GridItem extends StatelessWidget {
     final rating = item.communityRating;
 
     String badge = '';
-    if (item.type == 'Movie') {
+    if (!compactMobile && item.type == 'Movie') {
       badge = '电影';
-    } else if (item.type == 'Series') {
+    } else if (!compactMobile && item.type == 'Series') {
       badge = '剧集';
     }
 
@@ -84,6 +86,9 @@ class _GridItem extends StatelessWidget {
       year: year,
       rating: rating,
       badgeText: badge,
+      showOverlayRating: !compactMobile,
+      combineMetaLine: compactMobile,
+      posterAspectRatio: compactMobile ? (2 / 3) : null,
       onTap: onTap,
     );
   }
@@ -313,9 +318,8 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
         final seen = <int>{};
         for (final entry in rawYears) {
           if (entry == null) continue;
-          final parsed = entry is int
-              ? entry
-              : int.tryParse(entry.toString().trim());
+          final parsed =
+              entry is int ? entry : int.tryParse(entry.toString().trim());
           if (parsed == null || parsed <= 0) continue;
           if (seen.add(parsed)) outYears.add(parsed);
         }
@@ -713,9 +717,9 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
     if (access == null) return;
 
     final nextKey = _serverGenresKey();
-    final hasCurrentData =
-        nextKey == _lastServerGenresKey &&
-        (_availableGenresFromServer != null || _availableYearsFromServer != null);
+    final hasCurrentData = nextKey == _lastServerGenresKey &&
+        (_availableGenresFromServer != null ||
+            _availableYearsFromServer != null);
     if (!force && hasCurrentData && _isGenresCacheFresh()) return;
 
     final inFlight = _availableGenresInFlight;
@@ -743,14 +747,12 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
       final years = filters.years;
       final fetchedAtMs = DateTime.now().millisecondsSinceEpoch;
       final reuseExistingYears = requestKey == _lastServerGenresKey;
-      final nextYears =
-          years.isNotEmpty
-              ? years
-              : (reuseExistingYears ? (currentYears ?? years) : years);
-      final nextYearsFetchedAtMs =
-          years.isNotEmpty
-              ? fetchedAtMs
-              : (reuseExistingYears ? _availableYearsFetchedAtMs : null);
+      final nextYears = years.isNotEmpty
+          ? years
+          : (reuseExistingYears ? (currentYears ?? years) : years);
+      final nextYearsFetchedAtMs = years.isNotEmpty
+          ? fetchedAtMs
+          : (reuseExistingYears ? _availableYearsFetchedAtMs : null);
       setState(() {
         _availableGenresFromServer = genres;
         _availableYearsFromServer = nextYears;
@@ -1314,8 +1316,9 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
     required VoidCallback onTap,
   }) {
     final theme = Theme.of(context);
-    final fg =
-        selected ? theme.colorScheme.onSurface : theme.textTheme.bodyMedium?.color;
+    final fg = selected
+        ? theme.colorScheme.onSurface
+        : theme.textTheme.bodyMedium?.color;
     final weight = selected ? FontWeight.w600 : FontWeight.w400;
     final bg = selected ? _optionSelectedBackground(theme) : null;
 
@@ -1502,8 +1505,12 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
         final access = resolveServerAccess(appState: widget.appState);
         final uiScale = context.uiScale;
         final isTv = _isTv(context);
+        final compactMobile =
+            !isTv && MediaQuery.sizeOf(context).shortestSide < 600;
         final enableBlur = !isTv && widget.appState.enableBlurEffects;
-        final maxCrossAxisExtent = (isTv ? 160.0 : 180.0) * uiScale;
+        final maxCrossAxisExtent =
+            (isTv ? 160.0 : (compactMobile ? 130.0 : 180.0)) * uiScale;
+        final childAspectRatio = compactMobile ? 0.54 : 0.7;
 
         PopupMenuItem<_LibraryItemsSortBy> sortItem({
           required _LibraryItemsSortBy value,
@@ -1583,8 +1590,9 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
                     final next = !_filterPanelOpen;
                     setState(() => _filterPanelOpen = next);
                     if (next) {
-                      final cachedYearsEmpty = _availableYearsFromServer != null &&
-                          _availableYearsFromServer!.isEmpty;
+                      final cachedYearsEmpty =
+                          _availableYearsFromServer != null &&
+                              _availableYearsFromServer!.isEmpty;
                       _maybeReloadServerGenres(force: cachedYearsEmpty);
                     }
                   },
@@ -1657,7 +1665,8 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
                           decimal: true,
                         ),
                         Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 6 * uiScale),
+                          padding:
+                              EdgeInsets.symmetric(horizontal: 6 * uiScale),
                           child: const Text('~'),
                         ),
                         _numberField(
@@ -1705,7 +1714,8 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
                         selected: false,
                         onTap: () => _maybeReloadServerGenres(force: true),
                       ),
-                    if (_isLoadingGenresFromServer || _isScanningYearsFromServer)
+                    if (_isLoadingGenresFromServer ||
+                        _isScanningYearsFromServer)
                       Padding(
                         padding: EdgeInsets.symmetric(horizontal: 4 * uiScale),
                         child: SizedBox(
@@ -1755,7 +1765,8 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
                           width: 78,
                         ),
                         Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 6 * uiScale),
+                          padding:
+                              EdgeInsets.symmetric(horizontal: 6 * uiScale),
                           child: const Text('~'),
                         ),
                         _numberField(
@@ -1800,7 +1811,8 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
                         child: SizedBox(
                           width: 14 * uiScale,
                           height: 14 * uiScale,
-                          child: const CircularProgressIndicator(strokeWidth: 2),
+                          child:
+                              const CircularProgressIndicator(strokeWidth: 2),
                         ),
                       ),
                     for (final g in displayGenres)
@@ -1824,7 +1836,8 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
                       _optionChip(
                         context,
                         uiScale: uiScale,
-                        label: _showAllGenres ? '收起' : '更多(${genreList.length})',
+                        label:
+                            _showAllGenres ? '收起' : '更多(${genreList.length})',
                         selected: _showAllGenres,
                         onTap: () =>
                             setState(() => _showAllGenres = !_showAllGenres),
@@ -1934,16 +1947,19 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
                             _onFiltersChanged();
                           },
                         ),
-                      for (final entry in (_customPrefixSelections.entries.toList()
-                        ..sort((a, b) =>
-                            a.key.toLowerCase().compareTo(b.key.toLowerCase()))))
+                      for (final entry
+                          in (_customPrefixSelections.entries.toList()
+                            ..sort((a, b) => a.key
+                                .toLowerCase()
+                                .compareTo(b.key.toLowerCase()))))
                         _optionChip(
                           context,
                           uiScale: uiScale,
                           label: '${entry.key}:${(entry.value ?? '').trim()} ×',
                           selected: true,
                           onTap: () {
-                            setState(() => _customPrefixSelections.remove(entry.key));
+                            setState(() =>
+                                _customPrefixSelections.remove(entry.key));
                             _onFiltersChanged();
                           },
                         ),
@@ -1966,7 +1982,8 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
           if (items.isEmpty && allItems.isNotEmpty) {
             final total = widget.appState.getTotal(widget.parentId);
             final canLoadMore = total == 0 || allItems.length < total;
-            final canAutoLoad = _emptyAutoLoadAttempts < _kEmptyAutoLoadMaxAttempts;
+            final canAutoLoad =
+                _emptyAutoLoadAttempts < _kEmptyAutoLoadMaxAttempts;
             if (canLoadMore && !_isRequesting && !_loadingMore && canAutoLoad) {
               _scheduleEmptyAutoLoadMore();
             }
@@ -2018,7 +2035,7 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
                   maxCrossAxisExtent: maxCrossAxisExtent,
                   mainAxisSpacing: 10,
                   crossAxisSpacing: 10,
-                  childAspectRatio: 0.7,
+                  childAspectRatio: childAspectRatio,
                 ),
                 itemCount: items.length + (_loadingMore ? 1 : 0),
                 itemBuilder: (context, index) {

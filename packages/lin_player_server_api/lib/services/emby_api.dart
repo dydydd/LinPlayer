@@ -152,6 +152,7 @@ class MediaItem {
   final String type;
   final String overview;
   final double? communityRating;
+  final String? officialRating;
   final String? premiereDate;
   final int? productionYear;
   final String? status;
@@ -178,6 +179,7 @@ class MediaItem {
     required this.type,
     required this.overview,
     required this.communityRating,
+    this.officialRating,
     required this.premiereDate,
     this.productionYear,
     this.status,
@@ -206,6 +208,7 @@ class MediaItem {
         type: json['Type'] as String? ?? '',
         overview: json['Overview'] as String? ?? '',
         communityRating: (json['CommunityRating'] as num?)?.toDouble(),
+        officialRating: json['OfficialRating'] as String?,
         premiereDate: json['PremiereDate'] as String?,
         productionYear: json['ProductionYear'] as int?,
         status: json['Status'] as String?,
@@ -248,6 +251,7 @@ class MediaItem {
         'Type': type,
         'Overview': overview,
         'CommunityRating': communityRating,
+        'OfficialRating': officialRating,
         'PremiereDate': premiereDate,
         'ProductionYear': productionYear,
         'Status': status,
