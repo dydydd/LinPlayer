@@ -20,6 +20,7 @@ import 'play_network_page_exo.dart';
 import 'tv/tv_focusable.dart';
 
 class _DetailUiTokens {
+  // ignore: unused_field
   static const pagePadding = EdgeInsets.fromLTRB(20, 74, 20, 24);
   static const sectionGap = 16.0;
   static const sectionTitleGap = 8.0;
@@ -953,6 +954,831 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
         if (year != null) 'year': year,
       },
     };
+  }
+
+  void _openPersonPage(BuildContext context, MediaPerson person) {
+    final id = person.id.trim();
+    if (id.isEmpty) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PersonPage(
+          appState: widget.appState,
+          server: widget.server,
+          personId: id,
+          seedName: person.name,
+          isTv: widget.isTv,
+          onOpenItem: (ctx, entry) {
+            Navigator.of(ctx).push(
+              MaterialPageRoute(
+                builder: (_) => ShowDetailPage(
+                  itemId: entry.id,
+                  title: entry.name,
+                  appState: widget.appState,
+                  server: widget.server,
+                  isTv: widget.isTv,
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  String _episodeStripLabel(MediaItem episode, int index) {
+    final seasonNo = episode.seasonNumber;
+    final episodeNo = episode.episodeNumber ?? (index + 1);
+    if (seasonNo != null && seasonNo > 0) {
+      return 'S${seasonNo.toString().padLeft(2, '0')}E${episodeNo.toString().padLeft(2, '0')}';
+    }
+    return '第$episodeNo集';
+  }
+
+  Widget _buildMobileDetailPage(
+    BuildContext context, {
+    required MediaItem item,
+    required ServerAccess? access,
+    required bool isSeries,
+    required Duration? runtime,
+    required PlaybackInfoResult? playInfo,
+    required bool enableBlur,
+    required String heroImageUrl,
+    required bool showFloatingSettings,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final topInset = MediaQuery.of(context).padding.top;
+    final contentTop = topInset + 72;
+    final bottomPadding = showFloatingSettings ? 108.0 : 28.0;
+
+    Widget backdrop = heroImageUrl.isEmpty
+        ? DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  scheme.primary.withValues(alpha: 0.18),
+                  const Color(0xFF171B22),
+                  const Color(0xFF090B0E),
+                ],
+              ),
+            ),
+          )
+        : Image.network(
+            heroImageUrl,
+            fit: BoxFit.cover,
+            headers: {'User-Agent': LinHttpClientFactory.userAgent},
+            errorBuilder: (_, __, ___) => DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    scheme.primary.withValues(alpha: 0.18),
+                    const Color(0xFF171B22),
+                    const Color(0xFF090B0E),
+                  ],
+                ),
+              ),
+            ),
+          );
+
+    backdrop = ColorFiltered(
+      colorFilter: ColorFilter.mode(
+        Colors.black.withValues(alpha: 0.16),
+        BlendMode.darken,
+      ),
+      child: backdrop,
+    );
+
+    return Scaffold(
+      body: Stack(
+        children: [
+          Positioned.fill(child: backdrop),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  stops: const [0, 0.30, 0.72, 1],
+                  colors: [
+                    Colors.black.withValues(alpha: 0.22),
+                    Colors.black.withValues(alpha: 0.52),
+                    const Color(0xFF0D1014).withValues(alpha: 0.96),
+                    const Color(0xFF060708),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: const Alignment(0, -0.92),
+                  radius: 1.1,
+                  colors: [
+                    scheme.primary.withValues(alpha: 0.18),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
+          RefreshIndicator(
+            onRefresh: _load,
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(
+                parent: BouncingScrollPhysics(),
+              ),
+              padding: EdgeInsets.fromLTRB(16, contentTop, 16, bottomPadding),
+              children: [
+                _mobileHeroSection(
+                  context,
+                  item: item,
+                  access: access,
+                  isSeries: isSeries,
+                  runtime: runtime,
+                ),
+                if (isSeries && _seasons.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  _mobileSeriesEpisodesSection(
+                    context,
+                    enableBlur: enableBlur,
+                    seriesItem: item,
+                    access: access,
+                  ),
+                ],
+                if (item.people.isNotEmpty && access != null) ...[
+                  const SizedBox(height: 14),
+                  _mobilePeopleSection(
+                    context,
+                    access: access,
+                    enableBlur: enableBlur,
+                    people: item.people,
+                  ),
+                ],
+                if (!isSeries && playInfo != null && !showFloatingSettings) ...[
+                  const SizedBox(height: 14),
+                  _moviePlaybackOptionsCard(context, playInfo),
+                ],
+                if (_chapters.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  _detailGlassPanel(
+                    enableBlur: enableBlur,
+                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+                    radius: 18,
+                    child: _chaptersSection(context, _chapters),
+                  ),
+                ],
+                if (_similar.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  _detailGlassPanel(
+                    enableBlur: enableBlur,
+                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+                    radius: 18,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _sectionTitle(context, '更多类似'),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          height: 236,
+                          child: _withHorizontalEdgeFade(
+                            context,
+                            child: ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: _similar.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(width: 12),
+                              itemBuilder: (context, index) {
+                                final similar = _similar[index];
+                                final img = similar.hasImage && access != null
+                                    ? access.adapter.imageUrl(
+                                        access.auth,
+                                        itemId: similar.id,
+                                        maxWidth: 400,
+                                      )
+                                    : null;
+                                final year = _yearText(similar);
+                                final badge = similar.type == 'Movie'
+                                    ? '电影'
+                                    : (similar.type == 'Series' ? '剧集' : '');
+                                return _HoverScale(
+                                  child: SizedBox(
+                                    width: 138,
+                                    child: MediaPosterTile(
+                                      title: similar.name,
+                                      titleMaxLines: 2,
+                                      imageUrl: img,
+                                      year: year,
+                                      rating: similar.communityRating,
+                                      badgeText: badge,
+                                      onTap: () {
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => ShowDetailPage(
+                                              itemId: similar.id,
+                                              title: similar.name,
+                                              appState: widget.appState,
+                                              server: widget.server,
+                                              isTv: widget.isTv,
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 14),
+                _detailGlassPanel(
+                  enableBlur: enableBlur,
+                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+                  radius: 18,
+                  child: _externalLinksSection(context, item, widget.appState),
+                ),
+                const SizedBox(height: 14),
+                PluginSlotArea(
+                  appState: widget.appState,
+                  slotId: 'detail.sections.bottom',
+                  params: _buildDetailPluginParams(item),
+                ),
+              ],
+            ),
+          ),
+          Positioned.fill(child: _topNavOverlay(context)),
+          if (showFloatingSettings && playInfo != null)
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: SafeArea(
+                top: false,
+                left: false,
+                right: false,
+                minimum: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: _floatingPlaybackSettingsDock(
+                  context,
+                  playInfo,
+                  enableBlur: enableBlur,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _mobileHeroSection(
+    BuildContext context, {
+    required MediaItem item,
+    required ServerAccess? access,
+    required bool isSeries,
+    required Duration? runtime,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final width = MediaQuery.of(context).size.width;
+    final posterWidth = width >= 440 ? 142.0 : 118.0;
+    final posterUrl = access == null
+        ? ''
+        : access.adapter.imageUrl(
+            access.auth,
+            itemId: item.id,
+            imageType: 'Primary',
+            maxWidth: 720,
+          );
+    final year = _yearText(item);
+    final meta = <String>[
+      if (year.isNotEmpty) year,
+      if (item.officialRating?.trim().isNotEmpty == true)
+        item.officialRating!.trim(),
+      ...item.genres.take(2),
+      if (item.communityRating != null &&
+          item.communityRating!.isFinite &&
+          item.communityRating! > 0)
+        '★ ${item.communityRating!.toStringAsFixed(1)}',
+      if (isSeries && _seasons.isNotEmpty) '${_seasons.length}季',
+      if (!isSeries && runtime != null) _fmt(runtime),
+    ];
+    final overview = item.overview.trim();
+    final playLabel = item.playbackPositionTicks > 0
+        ? '继续播放 ${_fmtClock(_ticksToDuration(item.playbackPositionTicks))}'
+        : '播放';
+
+    return _detailGlassPanel(
+      enableBlur: !widget.isTv && widget.appState.enableBlurEffects,
+      radius: 18,
+      padding: const EdgeInsets.all(14),
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          scheme.primary.withValues(alpha: 0.12),
+          Colors.black.withValues(alpha: 0.42),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: posterWidth,
+            child: Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: AspectRatio(
+                    aspectRatio: 2 / 3,
+                    child: posterUrl.isEmpty
+                        ? DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [
+                                  scheme.primary.withValues(alpha: 0.28),
+                                  Colors.black.withValues(alpha: 0.52),
+                                ],
+                              ),
+                            ),
+                            child: const Center(
+                              child: Icon(Icons.movie_creation_outlined),
+                            ),
+                          )
+                        : Image.network(
+                            posterUrl,
+                            fit: BoxFit.cover,
+                            headers: {
+                              'User-Agent': LinHttpClientFactory.userAgent,
+                            },
+                            errorBuilder: (_, __, ___) =>
+                                const ColoredBox(color: Colors.black26),
+                          ),
+                  ),
+                ),
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Material(
+                    color: Colors.black.withValues(alpha: 0.58),
+                    borderRadius: BorderRadius.circular(999),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(999),
+                      onTap: _favoriteLoaded ? _toggleLocalFavorite : null,
+                      child: Container(
+                        width: 32,
+                        height: 32,
+                        alignment: Alignment.center,
+                        child: Icon(
+                          _localFavorite
+                              ? Icons.favorite_rounded
+                              : Icons.favorite_border_rounded,
+                          size: 18,
+                          color: _localFavorite
+                              ? const Color(0xFFFF8CA8)
+                              : Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    height: 1.12,
+                  ),
+                ),
+                if (meta.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: meta
+                        .map(
+                          (value) => Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.12),
+                              ),
+                            ),
+                            child: Text(
+                              value,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ],
+                if (overview.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    overview,
+                    maxLines: 5,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: Colors.white.withValues(alpha: 0.78),
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+                if (!isSeries) ...[
+                  const SizedBox(height: 12),
+                  _heroActionButton(
+                    context,
+                    icon: Icons.play_arrow_rounded,
+                    label: playLabel,
+                    primary: true,
+                    onTap: () => _playMovie(item),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                PluginSlotArea(
+                  appState: widget.appState,
+                  slotId: 'detail.hero.actions',
+                  axis: Axis.horizontal,
+                  gap: 8,
+                  params: _buildDetailPluginParams(item),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _mobileSeriesEpisodesSection(
+    BuildContext context, {
+    required bool enableBlur,
+    required MediaItem seriesItem,
+    required ServerAccess? access,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final selectedSeason = _selectedSeason;
+    final buttonStyle = OutlinedButton.styleFrom(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      foregroundColor: Colors.white,
+      backgroundColor: Colors.white.withValues(alpha: 0.04),
+      side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      textStyle: theme.textTheme.labelLarge?.copyWith(
+        fontWeight: FontWeight.w700,
+      ),
+    );
+
+    Widget buildEpisodeList() {
+      if (selectedSeason == null) {
+        return Text(
+          '暂无可用剧集',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: Colors.white70,
+            fontWeight: FontWeight.w600,
+          ),
+        );
+      }
+
+      return FutureBuilder<List<MediaItem>>(
+        future: _episodesForSeason(selectedSeason),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const SizedBox(
+              height: 168,
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          if (snapshot.hasError) {
+            return Text(
+              '剧集加载失败',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: scheme.error,
+                fontWeight: FontWeight.w600,
+              ),
+            );
+          }
+
+          final episodes = snapshot.data ?? const <MediaItem>[];
+          if (episodes.isEmpty) {
+            return Text(
+              '这一季还没有剧集',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: Colors.white70,
+                fontWeight: FontWeight.w600,
+              ),
+            );
+          }
+
+          return SizedBox(
+            height: 176,
+            child: _withHorizontalEdgeFade(
+              context,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: episodes.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemBuilder: (context, index) {
+                  final episode = episodes[index];
+                  final coverUrl = access == null
+                      ? ''
+                      : access.adapter.imageUrl(
+                          access.auth,
+                          itemId: episode.hasImage
+                              ? episode.id
+                              : (selectedSeason.id.isNotEmpty
+                                  ? selectedSeason.id
+                                  : seriesItem.id),
+                          maxWidth: 640,
+                        );
+                  final episodeName = episode.name.trim();
+                  return SizedBox(
+                    width: 138,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(14),
+                        onTap: () => _openEpisode(context, episode),
+                        child: Ink(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.05),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.12),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: AspectRatio(
+                                  aspectRatio: 16 / 9,
+                                  child: coverUrl.isEmpty
+                                      ? const ColoredBox(color: Colors.black26)
+                                      : Image.network(
+                                          coverUrl,
+                                          fit: BoxFit.cover,
+                                          headers: {
+                                            'User-Agent':
+                                                LinHttpClientFactory.userAgent,
+                                          },
+                                          errorBuilder: (_, __, ___) =>
+                                              const ColoredBox(
+                                            color: Colors.black26,
+                                          ),
+                                        ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                _episodeStripLabel(episode, index),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.labelLarge?.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              if (episodeName.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  episodeName,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: Colors.white70,
+                                    height: 1.3,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          );
+        },
+      );
+    }
+
+    return _detailGlassPanel(
+      enableBlur: enableBlur,
+      radius: 18,
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _sectionTitle(
+            context,
+            '选集',
+            trailing: Text(
+              _selectedSeasonLabel(),
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: Colors.white70,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  style: buttonStyle,
+                  onPressed: () => _pickSeason(context),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.layers_outlined, size: 18),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          _selectedSeasonLabel(),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.expand_more_rounded, size: 18),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton(
+                  style: buttonStyle,
+                  onPressed: selectedSeason == null
+                      ? null
+                      : () => _pickEpisode(context),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.format_list_numbered_rounded, size: 18),
+                      SizedBox(width: 8),
+                      Text('集数'),
+                      SizedBox(width: 4),
+                      Icon(Icons.expand_more_rounded, size: 18),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          buildEpisodeList(),
+        ],
+      ),
+    );
+  }
+
+  Widget _mobilePeopleSection(
+    BuildContext context, {
+    required ServerAccess access,
+    required bool enableBlur,
+    required List<MediaPerson> people,
+  }) {
+    final theme = Theme.of(context);
+    final cast = people.where((person) => person.id.trim().isNotEmpty).toList();
+    if (cast.isEmpty) return const SizedBox.shrink();
+
+    return _detailGlassPanel(
+      enableBlur: enableBlur,
+      radius: 18,
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _sectionTitle(context, '演职人员'),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 188,
+            child: _withHorizontalEdgeFade(
+              context,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: cast.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemBuilder: (context, index) {
+                  final person = cast[index];
+                  final imageUrl = access.adapter.personImageUrl(
+                    access.auth,
+                    personId: person.id,
+                    maxWidth: 320,
+                  );
+                  return SizedBox(
+                    width: 104,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(14),
+                        onTap: () => _openPersonPage(context, person),
+                        child: Ink(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.05),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.12),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: AspectRatio(
+                                  aspectRatio: 3 / 4,
+                                  child: imageUrl.isEmpty
+                                      ? const ColoredBox(
+                                          color: Colors.black26,
+                                          child: Icon(Icons.person),
+                                        )
+                                      : Image.network(
+                                          imageUrl,
+                                          fit: BoxFit.cover,
+                                          headers: {
+                                            'User-Agent':
+                                                LinHttpClientFactory.userAgent,
+                                          },
+                                          errorBuilder: (_, __, ___) =>
+                                              const ColoredBox(
+                                            color: Colors.black26,
+                                            child: Icon(Icons.person),
+                                          ),
+                                        ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                person.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.labelLarge?.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                person.role.trim().isEmpty
+                                    ? person.type
+                                    : person.role,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: Colors.white70,
+                                  height: 1.2,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _detailHeroSection(
@@ -3463,6 +4289,620 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     );
   }
 
+/*
+  String _episodeDisplayTitle(MediaItem ep) {
+    final episodeNo = ep.episodeNumber ?? 1;
+    final name = ep.name.trim();
+    return name.isNotEmpty ? '第$episodeNo集 $name' : '第$episodeNo集';
+  }
+
+  String _episodeRuntimeText(Duration? runtime) {
+    if (runtime == null) return '';
+    final hours = runtime.inHours;
+    final minutes = runtime.inMinutes.remainder(60);
+    if (hours > 0) {
+      return minutes > 0 ? '$hours小时$minutes分' : '$hours小时';
+    }
+    if (runtime.inMinutes > 0) return '${runtime.inMinutes}分钟';
+    return '${runtime.inSeconds}秒';
+  }
+
+  Future<void> _showEpisodeMoreSheet(
+    BuildContext context, {
+    required bool played,
+  }) async {
+    final season = _selectedSeason;
+    final canSwitchCore =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    final current = _detail ?? _episode;
+    final currentSeriesTitle = _seriesName.trim().isNotEmpty
+        ? _seriesName.trim()
+        : current.seriesName.trim();
+
+    final action = await showModalBottomSheet<_EpisodeMoreAction>(
+      context: context,
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                title: Text(_episodeDisplayTitle(current)),
+                subtitle: currentSeriesTitle.isEmpty
+                    ? null
+                    : Text(currentSeriesTitle),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.format_list_numbered_rounded),
+                title: const Text('选集'),
+                onTap: season == null
+                    ? null
+                    : () =>
+                        Navigator.of(ctx).pop(_EpisodeMoreAction.pickEpisode),
+              ),
+              ListTile(
+                leading: const Icon(Icons.layers_outlined),
+                title: const Text('切换季'),
+                onTap: _seasons.isEmpty
+                    ? null
+                    : () =>
+                        Navigator.of(ctx).pop(_EpisodeMoreAction.pickSeason),
+              ),
+              ListTile(
+                leading: const Icon(Icons.grid_view_rounded),
+                title: const Text('查看本季全部'),
+                onTap: season == null
+                    ? null
+                    : () => Navigator.of(ctx)
+                        .pop(_EpisodeMoreAction.openSeasonEpisodes),
+              ),
+              ListTile(
+                leading: Icon(
+                  played
+                      ? Icons.visibility_off_outlined
+                      : Icons.check_circle_outline_rounded,
+                ),
+                title: Text(played ? '标记为未播放' : '标记为已播放'),
+                onTap: _markBusy
+                    ? null
+                    : () =>
+                        Navigator.of(ctx).pop(_EpisodeMoreAction.togglePlayed),
+              ),
+              ListTile(
+                leading: Icon(
+                  _localFavorite
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
+                ),
+                title: Text(_localFavorite ? '取消本地收藏' : '加入本地收藏'),
+                onTap: !_favoriteLoaded
+                    ? null
+                    : () => Navigator.of(ctx)
+                        .pop(_EpisodeMoreAction.toggleFavorite),
+              ),
+              if (canSwitchCore)
+                ListTile(
+                  leading: const Icon(Icons.memory_rounded),
+                  title: Text(
+                    widget.appState.playerCore == PlayerCore.exo
+                        ? '切换到 mpv'
+                        : '切换到 ExoPlayer',
+                  ),
+                  onTap: () => Navigator.of(ctx)
+                      .pop(_EpisodeMoreAction.togglePlayerCore),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (!mounted || action == null) return;
+
+    switch (action) {
+      case _EpisodeMoreAction.pickEpisode:
+        await _pickEpisode(this.context);
+        break;
+      case _EpisodeMoreAction.pickSeason:
+        await _pickSeason(this.context);
+        break;
+      case _EpisodeMoreAction.openSeasonEpisodes:
+        final currentSeason = _selectedSeason;
+        if (currentSeason != null) {
+          _openSeasonEpisodesPage(this.context, currentSeason);
+        }
+        break;
+      case _EpisodeMoreAction.togglePlayed:
+        if (!_markBusy) {
+          await _toggleEpisodePlayedMark();
+        }
+        break;
+      case _EpisodeMoreAction.toggleFavorite:
+        if (_favoriteLoaded) {
+          await _toggleLocalFavorite();
+        }
+        break;
+      case _EpisodeMoreAction.togglePlayerCore:
+        await _togglePlayerCore();
+        break;
+    }
+  }
+
+  Widget _mobileEpisodeHeroCard(
+    BuildContext context, {
+    required MediaItem ep,
+    required String coverUrl,
+    required Duration? runtime,
+    required bool enableBlur,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final coverWidth = screenWidth >= 430 ? 152.0 : 134.0;
+    final title = _episodeDisplayTitle(ep);
+    final overview = (_detail?.overview ?? ep.overview).trim();
+    final runtimeText = _episodeRuntimeText(runtime);
+
+    return _detailGlassPanel(
+      enableBlur: enableBlur,
+      radius: 18,
+      padding: const EdgeInsets.all(14),
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          scheme.primary.withValues(alpha: 0.14),
+          Colors.black.withValues(alpha: 0.42),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: coverWidth,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: AspectRatio(
+                aspectRatio: 16 / 9,
+                child: coverUrl.isEmpty
+                    ? DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              scheme.primary.withValues(alpha: 0.28),
+                              Colors.black.withValues(alpha: 0.52),
+                            ],
+                          ),
+                        ),
+                        child: const Center(
+                          child: Icon(Icons.movie_creation_outlined),
+                        ),
+                      )
+                    : Image.network(
+                        coverUrl,
+                        fit: BoxFit.cover,
+                        headers: {
+                          'User-Agent': LinHttpClientFactory.userAgent,
+                        },
+                        errorBuilder: (_, __, ___) =>
+                            const ColoredBox(color: Colors.black26),
+                      ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: SizedBox(
+              height: coverWidth * 9 / 16,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            height: 1.2,
+                          ),
+                        ),
+                      ),
+                      if (runtimeText.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.14),
+                            ),
+                          ),
+                          child: Text(
+                            runtimeText,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Expanded(
+                    child: Text(
+                      overview.isEmpty ? '暂无简介' : overview,
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.80),
+                        height: 1.45,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _mobileEpisodeSelectorCard(
+    BuildContext context, {
+    required bool enableBlur,
+  }) {
+    final theme = Theme.of(context);
+    final playInfo = _playInfo;
+    final currentMs = _currentMediaSource();
+    final audioStreams = currentMs == null
+        ? const <Map<String, dynamic>>[]
+        : _ShowDetailPageState._streamsOfType(currentMs, 'Audio');
+    final subtitleStreams = currentMs == null
+        ? const <Map<String, dynamic>>[]
+        : _ShowDetailPageState._streamsOfType(currentMs, 'Subtitle');
+
+    final versionValue = playInfo == null
+        ? '加载中'
+        : (currentMs == null
+            ? '暂无版本'
+            : _ShowDetailPageState._mediaSourceTitle(currentMs));
+    final audioText = _currentAudioText().trim();
+    final subtitleText = _currentSubtitleText().trim();
+    final audioValue =
+        currentMs == null ? '默认' : (audioText.isEmpty ? '默认' : audioText);
+    final subtitleValue = currentMs == null
+        ? (_selectedSubtitleStreamIndex == -1 ? '关闭' : '默认')
+        : (subtitleText.isEmpty ? '默认' : subtitleText);
+
+    Widget selectorRow({
+      required IconData icon,
+      required String label,
+      required String value,
+      required VoidCallback? onTap,
+      bool showDivider = true,
+    }) {
+      final enabled = onTap != null;
+      final fg = enabled ? Colors.white : Colors.white38;
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onTap,
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                child: Row(
+                  children: [
+                    Icon(icon, size: 18, color: fg),
+                    const SizedBox(width: 10),
+                    Text(
+                      label,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: fg,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        value,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.end,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: fg,
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      color: fg,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (showDivider)
+            Divider(
+              height: 1,
+              color: Colors.white.withValues(alpha: 0.10),
+            ),
+        ],
+      );
+    }
+
+    return _detailGlassPanel(
+      enableBlur: enableBlur,
+      radius: 18,
+      padding: EdgeInsets.zero,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          selectorRow(
+            icon: Icons.movie_filter_rounded,
+            label: '版本选择',
+            value: versionValue,
+            onTap: playInfo == null
+                ? null
+                : () => _pickMediaSource(context, playInfo),
+          ),
+          selectorRow(
+            icon: Icons.audiotrack_rounded,
+            label: '音频选择',
+            value: audioValue,
+            onTap: audioStreams.isEmpty
+                ? null
+                : () => _pickAudioStream(context, currentMs!),
+          ),
+          selectorRow(
+            icon: Icons.closed_caption_rounded,
+            label: '字幕选择',
+            value: subtitleValue,
+            onTap: subtitleStreams.isEmpty
+                ? null
+                : () => _pickSubtitleStream(context, currentMs!),
+            showDivider: false,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _mobileEpisodePrimaryActions(
+    BuildContext context, {
+    required String playLabel,
+    required bool played,
+    required bool hasResume,
+    required int ticks,
+  }) {
+    return Row(
+      children: [
+        Expanded(
+          flex: 4,
+          child: _playButton(
+            context,
+            label: playLabel,
+            onTap: () => _playCurrentEpisode(
+              startPosition: hasResume ? _ticksToDuration(ticks) : null,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          flex: 1,
+          child: SizedBox(
+            height: 52,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(30),
+                onTap: () => _showEpisodeMoreSheet(context, played: played),
+                child: Ink(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.30),
+                    borderRadius: BorderRadius.circular(30),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.18),
+                    ),
+                  ),
+                  child: const Center(
+                    child: Icon(
+                      Icons.more_horiz_rounded,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileEpisodeDetailPage(
+    BuildContext context, {
+    required MediaItem ep,
+    required ServerAccess? access,
+    required String playLabel,
+    required bool played,
+    required bool hasResume,
+    required int ticks,
+    required Duration? runtime,
+    required String backdropUrl,
+    required String coverUrl,
+    required bool enableBlur,
+  }) {
+    final topInset = MediaQuery.of(context).padding.top;
+    Widget background;
+    if (backdropUrl.isNotEmpty) {
+      background = Image.network(
+        backdropUrl,
+        fit: BoxFit.cover,
+        headers: {'User-Agent': LinHttpClientFactory.userAgent},
+        errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black26),
+      );
+    } else if (coverUrl.isNotEmpty) {
+      background = Image.network(
+        coverUrl,
+        fit: BoxFit.cover,
+        headers: {'User-Agent': LinHttpClientFactory.userAgent},
+        errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black26),
+      );
+    } else {
+      background = DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Theme.of(context).colorScheme.primary.withValues(alpha: 0.18),
+              const Color(0xFF13171C),
+              const Color(0xFF070809),
+            ],
+          ),
+        ),
+      );
+    }
+
+    background = ColorFiltered(
+      colorFilter: ColorFilter.mode(
+        Colors.black.withValues(alpha: 0.18),
+        BlendMode.darken,
+      ),
+      child: background,
+    );
+
+    return Scaffold(
+      body: Stack(
+        children: [
+          Positioned.fill(child: background),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  stops: const [0, 0.26, 0.72, 1],
+                  colors: [
+                    Colors.black.withValues(alpha: 0.18),
+                    Colors.black.withValues(alpha: 0.48),
+                    const Color(0xFF0D1014).withValues(alpha: 0.96),
+                    const Color(0xFF060708),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: const Alignment(0, -0.90),
+                  radius: 1.08,
+                  colors: [
+                    Theme.of(context)
+                        .colorScheme
+                        .primary
+                        .withValues(alpha: 0.16),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
+          RefreshIndicator(
+            onRefresh: _load,
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(
+                parent: BouncingScrollPhysics(),
+              ),
+              padding: EdgeInsets.fromLTRB(16, topInset + 68, 16, 28),
+              children: [
+                _mobileEpisodeHeroCard(
+                  context,
+                  ep: ep,
+                  coverUrl: coverUrl,
+                  runtime: runtime,
+                  enableBlur: enableBlur,
+                ),
+                const SizedBox(height: 12),
+                _mobileEpisodeSelectorCard(
+                  context,
+                  enableBlur: enableBlur,
+                ),
+                const SizedBox(height: 12),
+                _mobileEpisodePrimaryActions(
+                  context,
+                  playLabel: playLabel,
+                  played: played,
+                  hasResume: hasResume,
+                  ticks: ticks,
+                ),
+                if (_playInfo != null) ...[
+                  const SizedBox(height: 16),
+                  _episodeMediaInfoSection(
+                    context,
+                    _playInfo!,
+                    selectedMediaSourceId: _selectedMediaSourceId,
+                  ),
+                ],
+                if ((_seriesId ?? '').trim().isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _otherEpisodesSection(context),
+                ],
+                if (_detail?.people.isNotEmpty == true && access != null) ...[
+                  const SizedBox(height: 16),
+                  _castSection(
+                    context,
+                    _detail!.people,
+                    access: access,
+                  ),
+                ],
+                if (_chapters.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _detailGlassPanel(
+                    enableBlur: enableBlur,
+                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+                    radius: 18,
+                    child: _chaptersSection(context, _chapters),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                PluginSlotArea(
+                  appState: widget.appState,
+                  slotId: 'detail.sections.bottom',
+                  params: _buildDetailPluginParams(_detail ?? _episode),
+                ),
+              ],
+            ),
+          ),
+          Positioned.fill(child: _episodeTopNavOverlay()),
+        ],
+      ),
+    );
+  }
+
+*/
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -3568,6 +5008,19 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       );
     }
 
+    return _buildMobileDetailPage(
+      context,
+      item: item,
+      access: access,
+      isSeries: isSeries,
+      runtime: runtime,
+      playInfo: playInfo,
+      enableBlur: enableBlur,
+      heroImageUrl: hero,
+      showFloatingSettings: showFloatingSettings,
+    );
+
+    // ignore: dead_code
     Widget heroImage = hero.isEmpty
         ? const ColoredBox(color: Colors.black26)
         : Image.network(
@@ -4358,6 +5811,15 @@ class _SeasonEpisodesPageState extends State<SeasonEpisodesPage> {
   }
 }
 
+enum _EpisodeMoreAction {
+  pickEpisode,
+  pickSeason,
+  openSeasonEpisodes,
+  togglePlayed,
+  toggleFavorite,
+  togglePlayerCore,
+}
+
 class EpisodeDetailPage extends StatefulWidget {
   const EpisodeDetailPage({
     super.key,
@@ -4793,6 +6255,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     return parts.isEmpty ? '直连播放' : parts.join(' / ');
   }
 
+  // ignore: unused_element
   Widget _episodePlaybackOptionsCard(
       BuildContext context, PlaybackInfoResult info) {
     final ms =
@@ -5079,6 +6542,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     );
   }
 
+  // ignore: unused_element
   String _episodeLine(MediaItem ep) {
     final seasonNo = ep.seasonNumber ?? 1;
     final epNo = ep.episodeNumber ?? 1;
@@ -5181,6 +6645,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     await _refreshProgressAfterReturn();
   }
 
+  // ignore: unused_element
   Widget _episodeActionButton({
     required IconData icon,
     required String label,
@@ -6387,13 +7852,620 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     );
   }
 
+  String _episodeDisplayTitle(MediaItem ep) {
+    final episodeNo = ep.episodeNumber ?? 1;
+    final name = ep.name.trim();
+    return name.isNotEmpty ? '第$episodeNo集 $name' : '第$episodeNo集';
+  }
+
+  String _episodeRuntimeText(Duration? runtime) {
+    if (runtime == null) return '';
+    final hours = runtime.inHours;
+    final minutes = runtime.inMinutes.remainder(60);
+    if (hours > 0) {
+      return minutes > 0 ? '$hours小时$minutes分' : '$hours小时';
+    }
+    if (runtime.inMinutes > 0) return '${runtime.inMinutes}分钟';
+    return '${runtime.inSeconds}秒';
+  }
+
+  Future<void> _showEpisodeMoreSheet(
+    BuildContext context, {
+    required bool played,
+  }) async {
+    final season = _selectedSeason;
+    final canSwitchCore =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    final current = _detail ?? _episode;
+    final currentSeriesTitle = _seriesName.trim().isNotEmpty
+        ? _seriesName.trim()
+        : current.seriesName.trim();
+
+    final action = await showModalBottomSheet<_EpisodeMoreAction>(
+      context: context,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                title: Text(_episodeDisplayTitle(current)),
+                subtitle: currentSeriesTitle.isEmpty
+                    ? null
+                    : Text(currentSeriesTitle),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.format_list_numbered_rounded),
+                title: const Text('选集'),
+                onTap: season == null
+                    ? null
+                    : () => Navigator.of(sheetContext)
+                        .pop(_EpisodeMoreAction.pickEpisode),
+              ),
+              ListTile(
+                leading: const Icon(Icons.layers_outlined),
+                title: const Text('切换季'),
+                onTap: _seasons.isEmpty
+                    ? null
+                    : () => Navigator.of(sheetContext)
+                        .pop(_EpisodeMoreAction.pickSeason),
+              ),
+              ListTile(
+                leading: const Icon(Icons.grid_view_rounded),
+                title: const Text('查看本季全部'),
+                onTap: season == null
+                    ? null
+                    : () => Navigator.of(sheetContext)
+                        .pop(_EpisodeMoreAction.openSeasonEpisodes),
+              ),
+              ListTile(
+                leading: Icon(
+                  played
+                      ? Icons.visibility_off_outlined
+                      : Icons.check_circle_outline_rounded,
+                ),
+                title: Text(played ? '标记为未播放' : '标记为已播放'),
+                onTap: _markBusy
+                    ? null
+                    : () => Navigator.of(sheetContext)
+                        .pop(_EpisodeMoreAction.togglePlayed),
+              ),
+              ListTile(
+                leading: Icon(
+                  _localFavorite
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
+                ),
+                title: Text(_localFavorite ? '取消本地收藏' : '加入本地收藏'),
+                onTap: !_favoriteLoaded
+                    ? null
+                    : () => Navigator.of(sheetContext)
+                        .pop(_EpisodeMoreAction.toggleFavorite),
+              ),
+              if (canSwitchCore)
+                ListTile(
+                  leading: const Icon(Icons.memory_rounded),
+                  title: Text(
+                    widget.appState.playerCore == PlayerCore.exo
+                        ? '切换到 mpv'
+                        : '切换到 ExoPlayer',
+                  ),
+                  onTap: () => Navigator.of(sheetContext)
+                      .pop(_EpisodeMoreAction.togglePlayerCore),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (!mounted || action == null) return;
+
+    switch (action) {
+      case _EpisodeMoreAction.pickEpisode:
+        await _pickEpisode(this.context);
+        break;
+      case _EpisodeMoreAction.pickSeason:
+        await _pickSeason(this.context);
+        break;
+      case _EpisodeMoreAction.openSeasonEpisodes:
+        final currentSeason = _selectedSeason;
+        if (currentSeason != null) {
+          _openSeasonEpisodesPage(this.context, currentSeason);
+        }
+        break;
+      case _EpisodeMoreAction.togglePlayed:
+        if (!_markBusy) {
+          await _toggleEpisodePlayedMark();
+        }
+        break;
+      case _EpisodeMoreAction.toggleFavorite:
+        if (_favoriteLoaded) {
+          await _toggleLocalFavorite();
+        }
+        break;
+      case _EpisodeMoreAction.togglePlayerCore:
+        await _togglePlayerCore();
+        break;
+    }
+  }
+
+  Widget _mobileEpisodeHeroCard(
+    BuildContext context, {
+    required MediaItem ep,
+    required String coverUrl,
+    required Duration? runtime,
+    required bool enableBlur,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final coverWidth = screenWidth >= 430 ? 152.0 : 134.0;
+    final title = _episodeDisplayTitle(ep);
+    final overview = (_detail?.overview ?? ep.overview).trim();
+    final runtimeText = _episodeRuntimeText(runtime);
+
+    return _detailGlassPanel(
+      enableBlur: enableBlur,
+      radius: 18,
+      padding: const EdgeInsets.all(14),
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          scheme.primary.withValues(alpha: 0.14),
+          Colors.black.withValues(alpha: 0.42),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: coverWidth,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: AspectRatio(
+                aspectRatio: 16 / 9,
+                child: coverUrl.isEmpty
+                    ? DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              scheme.primary.withValues(alpha: 0.28),
+                              Colors.black.withValues(alpha: 0.52),
+                            ],
+                          ),
+                        ),
+                        child: const Center(
+                          child: Icon(Icons.movie_creation_outlined),
+                        ),
+                      )
+                    : Image.network(
+                        coverUrl,
+                        fit: BoxFit.cover,
+                        headers: {
+                          'User-Agent': LinHttpClientFactory.userAgent,
+                        },
+                        errorBuilder: (_, __, ___) =>
+                            const ColoredBox(color: Colors.black26),
+                      ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: SizedBox(
+              height: coverWidth * 9 / 16,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            height: 1.2,
+                          ),
+                        ),
+                      ),
+                      if (runtimeText.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.14),
+                            ),
+                          ),
+                          child: Text(
+                            runtimeText,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Expanded(
+                    child: Text(
+                      overview.isEmpty ? '暂无简介' : overview,
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.80),
+                        height: 1.45,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _mobileEpisodeSelectorCard(
+    BuildContext context, {
+    required bool enableBlur,
+  }) {
+    final theme = Theme.of(context);
+    final playInfo = _playInfo;
+    final currentMs = _currentMediaSource();
+    final audioStreams = currentMs == null
+        ? const <Map<String, dynamic>>[]
+        : _ShowDetailPageState._streamsOfType(currentMs, 'Audio');
+    final subtitleStreams = currentMs == null
+        ? const <Map<String, dynamic>>[]
+        : _ShowDetailPageState._streamsOfType(currentMs, 'Subtitle');
+
+    final versionValue = playInfo == null
+        ? '加载中'
+        : (currentMs == null
+            ? '暂无版本'
+            : _ShowDetailPageState._mediaSourceTitle(currentMs));
+    final audioText = _currentAudioText().trim();
+    final subtitleText = _currentSubtitleText().trim();
+    final audioValue =
+        currentMs == null ? '默认' : (audioText.isEmpty ? '默认' : audioText);
+    final subtitleValue = currentMs == null
+        ? (_selectedSubtitleStreamIndex == -1 ? '关闭' : '默认')
+        : (subtitleText.isEmpty ? '默认' : subtitleText);
+
+    Widget selectorRow({
+      required IconData icon,
+      required String label,
+      required String value,
+      required VoidCallback? onTap,
+      bool showDivider = true,
+    }) {
+      final enabled = onTap != null;
+      final fg = enabled ? Colors.white : Colors.white38;
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onTap,
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                child: Row(
+                  children: [
+                    Icon(icon, size: 18, color: fg),
+                    const SizedBox(width: 10),
+                    Text(
+                      label,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: fg,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        value,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.end,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: fg,
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      color: fg,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (showDivider)
+            Divider(
+              height: 1,
+              color: Colors.white.withValues(alpha: 0.10),
+            ),
+        ],
+      );
+    }
+
+    return _detailGlassPanel(
+      enableBlur: enableBlur,
+      radius: 18,
+      padding: EdgeInsets.zero,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          selectorRow(
+            icon: Icons.movie_filter_rounded,
+            label: '版本选择',
+            value: versionValue,
+            onTap: playInfo == null
+                ? null
+                : () => _pickMediaSource(context, playInfo),
+          ),
+          selectorRow(
+            icon: Icons.audiotrack_rounded,
+            label: '音频选择',
+            value: audioValue,
+            onTap: audioStreams.isEmpty
+                ? null
+                : () => _pickAudioStream(context, currentMs!),
+          ),
+          selectorRow(
+            icon: Icons.closed_caption_rounded,
+            label: '字幕选择',
+            value: subtitleValue,
+            onTap: subtitleStreams.isEmpty
+                ? null
+                : () => _pickSubtitleStream(context, currentMs!),
+            showDivider: false,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _mobileEpisodePrimaryActions(
+    BuildContext context, {
+    required String playLabel,
+    required bool played,
+    required bool hasResume,
+    required int ticks,
+  }) {
+    return Row(
+      children: [
+        Expanded(
+          flex: 4,
+          child: _playButton(
+            context,
+            label: playLabel,
+            onTap: () => _playCurrentEpisode(
+              startPosition: hasResume ? _ticksToDuration(ticks) : null,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          flex: 1,
+          child: SizedBox(
+            height: 52,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(30),
+                onTap: () => _showEpisodeMoreSheet(context, played: played),
+                child: Ink(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.30),
+                    borderRadius: BorderRadius.circular(30),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.18),
+                    ),
+                  ),
+                  child: const Center(
+                    child: Icon(
+                      Icons.more_horiz_rounded,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileEpisodeDetailPage(
+    BuildContext context, {
+    required MediaItem ep,
+    required ServerAccess? access,
+    required String playLabel,
+    required bool played,
+    required bool hasResume,
+    required int ticks,
+    required Duration? runtime,
+    required String backdropUrl,
+    required String coverUrl,
+    required bool enableBlur,
+  }) {
+    final topInset = MediaQuery.of(context).padding.top;
+    Widget background;
+    if (backdropUrl.isNotEmpty) {
+      background = Image.network(
+        backdropUrl,
+        fit: BoxFit.cover,
+        headers: {'User-Agent': LinHttpClientFactory.userAgent},
+        errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black26),
+      );
+    } else if (coverUrl.isNotEmpty) {
+      background = Image.network(
+        coverUrl,
+        fit: BoxFit.cover,
+        headers: {'User-Agent': LinHttpClientFactory.userAgent},
+        errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black26),
+      );
+    } else {
+      background = DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Theme.of(context).colorScheme.primary.withValues(alpha: 0.18),
+              const Color(0xFF13171C),
+              const Color(0xFF070809),
+            ],
+          ),
+        ),
+      );
+    }
+
+    background = ColorFiltered(
+      colorFilter: ColorFilter.mode(
+        Colors.black.withValues(alpha: 0.18),
+        BlendMode.darken,
+      ),
+      child: background,
+    );
+
+    return Scaffold(
+      body: Stack(
+        children: [
+          Positioned.fill(child: background),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  stops: const [0, 0.26, 0.72, 1],
+                  colors: [
+                    Colors.black.withValues(alpha: 0.18),
+                    Colors.black.withValues(alpha: 0.48),
+                    const Color(0xFF0D1014).withValues(alpha: 0.96),
+                    const Color(0xFF060708),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: const Alignment(0, -0.90),
+                  radius: 1.08,
+                  colors: [
+                    Theme.of(context)
+                        .colorScheme
+                        .primary
+                        .withValues(alpha: 0.16),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
+          RefreshIndicator(
+            onRefresh: _load,
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(
+                parent: BouncingScrollPhysics(),
+              ),
+              padding: EdgeInsets.fromLTRB(16, topInset + 68, 16, 28),
+              children: [
+                _mobileEpisodeHeroCard(
+                  context,
+                  ep: ep,
+                  coverUrl: coverUrl,
+                  runtime: runtime,
+                  enableBlur: enableBlur,
+                ),
+                const SizedBox(height: 12),
+                _mobileEpisodeSelectorCard(
+                  context,
+                  enableBlur: enableBlur,
+                ),
+                const SizedBox(height: 12),
+                _mobileEpisodePrimaryActions(
+                  context,
+                  playLabel: playLabel,
+                  played: played,
+                  hasResume: hasResume,
+                  ticks: ticks,
+                ),
+                if (_playInfo != null) ...[
+                  const SizedBox(height: 16),
+                  _episodeMediaInfoSection(
+                    context,
+                    _playInfo!,
+                    selectedMediaSourceId: _selectedMediaSourceId,
+                  ),
+                ],
+                if ((_seriesId ?? '').trim().isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _otherEpisodesSection(context),
+                ],
+                if (_detail?.people.isNotEmpty == true && access != null) ...[
+                  const SizedBox(height: 16),
+                  _castSection(
+                    context,
+                    _detail!.people,
+                    access: access,
+                  ),
+                ],
+                if (_chapters.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _detailGlassPanel(
+                    enableBlur: enableBlur,
+                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+                    radius: 18,
+                    child: _chaptersSection(context, _chapters),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                PluginSlotArea(
+                  appState: widget.appState,
+                  slotId: 'detail.sections.bottom',
+                  params: _buildDetailPluginParams(_detail ?? _episode),
+                ),
+              ],
+            ),
+          ),
+          Positioned.fill(child: _episodeTopNavOverlay()),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    const heroTextColor = Colors.white;
-    final heroMutedTextColor = Colors.white.withValues(alpha: 0.88);
-    final heroMetaBg = Colors.black.withValues(alpha: 0.32);
-    final heroMetaBorder = Colors.white.withValues(alpha: 0.22);
     final enableBlur = !widget.isTv && widget.appState.enableBlurEffects;
     final access = resolveServerAccess(
       appState: widget.appState,
@@ -6413,7 +8485,6 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     }
 
     final ep = _detail ?? _episode;
-    final ms = _currentMediaSource();
     final played = _detail?.played ?? false;
     final ticks = _detail?.playbackPositionTicks ?? 0;
     final hasResume = ticks > 0 && !played;
@@ -6460,7 +8531,21 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       );
     }
 
-    Widget background = backdropUrl.isNotEmpty
+    return _buildMobileEpisodeDetailPage(
+      context,
+      ep: ep,
+      access: access,
+      playLabel: playLabel,
+      played: played,
+      hasResume: hasResume,
+      ticks: ticks,
+      runtime: runtime,
+      backdropUrl: backdropUrl,
+      coverUrl: thumbUrl,
+      enableBlur: enableBlur,
+    );
+
+/*    Widget background = backdropUrl.isNotEmpty
         ? Image.network(
             backdropUrl,
             fit: BoxFit.cover,
@@ -6787,6 +8872,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         ],
       ),
     );
+*/
   }
 
   Future<void> _loadSeriesEpisodes({
@@ -7780,6 +9866,380 @@ Widget _castSection(
   );
 }
 
+Widget _episodeMediaInfoSection(
+  BuildContext context,
+  PlaybackInfoResult info, {
+  String? selectedMediaSourceId,
+}) {
+  final theme = Theme.of(context);
+  final sources = info.mediaSources.cast<Map<String, dynamic>>();
+  final currentSourceId = (selectedMediaSourceId ?? '').trim();
+
+  String fmtSize(dynamic raw) {
+    final bytes = raw is num ? raw.toInt() : int.tryParse('$raw');
+    if (bytes == null || bytes <= 0) return '';
+    const kb = 1024;
+    const mb = kb * 1024;
+    const gb = mb * 1024;
+    if (bytes >= gb) return '${(bytes / gb).toStringAsFixed(1)} GB';
+    if (bytes >= mb) return '${(bytes / mb).toStringAsFixed(1)} MB';
+    if (bytes >= kb) return '${(bytes / kb).toStringAsFixed(0)} KB';
+    return '$bytes B';
+  }
+
+  String? fmtAdded(dynamic raw) {
+    final text = raw == null ? '' : raw.toString().trim();
+    if (text.isEmpty) return null;
+    final parsed = DateTime.tryParse(text);
+    if (parsed == null) return null;
+    final local = parsed.toLocal();
+    final hh = local.hour.toString().padLeft(2, '0');
+    final mm = local.minute.toString().padLeft(2, '0');
+    return '${local.year}/${local.month}/${local.day} $hh:$mm';
+  }
+
+  String yesNo(dynamic value) => value == true ? '是' : '否';
+
+  String fmtMbps(int? bitrate) {
+    if (bitrate == null || bitrate <= 0) return '';
+    return '${(bitrate / 1000000).toStringAsFixed(1)} Mbps';
+  }
+
+  String fmtKbps(int? bitrate) {
+    if (bitrate == null || bitrate <= 0) return '';
+    return '${(bitrate / 1000).toStringAsFixed(0)} Kbps';
+  }
+
+  List<({String label, String value})> videoLines(Map<String, dynamic> stream) {
+    final lines = <({String label, String value})>[];
+    final title = (stream['DisplayTitle'] ?? '').toString().trim();
+    final innerTitle = (stream['Title'] ?? '').toString().trim();
+    final codec = (stream['Codec'] ?? '').toString().trim();
+    final profile = (stream['Profile'] ?? '').toString().trim();
+    final level = _ShowDetailPageState._asInt(stream['Level']);
+    final width = _ShowDetailPageState._asInt(stream['Width']);
+    final height = _ShowDetailPageState._asInt(stream['Height']);
+    final aspect = _formatVideoAspectRatio(stream);
+    final interlaced = stream['IsInterlaced'] == true;
+    final frameRate = stream['RealFrameRate'] ?? stream['AverageFrameRate'];
+    final bitrate = _ShowDetailPageState._asInt(stream['BitRate']);
+    final primaries = (stream['ColorPrimaries'] ?? '').toString().trim();
+    final colorSpace = (stream['ColorSpace'] ?? '').toString().trim();
+    final transfer = (stream['ColorTransfer'] ?? '').toString().trim();
+    final bitDepth = _ShowDetailPageState._asInt(stream['BitDepth']);
+    final pixelFormat = (stream['PixelFormat'] ?? '').toString().trim();
+    final refFrames = _ShowDetailPageState._asInt(stream['RefFrames']);
+
+    if (title.isNotEmpty) lines.add((label: '标题名称', value: title));
+    if (innerTitle.isNotEmpty && innerTitle != title) {
+      lines.add((label: '内嵌标题', value: innerTitle));
+    }
+    if (codec.isNotEmpty) {
+      lines.add((label: '编码格式', value: codec.toUpperCase()));
+    }
+    if (profile.isNotEmpty) lines.add((label: '编码规格', value: profile));
+    if (level != null && level > 0) lines.add((label: '编码级别', value: '$level'));
+    if (width != null && height != null) {
+      lines.add((label: '源分辨率', value: '${width}x$height'));
+    }
+    if (aspect != null) lines.add((label: '视频比例', value: aspect));
+    lines.add((label: '隔行扫描', value: yesNo(interlaced)));
+    if (frameRate != null) {
+      lines.add((label: '帧速率', value: frameRate.toString()));
+    }
+    final bitrateText = fmtMbps(bitrate);
+    if (bitrateText.isNotEmpty) lines.add((label: '比特率', value: bitrateText));
+    if (primaries.isNotEmpty) lines.add((label: '原始色域', value: primaries));
+    if (colorSpace.isNotEmpty) lines.add((label: '色彩空间', value: colorSpace));
+    if (transfer.isNotEmpty) lines.add((label: '色彩转换', value: transfer));
+    if (bitDepth != null && bitDepth > 0) {
+      lines.add((label: '比特位深', value: '$bitDepth Bit'));
+    }
+    if (pixelFormat.isNotEmpty) lines.add((label: '像素格式', value: pixelFormat));
+    if (refFrames != null && refFrames > 0) {
+      lines.add((label: '参考帧', value: '$refFrames'));
+    }
+    lines.add((label: '默认', value: yesNo(stream['IsDefault'])));
+    return lines;
+  }
+
+  List<({String label, String value})> audioLines(Map<String, dynamic> stream) {
+    final lines = <({String label, String value})>[];
+    final title = (stream['DisplayTitle'] ?? '').toString().trim();
+    final innerTitle = (stream['Title'] ?? '').toString().trim();
+    final language = (stream['Language'] ?? '').toString().trim();
+    final codec = (stream['Codec'] ?? '').toString().trim();
+    final profile = (stream['Profile'] ?? '').toString().trim();
+    final channels = _ShowDetailPageState._asInt(stream['Channels']);
+    final layout = (stream['ChannelLayout'] ?? '').toString().trim();
+    final bitrate = _ShowDetailPageState._asInt(stream['BitRate']);
+    final sampleRate = _ShowDetailPageState._asInt(stream['SampleRate']);
+
+    if (title.isNotEmpty) lines.add((label: '标题名称', value: title));
+    if (innerTitle.isNotEmpty && innerTitle != title) {
+      lines.add((label: '内嵌标题', value: innerTitle));
+    }
+    if (language.isNotEmpty) lines.add((label: '语言种类', value: language));
+    if (codec.isNotEmpty) {
+      lines.add((label: '编码格式', value: codec.toUpperCase()));
+    }
+    if (profile.isNotEmpty) lines.add((label: '编码规格', value: profile));
+    if (layout.isNotEmpty) lines.add((label: '音效布局', value: layout));
+    if (channels != null && channels > 0) {
+      lines.add((label: '音频声道', value: '$channels ch'));
+    }
+    final bitrateText = fmtKbps(bitrate);
+    if (bitrateText.isNotEmpty) lines.add((label: '比特率', value: bitrateText));
+    if (sampleRate != null && sampleRate > 0) {
+      lines.add((label: '采样率', value: '$sampleRate Hz'));
+    }
+    lines.add((label: '默认', value: yesNo(stream['IsDefault'])));
+    return lines;
+  }
+
+  List<({String label, String value})> subtitleLines(
+    Map<String, dynamic> stream,
+  ) {
+    final lines = <({String label, String value})>[];
+    final title =
+        (stream['DisplayTitle'] ?? stream['Language'] ?? '').toString().trim();
+    final innerTitle = (stream['Title'] ?? '').toString().trim();
+    final language = (stream['Language'] ?? '').toString().trim();
+    final codec = (stream['Codec'] ?? '').toString().trim();
+
+    if (title.isNotEmpty) lines.add((label: '标题名称', value: title));
+    if (innerTitle.isNotEmpty && innerTitle != title) {
+      lines.add((label: '内嵌标题', value: innerTitle));
+    }
+    if (language.isNotEmpty) lines.add((label: '语言种类', value: language));
+    if (codec.isNotEmpty) {
+      lines.add((label: '编码格式', value: codec.toUpperCase()));
+    }
+    lines.add((label: '默认', value: yesNo(stream['IsDefault'])));
+    lines.add((label: '强制', value: yesNo(stream['IsForced'])));
+    lines.add((label: '外部', value: yesNo(stream['IsExternal'])));
+    return lines;
+  }
+
+  Widget streamCard({
+    required IconData icon,
+    required String title,
+    required List<({String label, String value})> lines,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: Colors.white),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (lines.isEmpty)
+            Text(
+              '暂无信息',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: Colors.white70,
+              ),
+            )
+          else
+            ...lines.map(
+              (line) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 88,
+                      child: Text(
+                        line.label,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: Colors.white70,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        line.value,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget sourceCard(Map<String, dynamic> source, int index) {
+    final sourceId = (source['Id']?.toString() ?? '').trim();
+    final isSelected =
+        currentSourceId.isEmpty ? index == 0 : sourceId == currentSourceId;
+    final streams = (source['MediaStreams'] as List?) ?? const [];
+    final videos = streams
+        .where((entry) => (entry as Map)['Type'] == 'Video')
+        .map((entry) => Map<String, dynamic>.from(entry as Map))
+        .toList();
+    final audios = streams
+        .where((entry) => (entry as Map)['Type'] == 'Audio')
+        .map((entry) => Map<String, dynamic>.from(entry as Map))
+        .toList();
+    final subtitles = streams
+        .where((entry) => (entry as Map)['Type'] == 'Subtitle')
+        .map((entry) => Map<String, dynamic>.from(entry as Map))
+        .toList();
+
+    final title = _ShowDetailPageState._mediaSourceTitle(source).trim();
+    final container = (source['Container'] ?? source['Name'] ?? '')
+        .toString()
+        .trim()
+        .toUpperCase();
+    final sizeText = fmtSize(source['Size']);
+    final addedText = fmtAdded(
+      source['DateCreated'] ??
+          source['DateAdded'] ??
+          source['DateCreatedUtc'] ??
+          source['DateModified'],
+    );
+    final summaryParts = <String>[
+      if (container.isNotEmpty) container,
+      if (sizeText.isNotEmpty) sizeText,
+      if (addedText != null) '媒体于 $addedText 添加',
+    ];
+
+    return _detailGlassPanel(
+      enableBlur: true,
+      radius: 18,
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.video_library_rounded, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title.isEmpty ? '版本 ${index + 1}' : title,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              if (isSelected) _pill(context, '当前'),
+            ],
+          ),
+          if (summaryParts.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              summaryParts.join('  '),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: Colors.white70,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+          if (videos.isEmpty && audios.isEmpty && subtitles.isEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              '暂无流信息',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: Colors.white70,
+              ),
+            ),
+          ] else ...[
+            ...videos.asMap().entries.map(
+                  (entry) => streamCard(
+                    icon: Icons.videocam_rounded,
+                    title: videos.length > 1 ? '视频 ${entry.key + 1}' : '视频信息',
+                    lines: videoLines(entry.value),
+                  ),
+                ),
+            ...audios.asMap().entries.map(
+                  (entry) => streamCard(
+                    icon: Icons.music_note_rounded,
+                    title: audios.length > 1 ? '音频 ${entry.key + 1}' : '音频信息',
+                    lines: audioLines(entry.value),
+                  ),
+                ),
+            ...subtitles.asMap().entries.map(
+                  (entry) => streamCard(
+                    icon: Icons.closed_caption_rounded,
+                    title:
+                        subtitles.length > 1 ? '字幕 ${entry.key + 1}' : '字幕信息',
+                    lines: subtitleLines(entry.value),
+                  ),
+                ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  if (sources.isEmpty) {
+    return _detailGlassPanel(
+      enableBlur: true,
+      radius: 18,
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _sectionTitle(context, '媒体信息'),
+          const SizedBox(height: 10),
+          Text(
+            '暂无媒体信息',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: Colors.white70,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      _sectionTitle(context, '媒体信息'),
+      const SizedBox(height: 12),
+      ...sources.asMap().entries.map(
+            (entry) => Padding(
+              padding: EdgeInsets.only(
+                bottom: entry.key == sources.length - 1 ? 0 : 12,
+              ),
+              child: sourceCard(entry.value, entry.key),
+            ),
+          ),
+    ],
+  );
+}
+
+// ignore: unused_element
 Widget _mediaInfo(
   BuildContext context,
   PlaybackInfoResult info, {
