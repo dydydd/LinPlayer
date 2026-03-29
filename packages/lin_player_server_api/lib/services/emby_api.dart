@@ -52,6 +52,15 @@ class AuthResult {
       this.apiPrefixUsed = 'emby'});
 }
 
+class _AuthSocketFailure implements Exception {
+  const _AuthSocketFailure(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 bool _hasAnyImageData(Map<String, dynamic> json) {
   if ((json['ImageTags'] as Map?)?.isNotEmpty == true) return true;
   if ((json['BackdropImageTags'] as List?)?.isNotEmpty == true) return true;
@@ -207,10 +216,7 @@ class MediaItem {
               json['genreItems'],
         ),
         tags: _stringListPreserveOrder(
-          json['Tags'] ??
-              json['tags'] ??
-              json['TagItems'] ??
-              json['tagItems'],
+          json['Tags'] ?? json['tags'] ?? json['TagItems'] ?? json['tagItems'],
         ),
         runTimeTicks: json['RunTimeTicks'] as int?,
         sizeBytes: json['Size'] as int?,
@@ -686,43 +692,29 @@ class EmbyApi {
     }
   }
 
-  List<String> _candidates() {
-    // If user pasted full URL with scheme, just try it.
-    final parsed = Uri.tryParse(_hostOrUrl);
-    if (parsed != null && parsed.hasScheme && parsed.host.isNotEmpty) {
-      final port = parsed.hasPort
-          ? ':${parsed.port}'
-          : (_port != null && _port!.trim().isNotEmpty
-              ? ':${_port!.trim()}'
-              : '');
-      final path =
-          parsed.path.isNotEmpty && parsed.path != '/' ? parsed.path : '';
-      final raw = '${parsed.scheme}://${parsed.host}$port$path';
-      return _expandAuthBaseVariants(raw).toList();
-    }
+  static String _normalizedCandidateScheme(String raw) {
+    final scheme = raw.trim().toLowerCase();
+    return scheme == 'http' ? 'http' : 'https';
+  }
 
-    // handle host/path form without scheme
-    String hostPart = _hostOrUrl;
-    String pathPart = '';
-    if (_hostOrUrl.contains('/')) {
-      final split = _hostOrUrl.split('/');
-      hostPart = split.first;
-      pathPart = '/${split.skip(1).join('/')}';
-    }
+  static String? _defaultDirectPortForScheme(String rawScheme) {
+    return switch (_normalizedCandidateScheme(rawScheme)) {
+      'http' => '8096',
+      'https' => '8920',
+      _ => null,
+    };
+  }
 
-    final withPort = _port != null && _port!.isNotEmpty
-        ? [
-            '$_preferredScheme://$hostPart:${_port!}$pathPart',
-            '${_preferredScheme == 'http' ? 'https' : 'http'}://$hostPart:${_port!}$pathPart'
-          ]
-        : [
-            '$_preferredScheme://$hostPart$pathPart',
-            '${_preferredScheme == 'http' ? 'https' : 'http'}://$hostPart$pathPart'
-          ];
+  static String? _defaultStandardPortForScheme(String rawScheme) {
+    return switch (_normalizedCandidateScheme(rawScheme)) {
+      'http' => '80',
+      'https' => '443',
+      _ => null,
+    };
+  }
 
-    // De-dup while interleaving variants across schemes, so we don't spend
-    // multiple timeouts on a wrong scheme before trying the fallback.
-    final expanded = withPort
+  static List<String> _expandCandidateBases(Iterable<String> rawBases) {
+    final expanded = rawBases
         .map((c) => _expandAuthBaseVariants(c).toList(growable: false))
         .toList(growable: false);
 
@@ -740,6 +732,109 @@ class EmbyApi {
       }
     }
     return result;
+  }
+
+  List<String> _candidateBasesForHostPath({
+    required String host,
+    required String path,
+    required String preferredScheme,
+    String? explicitPort,
+  }) {
+    final primaryScheme = _normalizedCandidateScheme(preferredScheme);
+    final secondaryScheme = primaryScheme == 'http' ? 'https' : 'http';
+    final fixedPort = (explicitPort ?? '').trim();
+    final fixedPath = (path.isNotEmpty && path != '/') ? path : '';
+
+    String build(String scheme, {String? port}) {
+      final fixedScheme = _normalizedCandidateScheme(scheme);
+      final fixedPortText = (port ?? '').trim();
+      final portPart = fixedPortText.isEmpty ? '' : ':$fixedPortText';
+      return '$fixedScheme://$host$portPart$fixedPath';
+    }
+
+    if (fixedPort.isNotEmpty) {
+      return _expandCandidateBases([
+        build(primaryScheme, port: fixedPort),
+        build(secondaryScheme, port: fixedPort),
+      ]);
+    }
+
+    return _expandCandidateBases([
+      build(primaryScheme),
+      build(
+        primaryScheme,
+        port: _defaultStandardPortForScheme(primaryScheme),
+      ),
+      build(
+        primaryScheme,
+        port: _defaultDirectPortForScheme(primaryScheme),
+      ),
+      build(secondaryScheme),
+      build(
+        secondaryScheme,
+        port: _defaultStandardPortForScheme(secondaryScheme),
+      ),
+      build(
+        secondaryScheme,
+        port: _defaultDirectPortForScheme(secondaryScheme),
+      ),
+    ]);
+  }
+
+  static String _describeSocketException(SocketException e) {
+    final raw = e.message.trim();
+    final lower = raw.toLowerCase();
+    if (lower.contains('failed host lookup') ||
+        lower.contains('name or service not known') ||
+        lower.contains('nodename nor servname') ||
+        lower.contains('no address associated with hostname')) {
+      return 'DNS 解析失败 ($raw)';
+    }
+    if (lower.contains('connection refused')) {
+      return '连接被拒绝 ($raw)';
+    }
+    if (lower.contains('network is unreachable')) {
+      return '网络不可达 ($raw)';
+    }
+    if (lower.contains('timed out')) {
+      return '连接超时 ($raw)';
+    }
+    return '网络异常 ($raw)';
+  }
+
+  List<String> _candidates() {
+    // If user pasted full URL with scheme, honor it first but still allow
+    // the usual direct-port fallbacks when no explicit port was provided.
+    final parsed = Uri.tryParse(_hostOrUrl);
+    if (parsed != null && parsed.hasScheme && parsed.host.isNotEmpty) {
+      final path =
+          parsed.path.isNotEmpty && parsed.path != '/' ? parsed.path : '';
+      final explicitPort = parsed.hasPort
+          ? parsed.port.toString()
+          : (_port != null && _port!.trim().isNotEmpty ? _port!.trim() : null);
+      return _candidateBasesForHostPath(
+        host: parsed.host,
+        path: path,
+        preferredScheme: parsed.scheme,
+        explicitPort: explicitPort,
+      );
+    }
+
+    // handle host/path form without scheme
+    String hostPart = _hostOrUrl;
+    String pathPart = '';
+    if (_hostOrUrl.contains('/')) {
+      final split = _hostOrUrl.split('/');
+      hostPart = split.first;
+      pathPart = '/${split.skip(1).join('/')}';
+    }
+
+    return _candidateBasesForHostPath(
+      host: hostPart,
+      path: pathPart,
+      preferredScheme: _preferredScheme,
+      explicitPort: _port,
+    );
   }
 
   Future<AuthResult> authenticate({
@@ -773,7 +868,13 @@ class EmbyApi {
                     _authHeader(deviceId: deviceId, serverType: serverType),
                 body: body,
               )
-              .timeout(const Duration(seconds: 6));
+              .timeout(const Duration(seconds: 6))
+              .catchError((Object error) {
+            if (error is SocketException) {
+              throw _AuthSocketFailure(_describeSocketException(error));
+            }
+            throw error;
+          });
           if (resp.statusCode != 200) {
             errors.add('${url.toString()}: HTTP ${resp.statusCode}');
             continue;
@@ -818,6 +919,10 @@ class EmbyApi {
             apiPrefixUsed: _normalizeApiPrefix(prefix),
           );
         } catch (e) {
+          if (e is _AuthSocketFailure) {
+            errors.add('${url.origin}: $e');
+            continue;
+          }
           if (e is SocketException) {
             errors.add('${url.origin}: DNS/网络不可达 (${e.message})');
           } else {
@@ -1036,10 +1141,8 @@ class EmbyApi {
     if (resolvedGenres != null && resolvedGenres.isNotEmpty) {
       params.add('Genres=${Uri.encodeComponent(resolvedGenres.join('|'))}');
     }
-    final resolvedYears = years
-        ?.where((value) => value > 0)
-        .toSet()
-        .toList(growable: false);
+    final resolvedYears =
+        years?.where((value) => value > 0).toSet().toList(growable: false);
     if (resolvedYears != null && resolvedYears.isNotEmpty) {
       resolvedYears.sort();
       params.add('Years=${resolvedYears.join(',')}');
@@ -1050,7 +1153,8 @@ class EmbyApi {
         .toSet()
         .toList(growable: false);
     if (resolvedPersonIds != null && resolvedPersonIds.isNotEmpty) {
-      params.add('PersonIds=${Uri.encodeComponent(resolvedPersonIds.join(','))}');
+      params
+          .add('PersonIds=${Uri.encodeComponent(resolvedPersonIds.join(','))}');
     }
     if (sortBy != null && sortBy.isNotEmpty) {
       params.addAll(['SortBy=$sortBy', 'SortOrder=$sortOrder']);
@@ -1079,8 +1183,8 @@ class EmbyApi {
         'SeriesStatus=${Uri.encodeComponent(resolvedSeriesStatus.join(','))}',
       );
     }
-    final url =
-        _apiUri(baseUrl, 'Users/$userId/Items?${params.join('&')}', token: token);
+    final url = _apiUri(baseUrl, 'Users/$userId/Items?${params.join('&')}',
+        token: token);
     final resp = await _client.get(url,
         headers: _jsonHeaders(token: token, userId: userId));
     if (resp.statusCode != 200) {

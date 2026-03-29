@@ -24,6 +24,20 @@ Flutter 页面(lib/*.dart)
     -> media_kit(mpv) 或 video_player_android(Exo)
 ```
 
+补充：仓库内还保留一条独立的兼容线 `legacy/tv-legacy/`，用于 Android 4.4 / API 19 电视盒子。它不是 Flutter 壳的一个 flavor，而是单独的 Android Application：
+
+```text
+Legacy TV Activity(XML/View)
+  -> AppPrefs / ServerStore
+    -> EmbyClient（首页/收藏/搜索/Item 详情）
+       或 Backends.media(MediaBackend)
+         -> EmbyLike / Plex / WebDAV / Demo Backend
+  -> NetworkClients / ProxyService / RemoteHttpServer
+  -> PlayerActivity
+    -> PlayerCores / VlcPlayerCore
+      -> libVLC
+```
+
 ## 3. 顶层目录职责
 
 - `.github/`
@@ -36,6 +50,8 @@ Flutter 页面(lib/*.dart)
   - 模块化后的核心包（state/ui/player/server/api/core/prefs）与 patched 依赖。
 - `docs/`
   - 用户与开发文档。
+- `legacy/`
+  - 独立兼容工程与历史实现；当前主要是 `legacy/tv-legacy/`（Java + XML/View 的 Android 4.4 TV 端）。
 - `tool/`
   - 构建辅助脚本（如 TV 代理资源拉取）。
 - `workers/`
@@ -183,6 +199,43 @@ Flutter 页面(lib/*.dart)
 - 功能开关（允许的 server type）
 - 基础枚举与全局配置上下文
 
+### 4.9 Legacy TV 兼容工程（`legacy/tv-legacy/`）
+
+定位：
+- 独立 Android 应用，不参与 Flutter 运行时。
+- 技术栈：Java + XML/View，`minSdk = 19`，兼容 Android 4.4 TV/盒子设备。
+- 主要依赖：AppCompat 1.6.1、RecyclerView、OkHttp 3.12、libVLC 3.6、ZXing。
+
+入口与页面：
+- `LinPlayerApp`
+- 首页：`MainActivity`
+- 服务器管理：`ServersActivity`、`ServerEditActivity`
+- 搜索/媒体库：`SearchActivity`、`LibraryDetailActivity`
+- 详情页：`ItemDetailActivity`、`ShowDetailActivity`、`EpisodeListActivity`、`EpisodeDetailActivity`
+- 播放页：`PlayerActivity`
+- 设置页：`SettingsActivity`
+
+数据与状态：
+- 持久化入口：`AppPrefs`
+- 服务器配置：`servers/ServerStore` + `servers/ServerConfig`
+- 当前实现同时存在两条数据访问路径：
+  - Emby 专用路径：`MainActivity`、`SearchActivity`、`LibraryDetailActivity`、`ItemDetailActivity` 直接使用 `emby/EmbyClient`
+  - 统一后端路径：`backend/Backends.media(...)` 根据 active server 选择 `EmbyLikeMediaBackend`、`PlexMediaBackend`、`WebDavMediaBackend` 或 `DemoMediaBackend`
+- 这意味着 `tv-legacy` 仍处在“专用实现 + 统一抽象并存”的过渡状态。
+
+播放与平台服务：
+- 播放核心：`player/PlayerCores` -> `player/VlcPlayerCore` -> libVLC
+- `PlayerActivity` 负责播放 HUD、选集、音轨/字幕切换、进度控制，以及 STRM / Emby-like URL 的解析与重定向处理。
+- 网络层：`NetworkClients` 统一注入 `User-Agent`，并按设置决定直连或 per-app 代理。
+- 内置代理：`ProxyService` + `MihomoConfig` + `MihomoProcess` + `ProxyEnv`
+- 遥控/配网：`remote/RemoteControl` + `remote/RemoteHttpServer` + `remote/PlaybackSession`
+  - `ServersActivity` 会启动局域网 HTTP 服务并展示 QR，手机网页可批量添加服务器、调整代理设置、控制播放。
+
+UI 组织：
+- 以 `activity_*.xml`、`item_*.xml` 为主的 XML 布局 + `RecyclerView.Adapter`
+- 共享 TV 视觉参数通过 `TvStyle` + `AppPrefs` 管理（面板透明度、背景模糊等）
+- 背景图和毛玻璃视觉由 `BitmapFetcher` / `BitmapBlur` / `ImageLoader` 等工具类完成
+
 ## 5. patched 依赖说明
 
 - `packages/media_kit_patched`
@@ -253,6 +306,14 @@ Flutter 页面(lib/*.dart)
 - TV 内置代理：`built_in_proxy_service.dart`
   - 管理 mihomo 进程、配置生成、代理规则及 UI 面板资源。
 
+### 6.8 Legacy TV 关键链路
+
+1. `MainActivity` 启动时先检查 `ServerStore.hasAny(...)`；若没有服务器则跳转 `ServersActivity`。
+2. `ServersActivity` / `ServerEditActivity` 负责登录 Emby/Jellyfin、保存 `ServerConfig`，并可通过 QR Remote 做批量导入与远程配网。
+3. 首页/搜索/媒体库当前直接使用 `EmbyClient` 拉取 Emby/Jellyfin 数据；剧集详情与播放器侧则更多通过 `Backends.media(...)` 访问 Emby-like / Plex / WebDAV。
+4. `PlayerActivity` 根据 URL、showId、episodeIndex 等上下文调用 `VlcPlayerCore` 打开流，并接管选集、音轨、字幕、seek 与远程控制状态同步。
+5. 若启用代理，则 `ProxyService` 启动本地 mihomo，`NetworkClients` 与 `ProxyEnv` 让 App 内网络请求经 `127.0.0.1` 走 per-app 代理。
+
 ## 7. 平台与壳层
 
 ### 7.1 Desktop 壳层
@@ -270,6 +331,15 @@ Flutter 页面(lib/*.dart)
 
 职责：
 - TV 首页、背景模式、首启向导、遥控操作体验。
+
+### 7.3 Legacy TV 兼容壳层
+
+目录：`legacy/tv-legacy/`
+
+职责：
+- 为 Android 4.4 / API 19 设备提供独立 TV 壳与播放器。
+- 与主 Flutter 工程共存，但构建、运行、依赖链完全独立。
+- 作为低版本设备兼容线保留，便于继续维护传统 Java/XML TV 端能力。
 
 ## 8. 数据与持久化策略
 
@@ -311,6 +381,7 @@ Flutter 页面(lib/*.dart)
 - 静态检查：`flutter analyze`
 - 测试：`flutter test`
 - 平台构建前先确认：`flutter doctor -v`
+- 低版本 TV 工程单独构建：`cd legacy/tv-legacy; .\gradlew.bat :app:assembleDebug`
 - 对外接口异常优先查：
   - 当前 active server 信息
   - Adapter 选型是否正确
@@ -326,6 +397,9 @@ Flutter 页面(lib/*.dart)
 - `docs/dev/ANDROID_SIGNING.md`
 - `docs/dev/TV_PROXY_ROADMAP.md`
 - `docs/SERVER_IMPORT.md`
+- `legacy/tv-legacy/README.md`
+- `legacy/tv-legacy/TV_GUIDE.md`
+- `legacy/tv-legacy/API.md`
 
 ---
 
