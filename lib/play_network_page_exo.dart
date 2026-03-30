@@ -24,6 +24,7 @@ import 'services/subtitle_support.dart';
 import 'tv/tv_focusable.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
 import 'widgets/list_picker_dialog.dart';
+import 'widgets/mobile_player_status_bars.dart';
 
 class ExoPlayNetworkPage extends StatefulWidget {
   const ExoPlayNetworkPage({
@@ -83,7 +84,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   DateTime? _lastUiTickAt;
-  _OrientationMode _orientationMode = _OrientationMode.auto;
+  final _OrientationMode _orientationMode = _OrientationMode.auto;
   String? _lastOrientationKey;
   DateTime? _lastAutoOrientationApplyAt;
   Duration? _resumeHintPosition;
@@ -166,6 +167,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
   VideoViewType _viewType = VideoViewType.platformView;
   bool _switchingViewType = false;
+  static const int _playbackRouteHistoryLimit = 5;
+  final List<String> _playbackRouteHistory = <String>[];
 
   // Subtitle options (EXO).
   double _subtitleDelaySeconds = 0.0;
@@ -2073,6 +2076,231 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     return '${mb.toStringAsFixed(1)} MB/S';
   }
 
+  String _mobileTopTitleText() {
+    final item = _episodePickerItem;
+    final title = (item?.name ?? '').trim().isNotEmpty
+        ? item!.name.trim()
+        : widget.title.trim();
+    if (item == null) return title;
+    if (item.type.trim().toLowerCase() != 'episode') return title;
+    final season = item.seasonNumber ?? 0;
+    final episode = item.episodeNumber ?? 0;
+    if (season <= 0 || episode <= 0) return title;
+    final mark =
+        'S${season.toString().padLeft(2, '0')}E${episode.toString().padLeft(2, '0')}';
+    if (title.isEmpty) return mark;
+    return '$mark $title';
+  }
+
+  String _mobileNetSpeedLabel() {
+    final speed = _netSpeedBytesPerSecond;
+    if (speed != null && speed.isFinite && speed > 0) {
+      return formatBytesPerSecond(speed);
+    }
+    final bufferSpeedX = _bufferSpeedX;
+    if (bufferSpeedX != null && bufferSpeedX.isFinite && bufferSpeedX > 0) {
+      return '缓冲 x${bufferSpeedX.toStringAsFixed(2)}';
+    }
+    return '--';
+  }
+
+  List<Widget> _buildMobileTopActions(
+    BuildContext context, {
+    required bool controlsEnabled,
+  }) {
+    return [
+      MobilePlayerActionButton(
+        icon: Icons.route_outlined,
+        label: '线路',
+        compact: true,
+        onTap: controlsEnabled
+            ? () {
+                _showControls(scheduleHide: false);
+                unawaited(_showPlaybackRouteSheet());
+              }
+            : null,
+      ),
+      MobilePlayerActionButton(
+        icon: Icons.video_file_outlined,
+        label: '版本',
+        compact: true,
+        onTap: controlsEnabled
+            ? () {
+                _showControls(scheduleHide: false);
+                unawaited(_switchVersion());
+              }
+            : null,
+      ),
+      MobilePlayerActionButton(
+        icon: Icons.audiotrack_outlined,
+        label: '音频',
+        compact: true,
+        onTap: controlsEnabled
+            ? () {
+                _showControls(scheduleHide: false);
+                unawaited(_showAudioTracks(context));
+              }
+            : null,
+      ),
+      MobilePlayerActionButton(
+        icon: Icons.tune,
+        label:
+            widget.appState.playerCore == PlayerCore.exo ? '内核 Exo' : '内核 mpv',
+        compact: true,
+        onTap: controlsEnabled
+            ? () {
+                _showControls(scheduleHide: false);
+                unawaited(_switchCore());
+              }
+            : null,
+      ),
+      MobilePlayerActionButton(
+        icon: Icons.auto_fix_high_outlined,
+        label: '超分 关',
+        compact: true,
+        onTap: controlsEnabled
+            ? () {
+                _showControls(scheduleHide: false);
+                _showNotSupported('超分');
+              }
+            : null,
+      ),
+    ];
+  }
+
+  Widget _buildMobileTopStatusBar(
+    BuildContext context, {
+    required bool controlsEnabled,
+  }) {
+    return MobilePlayerTopStatusBar(
+      title: _mobileTopTitleText(),
+      actions: _buildMobileTopActions(
+        context,
+        controlsEnabled: controlsEnabled,
+      ),
+    );
+  }
+
+  Widget _buildMobileBottomStatusBar(
+    BuildContext context, {
+    required bool controlsEnabled,
+    required VideoPlayerController controller,
+  }) {
+    return MobilePlayerBottomStatusBar(
+      position: _position,
+      buffered: _lastBufferedEnd,
+      duration: _duration,
+      positionLabel: _fmtClock(_position),
+      durationLabel: _fmtClock(_duration),
+      leftContent: Text(
+        '网速 ${_mobileNetSpeedLabel()}',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      centerContent: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          MobilePlayerTransportButton(
+            icon: Icons.fast_rewind_rounded,
+            onTap: controlsEnabled
+                ? () {
+                    _showControls();
+                    unawaited(
+                      _seekRelative(
+                        Duration(seconds: -_seekBackSeconds),
+                        showOverlay: false,
+                      ),
+                    );
+                  }
+                : null,
+          ),
+          const SizedBox(width: 4),
+          MobilePlayerTransportButton(
+            icon: _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            emphasized: true,
+            onTap: controlsEnabled
+                ? () {
+                    _showControls();
+                    unawaited(_togglePlayPause(showOverlay: false));
+                  }
+                : null,
+          ),
+          const SizedBox(width: 4),
+          MobilePlayerTransportButton(
+            icon: Icons.fast_forward_rounded,
+            onTap: controlsEnabled
+                ? () {
+                    _showControls();
+                    unawaited(
+                      _seekRelative(
+                        Duration(seconds: _seekForwardSeconds),
+                        showOverlay: false,
+                      ),
+                    );
+                  }
+                : null,
+          ),
+        ],
+      ),
+      rightContent: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            MobilePlayerActionButton(
+              icon: (_danmakuEnabled || _danmakuHeatmap.isNotEmpty)
+                  ? Icons.comment
+                  : Icons.comment_outlined,
+              label: '弹幕',
+              compact: true,
+              onTap: controlsEnabled
+                  ? () {
+                      _showControls(scheduleHide: false);
+                      unawaited(_showDanmakuSheet());
+                    }
+                  : null,
+            ),
+            MobilePlayerActionButton(
+              icon: Icons.subtitles_outlined,
+              label: '字幕',
+              compact: true,
+              onTap: controlsEnabled
+                  ? () {
+                      _showControls(scheduleHide: false);
+                      unawaited(_showSubtitleTracks(context));
+                    }
+                  : null,
+            ),
+            MobilePlayerActionButton(
+              icon: Icons.format_list_numbered,
+              label: '选集',
+              compact: true,
+              onTap: controlsEnabled && _canShowEpisodePickerButton
+                  ? () {
+                      _showControls(scheduleHide: false);
+                      unawaited(_toggleEpisodePicker());
+                    }
+                  : null,
+            ),
+          ],
+        ),
+      ),
+      onScrubStart: controlsEnabled ? _onScrubStart : null,
+      onSeekPreview: controlsEnabled
+          ? (target) => setState(() => _position = target)
+          : null,
+      onSeekCommit: controlsEnabled
+          ? (target) async {
+              await controller.seekTo(target);
+              _maybeReportPlaybackProgress(target, force: true);
+              _syncDanmakuCursor(target);
+              _onScrubEnd();
+              if (mounted) setState(() {});
+            }
+          : null,
+    );
+  }
+
   Future<void> _refreshTvSubtitleTracks() async {
     if (_tvSubtitleTracksLoading) return;
     final controller = _controller;
@@ -3287,6 +3515,309 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       _overrideResumeImmediately = true;
     });
     await _init();
+  }
+
+  String? get _playbackServerId =>
+      widget.server?.id ?? widget.appState.activeServerId;
+
+  String? _playbackDomainRemark(String url) {
+    final serverId = _playbackServerId;
+    if (serverId == null || serverId.isEmpty) {
+      return widget.appState.domainRemark(url);
+    }
+    return widget.appState.serverDomainRemark(serverId, url);
+  }
+
+  Future<List<RouteEntry>> _resolvePlaybackRouteEntries({
+    bool forceRefresh = false,
+  }) async {
+    final serverId = _playbackServerId;
+    final usingActiveServer = serverId == null ||
+        serverId.isEmpty ||
+        serverId == widget.appState.activeServerId;
+
+    final customDomains = (serverId == null || serverId.isEmpty)
+        ? widget.appState.customDomains
+        : widget.appState.customDomainsOfServer(serverId);
+    final customEntries = customDomains
+        .map((d) => DomainInfo(name: d.name, url: d.url))
+        .toList(growable: false);
+
+    List<DomainInfo> pluginDomains = const [];
+    if (usingActiveServer) {
+      if (forceRefresh || widget.appState.domains.isEmpty) {
+        await widget.appState.refreshDomains();
+      }
+      pluginDomains = List<DomainInfo>.from(widget.appState.domains);
+    } else {
+      final access = _serverAccess;
+      if (access != null) {
+        try {
+          pluginDomains = List<DomainInfo>.from(
+            await access.adapter.fetchDomains(access.auth, allowFailure: true),
+          );
+        } catch (_) {}
+      }
+    }
+
+    final knownUrls = <String>{
+      for (final d in customEntries) d.url,
+      for (final d in pluginDomains) d.url,
+      (_baseUrl ?? '').trim(),
+    };
+    final historyEntries = <DomainInfo>[];
+    for (final raw in _playbackRouteHistory) {
+      final url = raw.trim();
+      if (url.isEmpty || knownUrls.contains(url)) continue;
+      historyEntries.add(
+        DomainInfo(name: '上次线路 ${historyEntries.length + 1}', url: url),
+      );
+      knownUrls.add(url);
+      if (historyEntries.length >= _playbackRouteHistoryLimit) break;
+    }
+
+    return buildRouteEntries(
+      currentUrl: _baseUrl,
+      customEntries: [...historyEntries, ...customEntries],
+      pluginDomains: pluginDomains,
+    );
+  }
+
+  void _rememberPlaybackRouteHistory(String url) {
+    final value = url.trim();
+    if (value.isEmpty) return;
+    _playbackRouteHistory.removeWhere((entry) => entry == value);
+    _playbackRouteHistory.insert(0, value);
+    if (_playbackRouteHistory.length > _playbackRouteHistoryLimit) {
+      _playbackRouteHistory.removeRange(
+        _playbackRouteHistoryLimit,
+        _playbackRouteHistory.length,
+      );
+    }
+  }
+
+  Future<void> _switchPlaybackRoute(String url) async {
+    final nextUrl = url.trim();
+    final currentUrl = (_baseUrl ?? '').trim();
+    final serverId = _playbackServerId;
+    if (nextUrl.isEmpty ||
+        currentUrl.isEmpty ||
+        nextUrl == currentUrl ||
+        serverId == null ||
+        serverId.isEmpty ||
+        _loading) {
+      return;
+    }
+
+    final resumePos = _position;
+    _maybeReportPlaybackProgress(resumePos, force: true);
+    _rememberPlaybackRouteHistory(currentUrl);
+
+    final previousSources =
+        List<Map<String, dynamic>>.from(_availableMediaSources);
+    final previousSelectedSourceId = _selectedMediaSourceId;
+    final previousAudioIndex = _selectedAudioStreamIndex;
+    final previousSubtitleIndex = _selectedSubtitleStreamIndex;
+    var routeUpdated = false;
+
+    Future<void> restorePreviousRoute({String? message}) async {
+      try {
+        await widget.appState.updateServerRoute(serverId, url: currentUrl);
+      } catch (_) {}
+      _serverAccess =
+          resolveServerAccess(appState: widget.appState, server: widget.server);
+      if (!mounted) return;
+      setState(() {
+        _availableMediaSources = previousSources;
+        _selectedMediaSourceId = previousSelectedSourceId;
+        _selectedAudioStreamIndex = previousAudioIndex;
+        _selectedSubtitleStreamIndex = previousSubtitleIndex;
+        _overrideStartPosition = resumePos;
+        _overrideResumeImmediately = true;
+        _loading = true;
+        _playError = null;
+      });
+      await _init();
+      if (!mounted || message == null || message.trim().isEmpty) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message.trim())),
+      );
+    }
+
+    try {
+      await widget.appState.updateServerRoute(serverId, url: nextUrl);
+      routeUpdated = true;
+      _serverAccess =
+          resolveServerAccess(appState: widget.appState, server: widget.server);
+      if (!mounted) return;
+      setState(() {
+        _availableMediaSources = const [];
+        _selectedMediaSourceId = null;
+        _selectedAudioStreamIndex = null;
+        _selectedSubtitleStreamIndex = null;
+        _overrideStartPosition = resumePos;
+        _overrideResumeImmediately = true;
+        _loading = true;
+        _playError = null;
+      });
+      await _init();
+      if (!mounted) return;
+      if (_playError == null) return;
+      await restorePreviousRoute(message: '新线路无画面，已恢复到原线路');
+    } catch (e) {
+      if (routeUpdated) {
+        await restorePreviousRoute();
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('线路切换失败：$e')),
+      );
+    }
+  }
+
+  Future<void> _showPlaybackRouteSheet() async {
+    if (!mounted) return;
+    _showControls(scheduleHide: false);
+    Future<List<RouteEntry>> entriesFuture = _resolvePlaybackRouteEntries();
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: StatefulBuilder(
+            builder: (context, setSheetState) {
+              return SizedBox(
+                height: math.min(MediaQuery.sizeOf(context).height * 0.72, 620),
+                child: FutureBuilder<List<RouteEntry>>(
+                  future: entriesFuture,
+                  builder: (context, snapshot) {
+                    final loading =
+                        snapshot.connectionState != ConnectionState.done;
+                    final entries = snapshot.data ?? const <RouteEntry>[];
+                    final isDark =
+                        Theme.of(context).brightness == Brightness.dark;
+                    return Column(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 6, 10, 6),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  '线路切换',
+                                  style:
+                                      Theme.of(context).textTheme.titleMedium,
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: '刷新线路',
+                                onPressed: loading
+                                    ? null
+                                    : () {
+                                        setSheetState(() {
+                                          entriesFuture =
+                                              _resolvePlaybackRouteEntries(
+                                            forceRefresh: true,
+                                          );
+                                        });
+                                      },
+                                icon: const Icon(Icons.refresh),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Divider(height: 1),
+                        if (loading)
+                          const Expanded(
+                            child: Center(child: CircularProgressIndicator()),
+                          )
+                        else if (entries.isEmpty)
+                          const Expanded(
+                            child: Center(child: Text('当前服务器暂无可用线路')),
+                          )
+                        else
+                          Expanded(
+                            child: ListView.separated(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              itemCount: entries.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 6),
+                              itemBuilder: (context, index) {
+                                final entry = entries[index];
+                                final domain = entry.domain;
+                                final selected =
+                                    (_baseUrl ?? '').trim() == domain.url;
+                                final name = domain.name.trim().isEmpty
+                                    ? domain.url
+                                    : domain.name.trim();
+                                final remark =
+                                    (_playbackDomainRemark(domain.url) ?? '')
+                                        .trim();
+                                return ListTile(
+                                  dense: true,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  tileColor: isDark
+                                      ? Colors.white.withValues(
+                                          alpha: selected ? 0.16 : 0.06,
+                                        )
+                                      : Colors.black.withValues(
+                                          alpha: selected ? 0.10 : 0.04,
+                                        ),
+                                  title: Text(
+                                    name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  subtitle: remark.isEmpty
+                                      ? Text(
+                                          domain.url,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        )
+                                      : Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              remark,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                            Text(
+                                              domain.url,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ],
+                                        ),
+                                  trailing: selected
+                                      ? const Icon(Icons.check_circle_rounded)
+                                      : null,
+                                  onTap: () async {
+                                    Navigator.of(ctx).pop();
+                                    await _switchPlaybackRoute(domain.url);
+                                  },
+                                );
+                              },
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _init() async {
@@ -4941,52 +5472,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     );
   }
 
-  String get _orientationTooltip {
-    switch (_orientationMode) {
-      case _OrientationMode.auto:
-        return '自动旋转';
-      case _OrientationMode.landscape:
-        return '锁定横屏';
-      case _OrientationMode.portrait:
-        return '锁定竖屏';
-    }
-  }
-
-  IconData get _orientationIcon {
-    switch (_orientationMode) {
-      case _OrientationMode.auto:
-        return Icons.screen_rotation;
-      case _OrientationMode.landscape:
-        return Icons.screen_lock_landscape;
-      case _OrientationMode.portrait:
-        return Icons.screen_lock_portrait;
-    }
-  }
-
-  Future<void> _cycleOrientationMode() async {
-    final next = switch (_orientationMode) {
-      _OrientationMode.auto => _OrientationMode.landscape,
-      _OrientationMode.landscape => _OrientationMode.portrait,
-      _OrientationMode.portrait => _OrientationMode.auto,
-    };
-
-    if (mounted) {
-      setState(() => _orientationMode = next);
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text(_orientationTooltip),
-            duration: const Duration(milliseconds: 800),
-          ),
-        );
-    } else {
-      _orientationMode = next;
-    }
-
-    await _applyOrientationForMode();
-  }
-
   Future<void> _applyOrientationForMode() async {
     if (!_shouldControlSystemUi) return;
 
@@ -5225,118 +5710,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       child: Scaffold(
         backgroundColor: Colors.black,
         extendBodyBehindAppBar: true,
-        appBar: widget.isTv
-            ? null
-            : PreferredSize(
-                preferredSize: _controlsVisible
-                    ? const Size.fromHeight(kToolbarHeight)
-                    : Size.zero,
-                child: AnimatedOpacity(
-                  opacity: _controlsVisible ? 1 : 0,
-                  duration: const Duration(milliseconds: 200),
-                  child: IgnorePointer(
-                    ignoring: !_controlsVisible,
-                    child: SafeArea(
-                      top: false,
-                      bottom: false,
-                      child: GlassAppBar(
-                        enableBlur: enableBlur,
-                        child: AppBar(
-                          backgroundColor: Colors.transparent,
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          scrolledUnderElevation: 0,
-                          shadowColor: Colors.transparent,
-                          surfaceTintColor: Colors.transparent,
-                          forceMaterialTransparency: true,
-                          title: Text(widget.title),
-                          centerTitle: true,
-                          actions: [
-                            IconButton(
-                              tooltip: '重新加载',
-                              icon: const Icon(Icons.refresh),
-                              onPressed: _loading ? null : _init,
-                            ),
-                            IconButton(
-                              tooltip: '音轨',
-                              icon: const Icon(Icons.audiotrack),
-                              onPressed: () => _showAudioTracks(context),
-                            ),
-                            IconButton(
-                              tooltip: '字幕',
-                              icon: const Icon(Icons.subtitles),
-                              onPressed: () => _showSubtitleTracks(context),
-                            ),
-                            IconButton(
-                              tooltip: '弹幕',
-                              icon: const Icon(Icons.comment_outlined),
-                              onPressed: _showDanmakuSheet,
-                            ),
-                            IconButton(
-                              tooltip: '软/硬解切换',
-                              icon: const Icon(Icons.memory),
-                              onPressed: () => _showNotSupported('软/硬解切换'),
-                            ),
-                            IconButton(
-                              tooltip: _orientationTooltip,
-                              icon: Icon(_orientationIcon),
-                              onPressed: _cycleOrientationMode,
-                            ),
-                            PopupMenuButton<_PlayerMenuAction>(
-                              tooltip: '更多',
-                              icon: const Icon(Icons.more_vert),
-                              color: const Color(0xFF202020),
-                              onSelected: (action) async {
-                                switch (action) {
-                                  case _PlayerMenuAction.switchCore:
-                                    await _switchCore();
-                                    break;
-                                  case _PlayerMenuAction.switchVersion:
-                                    await _switchVersion();
-                                    break;
-                                }
-                              },
-                              itemBuilder: (ctx) {
-                                final scheme = Theme.of(ctx).colorScheme;
-                                return [
-                                  PopupMenuItem(
-                                    value: _PlayerMenuAction.switchVersion,
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.video_file_outlined,
-                                            color: scheme.primary),
-                                        const SizedBox(width: 10),
-                                        const Text(
-                                          '版本选择',
-                                          style: TextStyle(color: Colors.white),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  PopupMenuItem(
-                                    value: _PlayerMenuAction.switchCore,
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.tune,
-                                            color: scheme.secondary),
-                                        const SizedBox(width: 10),
-                                        const Text(
-                                          '切换内核',
-                                          style: TextStyle(color: Colors.white),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ];
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+        appBar: null,
         body: Column(
           children: [
             Expanded(
@@ -5564,6 +5938,37 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                           ),
                                         ),
                                       ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (!widget.isTv)
+                            Align(
+                              alignment: Alignment.topCenter,
+                              child: SafeArea(
+                                bottom: false,
+                                minimum:
+                                    const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                                child: AnimatedSlide(
+                                  offset: _controlsVisible
+                                      ? Offset.zero
+                                      : const Offset(0, -0.18),
+                                  duration: const Duration(milliseconds: 200),
+                                  curve: Curves.easeOutCubic,
+                                  child: AnimatedOpacity(
+                                    opacity: _controlsVisible ? 1 : 0,
+                                    duration: const Duration(milliseconds: 160),
+                                    curve: Curves.easeOut,
+                                    child: IgnorePointer(
+                                      ignoring: !_controlsVisible,
+                                      child: Listener(
+                                        onPointerDown: (_) => _showControls(),
+                                        child: _buildMobileTopStatusBar(
+                                          context,
+                                          controlsEnabled: controlsEnabled,
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -5888,139 +6293,49 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                 top: false,
                                 minimum:
                                     const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                                child: AnimatedOpacity(
-                                  opacity: _controlsVisible ? 1 : 0,
+                                child: AnimatedSlide(
+                                  offset: _controlsVisible
+                                      ? Offset.zero
+                                      : const Offset(0, 0.18),
                                   duration: const Duration(milliseconds: 200),
-                                  child: IgnorePointer(
-                                    ignoring: !_controlsVisible,
-                                    child: Listener(
-                                      onPointerDown: (_) => _showControls(),
-                                      child: Focus(
-                                        canRequestFocus: false,
-                                        onKeyEvent: (node, event) {
-                                          if (!_remoteEnabled) {
-                                            return KeyEventResult.ignored;
-                                          }
-                                          if (event is! KeyDownEvent) {
-                                            return KeyEventResult.ignored;
-                                          }
-                                          if (event.logicalKey ==
-                                              LogicalKeyboardKey.arrowDown) {
-                                            final moved = FocusScope.of(context)
-                                                .focusInDirection(
-                                              TraversalDirection.down,
-                                            );
-                                            if (moved) {
+                                  curve: Curves.easeOutCubic,
+                                  child: AnimatedOpacity(
+                                    opacity: _controlsVisible ? 1 : 0,
+                                    duration: const Duration(milliseconds: 160),
+                                    curve: Curves.easeOut,
+                                    child: IgnorePointer(
+                                      ignoring: !_controlsVisible,
+                                      child: Listener(
+                                        onPointerDown: (_) => _showControls(),
+                                        child: Focus(
+                                          canRequestFocus: false,
+                                          onKeyEvent: (node, event) {
+                                            if (!_remoteEnabled) {
+                                              return KeyEventResult.ignored;
+                                            }
+                                            if (event is! KeyDownEvent) {
+                                              return KeyEventResult.ignored;
+                                            }
+                                            if (event.logicalKey ==
+                                                LogicalKeyboardKey.arrowDown) {
+                                              final moved =
+                                                  FocusScope.of(context)
+                                                      .focusInDirection(
+                                                TraversalDirection.down,
+                                              );
+                                              if (moved) {
+                                                return KeyEventResult.handled;
+                                              }
+                                              _hideControlsForRemote();
                                               return KeyEventResult.handled;
                                             }
-                                            _hideControlsForRemote();
-                                            return KeyEventResult.handled;
-                                          }
-                                          return KeyEventResult.ignored;
-                                        },
-                                        child: PlaybackControls(
-                                          enabled: controlsEnabled,
-                                          playPauseFocusNode:
-                                              _tvPlayPauseFocusNode,
-                                          position: _position,
-                                          buffered: _lastBufferedEnd,
-                                          duration: _duration,
-                                          isPlaying: _isPlaying,
-                                          playbackRate:
-                                              controller.value.playbackSpeed,
-                                          onSetPlaybackRate: (rate) async {
-                                            _showControls();
-                                            await controller.setPlaybackSpeed(
-                                              rate,
-                                            );
-                                            if (mounted) setState(() {});
+                                            return KeyEventResult.ignored;
                                           },
-                                          heatmap: _danmakuHeatmap,
-                                          showHeatmap: _danmakuShowHeatmap &&
-                                              _danmakuHeatmap.isNotEmpty,
-                                          seekBackwardSeconds: _seekBackSeconds,
-                                          seekForwardSeconds:
-                                              _seekForwardSeconds,
-                                          showSystemTime: widget.appState
-                                              .showSystemTimeInControls,
-                                          showBattery: widget
-                                              .appState.showBatteryInControls,
-                                          showBufferSpeed:
-                                              widget.appState.showBufferSpeed,
-                                          buffering: _buffering,
-                                          bufferSpeedX: _bufferSpeedX,
-                                          netSpeedBytesPerSecond:
-                                              _netSpeedBytesPerSecond,
-                                          onOpenEpisodePicker:
-                                              _canShowEpisodePickerButton
-                                                  ? _toggleEpisodePicker
-                                                  : null,
-                                          onScrubStart: _onScrubStart,
-                                          onScrubEnd: _onScrubEnd,
-                                          onSeek: (pos) async {
-                                            await controller.seekTo(pos);
-                                            _maybeReportPlaybackProgress(
-                                              pos,
-                                              force: true,
-                                            );
-                                            _syncDanmakuCursor(pos);
-                                            if (mounted) setState(() {});
-                                          },
-                                          onPlay: () async {
-                                            _showControls();
-                                            await controller.play();
-                                            _maybeReportPlaybackProgress(
-                                              controller.value.position,
-                                              force: true,
-                                            );
-                                            _applyDanmakuPauseState(false);
-                                            if (mounted) setState(() {});
-                                          },
-                                          onPause: () async {
-                                            _showControls();
-                                            await controller.pause();
-                                            _maybeReportPlaybackProgress(
-                                              controller.value.position,
-                                              force: true,
-                                            );
-                                            _applyDanmakuPauseState(true);
-                                            if (mounted) setState(() {});
-                                          },
-                                          onSeekBackward: () async {
-                                            _showControls();
-                                            final target = _position -
-                                                Duration(
-                                                    seconds: _seekBackSeconds);
-                                            final pos = target < Duration.zero
-                                                ? Duration.zero
-                                                : target;
-                                            await controller.seekTo(pos);
-                                            _maybeReportPlaybackProgress(
-                                              controller.value.position,
-                                              force: true,
-                                            );
-                                            _syncDanmakuCursor(pos);
-                                            if (mounted) setState(() {});
-                                          },
-                                          onSeekForward: () async {
-                                            _showControls();
-                                            final d = _duration;
-                                            final target = _position +
-                                                Duration(
-                                                    seconds:
-                                                        _seekForwardSeconds);
-                                            final pos = (d > Duration.zero &&
-                                                    target > d)
-                                                ? d
-                                                : target;
-                                            await controller.seekTo(pos);
-                                            _maybeReportPlaybackProgress(
-                                              controller.value.position,
-                                              force: true,
-                                            );
-                                            _syncDanmakuCursor(pos);
-                                            if (mounted) setState(() {});
-                                          },
+                                          child: _buildMobileBottomStatusBar(
+                                            context,
+                                            controlsEnabled: controlsEnabled,
+                                            controller: controller,
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -6050,8 +6365,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     );
   }
 }
-
-enum _PlayerMenuAction { switchCore, switchVersion }
 
 enum _OrientationMode { auto, landscape, portrait }
 

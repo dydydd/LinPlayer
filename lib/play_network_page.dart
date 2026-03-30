@@ -17,7 +17,6 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'plugins/plugin_slot_area.dart';
 import 'play_network_page_exo.dart';
 import 'server_adapters/server_access.dart';
 import 'services/app_route_observer.dart';
@@ -28,6 +27,7 @@ import 'services/subtitle_support.dart';
 import 'tv/tv_focusable.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
 import 'widgets/list_picker_dialog.dart';
+import 'widgets/mobile_player_status_bars.dart';
 
 class PlayNetworkPage extends StatefulWidget {
   const PlayNetworkPage({
@@ -124,7 +124,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   bool _autoMarkedPlayed = false;
   StreamSubscription<VideoParams>? _videoParamsSub;
   VideoParams? _lastVideoParams;
-  _OrientationMode _orientationMode = _OrientationMode.auto;
+  final _OrientationMode _orientationMode = _OrientationMode.auto;
   String? _lastOrientationKey;
   bool _remoteEnabled = false;
   final FocusNode _tvSurfaceFocusNode =
@@ -3371,42 +3371,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     } catch (_) {}
   }
 
-  String get _orientationTooltip => switch (_orientationMode) {
-        _OrientationMode.auto => 'Orientation: Auto',
-        _OrientationMode.landscape => 'Orientation: Landscape',
-        _OrientationMode.portrait => 'Orientation: Portrait',
-      };
-
-  IconData get _orientationIcon => switch (_orientationMode) {
-        _OrientationMode.auto => Icons.screen_rotation,
-        _OrientationMode.landscape => Icons.stay_current_landscape,
-        _OrientationMode.portrait => Icons.stay_current_portrait,
-      };
-
-  Future<void> _cycleOrientationMode() async {
-    final next = switch (_orientationMode) {
-      _OrientationMode.auto => _OrientationMode.landscape,
-      _OrientationMode.landscape => _OrientationMode.portrait,
-      _OrientationMode.portrait => _OrientationMode.auto,
-    };
-    if (mounted) {
-      setState(() => _orientationMode = next);
-    } else {
-      _orientationMode = next;
-    }
-    if (mounted) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text(_orientationTooltip),
-            duration: const Duration(milliseconds: 800),
-          ),
-        );
-    }
-    await _applyOrientationForMode(videoParams: _lastVideoParams);
-  }
-
   void _scheduleNetSpeedTick() {
     _netSpeedTimer?.cancel();
     _netSpeedTimer = null;
@@ -5403,173 +5367,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         backgroundColor:
             useDesktopCinematic ? Colors.transparent : Colors.black,
         extendBodyBehindAppBar: !useDesktopCinematic,
-        appBar: useDesktopCinematic || widget.isTv
-            ? null
-            : PreferredSize(
-                preferredSize: _controlsVisible
-                    ? const Size.fromHeight(kToolbarHeight)
-                    : Size.zero,
-                child: AnimatedOpacity(
-                  opacity: _controlsVisible ? 1 : 0,
-                  duration: const Duration(milliseconds: 200),
-                  child: IgnorePointer(
-                    ignoring: !_controlsVisible,
-                    child: SafeArea(
-                      top: false,
-                      bottom: false,
-                      child: GlassAppBar(
-                        enableBlur: enableBlur,
-                        child: AppBar(
-                          backgroundColor: Colors.transparent,
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          scrolledUnderElevation: 0,
-                          shadowColor: Colors.transparent,
-                          surfaceTintColor: Colors.transparent,
-                          forceMaterialTransparency: true,
-                          title: Text(widget.title),
-                          centerTitle: true,
-                          actions: [
-                            IconButton(
-                              tooltip: '重新加载',
-                              icon: const Icon(Icons.refresh),
-                              onPressed: _loading
-                                  ? null
-                                  : () async {
-                                      setState(() {
-                                        _loading = true;
-                                        _playError = null;
-                                      });
-                                      await _init();
-                                    },
-                            ),
-                            IconButton(
-                              tooltip: '音轨',
-                              icon: const Icon(Icons.audiotrack),
-                              onPressed: () => _showAudioTracks(context),
-                            ),
-                            IconButton(
-                              tooltip: '字幕',
-                              icon: const Icon(Icons.subtitles),
-                              onPressed: () => _showSubtitleTracks(context),
-                            ),
-                            IconButton(
-                              tooltip: '弹幕',
-                              icon: const Icon(Icons.comment_outlined),
-                              onPressed: _showDanmakuSheet,
-                            ),
-                            IconButton(
-                              tooltip: '软硬解切换（当前：${_hwdecOn ? '硬解' : '软解'}）',
-                              icon: const Icon(Icons.memory),
-                              onPressed: () async {
-                                setState(() {
-                                  _hwdecOn = !_hwdecOn;
-                                  _loading = true;
-                                  _playError = null;
-                                });
-                                await _init();
-                              },
-                            ),
-                            IconButton(
-                              tooltip: _orientationTooltip,
-                              icon: Icon(_orientationIcon),
-                              onPressed: _cycleOrientationMode,
-                            ),
-                            PluginSlotArea(
-                              appState: widget.appState,
-                              slotId: 'player.appbar.trailing',
-                              axis: Axis.horizontal,
-                              gap: 6,
-                              params: <String, Object?>{
-                                'page': 'player',
-                                'source': 'network',
-                                'itemId': widget.itemId,
-                                'title': widget.title,
-                                'playback': <String, Object?>{
-                                  'itemId': widget.itemId,
-                                  'title': widget.title,
-                                },
-                              },
-                            ),
-                            PopupMenuButton<_PlayerMenuAction>(
-                              tooltip: '更多',
-                              icon: const Icon(Icons.more_vert),
-                              color: const Color(0xFF202020),
-                              onSelected: (action) async {
-                                switch (action) {
-                                  case _PlayerMenuAction.anime4k:
-                                    await _showAnime4kSheet();
-                                    break;
-                                  case _PlayerMenuAction.switchCore:
-                                    await _switchCore();
-                                    break;
-                                  case _PlayerMenuAction.switchVersion:
-                                    await _switchVersion();
-                                    break;
-                                }
-                              },
-                              itemBuilder: (ctx) {
-                                final scheme = Theme.of(ctx).colorScheme;
-                                return [
-                                  PopupMenuItem(
-                                    value: _PlayerMenuAction.anime4k,
-                                    child: Row(
-                                      children: [
-                                        Icon(
-                                          Icons.auto_fix_high,
-                                          color: scheme.primary,
-                                        ),
-                                        const SizedBox(width: 10),
-                                        Text(
-                                          'Anime4K：${_anime4kPreset.label}',
-                                          style: const TextStyle(
-                                              color: Colors.white),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  PopupMenuItem(
-                                    value: _PlayerMenuAction.switchVersion,
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.video_file_outlined,
-                                            color: scheme.primary),
-                                        const SizedBox(width: 10),
-                                        const Text(
-                                          '版本选择',
-                                          style: TextStyle(color: Colors.white),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  if (!kIsWeb &&
-                                      defaultTargetPlatform ==
-                                          TargetPlatform.android)
-                                    PopupMenuItem(
-                                      value: _PlayerMenuAction.switchCore,
-                                      child: Row(
-                                        children: [
-                                          Icon(Icons.tune,
-                                              color: scheme.secondary),
-                                          const SizedBox(width: 10),
-                                          const Text(
-                                            '切换内核',
-                                            style:
-                                                TextStyle(color: Colors.white),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                ];
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+        appBar: null,
         body: useDesktopCinematic
             ? _buildDesktopCinematicBody(
                 context,
@@ -5792,6 +5590,41 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                                 ),
                                               ),
                                             ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                if (!widget.isTv)
+                                  Align(
+                                    alignment: Alignment.topCenter,
+                                    child: SafeArea(
+                                      bottom: false,
+                                      minimum: const EdgeInsets.fromLTRB(
+                                          12, 12, 12, 0),
+                                      child: AnimatedSlide(
+                                        offset: _controlsVisible
+                                            ? Offset.zero
+                                            : const Offset(0, -0.18),
+                                        duration:
+                                            const Duration(milliseconds: 200),
+                                        curve: Curves.easeOutCubic,
+                                        child: AnimatedOpacity(
+                                          opacity: _controlsVisible ? 1 : 0,
+                                          duration:
+                                              const Duration(milliseconds: 160),
+                                          curve: Curves.easeOut,
+                                          child: IgnorePointer(
+                                            ignoring: !_controlsVisible,
+                                            child: Listener(
+                                              onPointerDown: (_) =>
+                                                  _showControls(),
+                                              child: _buildMobileTopStatusBar(
+                                                context,
+                                                controlsEnabled:
+                                                    controlsEnabled,
+                                              ),
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -6126,164 +5959,60 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                       top: false,
                                       minimum: const EdgeInsets.fromLTRB(
                                           12, 0, 12, 12),
-                                      child: AnimatedOpacity(
-                                        opacity: _controlsVisible ? 1 : 0,
+                                      child: AnimatedSlide(
+                                        offset: _controlsVisible
+                                            ? Offset.zero
+                                            : const Offset(0, 0.18),
                                         duration:
                                             const Duration(milliseconds: 200),
-                                        child: IgnorePointer(
-                                          ignoring: !_controlsVisible,
-                                          child: Listener(
-                                            onPointerDown: (_) =>
-                                                _showControls(),
-                                            child: Focus(
-                                              canRequestFocus: false,
-                                              onKeyEvent: (node, event) {
-                                                if (!_remoteEnabled) {
-                                                  return KeyEventResult.ignored;
-                                                }
-                                                if (event is! KeyDownEvent) {
-                                                  return KeyEventResult.ignored;
-                                                }
-                                                if (event.logicalKey ==
-                                                    LogicalKeyboardKey
-                                                        .arrowDown) {
-                                                  final moved =
-                                                      FocusScope.of(context)
-                                                          .focusInDirection(
-                                                    TraversalDirection.down,
-                                                  );
-                                                  if (moved) {
+                                        curve: Curves.easeOutCubic,
+                                        child: AnimatedOpacity(
+                                          opacity: _controlsVisible ? 1 : 0,
+                                          duration:
+                                              const Duration(milliseconds: 160),
+                                          curve: Curves.easeOut,
+                                          child: IgnorePointer(
+                                            ignoring: !_controlsVisible,
+                                            child: Listener(
+                                              onPointerDown: (_) =>
+                                                  _showControls(),
+                                              child: Focus(
+                                                canRequestFocus: false,
+                                                onKeyEvent: (node, event) {
+                                                  if (!_remoteEnabled) {
+                                                    return KeyEventResult
+                                                        .ignored;
+                                                  }
+                                                  if (event is! KeyDownEvent) {
+                                                    return KeyEventResult
+                                                        .ignored;
+                                                  }
+                                                  if (event.logicalKey ==
+                                                      LogicalKeyboardKey
+                                                          .arrowDown) {
+                                                    final moved =
+                                                        FocusScope.of(context)
+                                                            .focusInDirection(
+                                                      TraversalDirection.down,
+                                                    );
+                                                    if (moved) {
+                                                      return KeyEventResult
+                                                          .handled;
+                                                    }
+                                                    _hideControlsForRemote();
                                                     return KeyEventResult
                                                         .handled;
                                                   }
-                                                  _hideControlsForRemote();
-                                                  return KeyEventResult.handled;
-                                                }
-                                                return KeyEventResult.ignored;
-                                              },
-                                              child: PlaybackControls(
-                                                enabled: controlsEnabled,
-                                                playPauseFocusNode:
-                                                    _tvPlayPauseFocusNode,
-                                                position: _lastPosition,
-                                                buffered: _lastBuffer,
-                                                duration: duration,
-                                                isPlaying: isPlaying,
-                                                playbackRate: _playerService
-                                                    .player.state.rate,
-                                                onSetPlaybackRate:
-                                                    (rate) async {
-                                                  _showControls();
-                                                  if (!_playerService
-                                                      .isInitialized) {
-                                                    return;
-                                                  }
-                                                  await _playerService.player
-                                                      .setRate(rate);
-                                                  if (mounted) setState(() {});
+                                                  return KeyEventResult.ignored;
                                                 },
-                                                heatmap: _danmakuHeatmap,
-                                                showHeatmap:
-                                                    _danmakuShowHeatmap &&
-                                                        _danmakuHeatmap
-                                                            .isNotEmpty,
-                                                seekBackwardSeconds:
-                                                    _seekBackSeconds,
-                                                seekForwardSeconds:
-                                                    _seekForwardSeconds,
-                                                showSystemTime: widget.appState
-                                                    .showSystemTimeInControls,
-                                                showBattery: widget.appState
-                                                    .showBatteryInControls,
-                                                showBufferSpeed: widget
-                                                    .appState.showBufferSpeed,
-                                                buffering: _buffering,
-                                                bufferSpeedX: _bufferSpeedX,
-                                                netSpeedBytesPerSecond:
-                                                    _netSpeedBytesPerSecond,
-                                                onRequestThumbnail:
-                                                    _thumbnailer == null
-                                                        ? null
-                                                        : (pos) => _thumbnailer!
-                                                                .getThumbnail(
-                                                              pos,
-                                                            ),
-                                                onOpenEpisodePicker:
-                                                    _canShowEpisodePickerButton
-                                                        ? _toggleEpisodePicker
-                                                        : null,
-                                                onScrubStart: _onScrubStart,
-                                                onScrubEnd: _onScrubEnd,
-                                                onSeek: (pos) async {
-                                                  await _playerService.seek(
-                                                    pos,
-                                                    flushBuffer:
-                                                        _flushBufferOnSeek,
-                                                  );
-                                                  _lastPosition = pos;
-                                                  _syncDanmakuCursor(pos);
-                                                  _maybeReportPlaybackProgress(
-                                                    pos,
-                                                    force: true,
-                                                  );
-                                                  if (mounted) setState(() {});
-                                                },
-                                                onPlay: () {
-                                                  _showControls();
-                                                  return _playerService.play();
-                                                },
-                                                onPause: () {
-                                                  _showControls();
-                                                  return _playerService.pause();
-                                                },
-                                                onSeekBackward: () async {
-                                                  _showControls();
-                                                  final target = _lastPosition -
-                                                      Duration(
-                                                          seconds:
-                                                              _seekBackSeconds);
-                                                  final pos =
-                                                      target < Duration.zero
-                                                          ? Duration.zero
-                                                          : target;
-                                                  await _playerService.seek(
-                                                    pos,
-                                                    flushBuffer:
-                                                        _flushBufferOnSeek,
-                                                  );
-                                                  _lastPosition = pos;
-                                                  _syncDanmakuCursor(pos);
-                                                  _maybeReportPlaybackProgress(
-                                                    pos,
-                                                    force: true,
-                                                  );
-                                                  if (mounted) setState(() {});
-                                                },
-                                                onSeekForward: () async {
-                                                  _showControls();
-                                                  final d = duration;
-                                                  final target = _lastPosition +
-                                                      Duration(
-                                                          seconds:
-                                                              _seekForwardSeconds);
-                                                  final pos =
-                                                      (d > Duration.zero &&
-                                                              target > d)
-                                                          ? d
-                                                          : target;
-                                                  await _playerService.seek(
-                                                    pos,
-                                                    flushBuffer:
-                                                        _flushBufferOnSeek,
-                                                  );
-                                                  _lastPosition = pos;
-                                                  _syncDanmakuCursor(pos);
-                                                  _maybeReportPlaybackProgress(
-                                                    pos,
-                                                    force: true,
-                                                  );
-                                                  if (mounted) setState(() {});
-                                                },
+                                                child:
+                                                    _buildMobileBottomStatusBar(
+                                                  context,
+                                                  controlsEnabled:
+                                                      controlsEnabled,
+                                                  duration: duration,
+                                                  isPlaying: isPlaying,
+                                                ),
                                               ),
                                             ),
                                           ),
@@ -6876,6 +6605,224 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         'S${season.toString().padLeft(2, '0')}E${episode.toString().padLeft(2, '0')}';
     if (title.isEmpty) return mark;
     return '$mark $title';
+  }
+
+  String _mobileTopTitleText() => _desktopTopCenterTitle();
+
+  String _mobileNetSpeedLabel() {
+    final speed = _netSpeedBytesPerSecond;
+    if (speed != null && speed.isFinite && speed > 0) {
+      return formatBytesPerSecond(speed);
+    }
+    final bufferSpeedX = _bufferSpeedX;
+    if (bufferSpeedX != null && bufferSpeedX.isFinite && bufferSpeedX > 0) {
+      return '缓冲 x${bufferSpeedX.toStringAsFixed(2)}';
+    }
+    return '--';
+  }
+
+  List<Widget> _buildMobileTopActions(
+    BuildContext context, {
+    required bool controlsEnabled,
+  }) {
+    return [
+      MobilePlayerActionButton(
+        icon: Icons.route_outlined,
+        label: '线路',
+        compact: true,
+        onTap: controlsEnabled
+            ? () {
+                _showControls(scheduleHide: false);
+                unawaited(_showDesktopRouteSheet());
+              }
+            : null,
+      ),
+      MobilePlayerActionButton(
+        icon: Icons.video_file_outlined,
+        label: '版本',
+        compact: true,
+        onTap: controlsEnabled
+            ? () {
+                _showControls(scheduleHide: false);
+                unawaited(_switchVersion());
+              }
+            : null,
+      ),
+      MobilePlayerActionButton(
+        icon: Icons.audiotrack_outlined,
+        label: '音频',
+        compact: true,
+        onTap: controlsEnabled
+            ? () {
+                _showControls(scheduleHide: false);
+                _showAudioTracks(context);
+              }
+            : null,
+      ),
+      MobilePlayerActionButton(
+        icon: Icons.tune,
+        label:
+            widget.appState.playerCore == PlayerCore.mpv ? '内核 mpv' : '内核 Exo',
+        compact: true,
+        onTap: controlsEnabled
+            ? () {
+                _showControls(scheduleHide: false);
+                unawaited(_switchCore());
+              }
+            : null,
+      ),
+      MobilePlayerActionButton(
+        icon: _anime4kPreset.isOff
+            ? Icons.auto_fix_high_outlined
+            : Icons.auto_fix_high,
+        label: _anime4kPreset.isOff ? '超分 关' : '超分 开',
+        compact: true,
+        onTap: controlsEnabled
+            ? () {
+                _showControls(scheduleHide: false);
+                unawaited(_showAnime4kSheet());
+              }
+            : null,
+      ),
+    ];
+  }
+
+  Widget _buildMobileTopStatusBar(
+    BuildContext context, {
+    required bool controlsEnabled,
+  }) {
+    return MobilePlayerTopStatusBar(
+      title: _mobileTopTitleText(),
+      actions: _buildMobileTopActions(
+        context,
+        controlsEnabled: controlsEnabled,
+      ),
+    );
+  }
+
+  Widget _buildMobileBottomStatusBar(
+    BuildContext context, {
+    required bool controlsEnabled,
+    required Duration duration,
+    required bool isPlaying,
+  }) {
+    return MobilePlayerBottomStatusBar(
+      position: _lastPosition,
+      buffered: _lastBuffer,
+      duration: duration,
+      positionLabel: _fmtClock(_lastPosition),
+      durationLabel: _fmtClock(duration),
+      leftContent: Text(
+        '网速 ${_mobileNetSpeedLabel()}',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      centerContent: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          MobilePlayerTransportButton(
+            icon: Icons.fast_rewind_rounded,
+            onTap: controlsEnabled
+                ? () {
+                    _showControls();
+                    unawaited(
+                      _seekRelative(
+                        Duration(seconds: -_seekBackSeconds),
+                        showOverlay: false,
+                      ),
+                    );
+                  }
+                : null,
+          ),
+          const SizedBox(width: 4),
+          MobilePlayerTransportButton(
+            icon: isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            emphasized: true,
+            onTap: controlsEnabled
+                ? () {
+                    _showControls();
+                    unawaited(_togglePlayPause(showOverlay: false));
+                  }
+                : null,
+          ),
+          const SizedBox(width: 4),
+          MobilePlayerTransportButton(
+            icon: Icons.fast_forward_rounded,
+            onTap: controlsEnabled
+                ? () {
+                    _showControls();
+                    unawaited(
+                      _seekRelative(
+                        Duration(seconds: _seekForwardSeconds),
+                        showOverlay: false,
+                      ),
+                    );
+                  }
+                : null,
+          ),
+        ],
+      ),
+      rightContent: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            MobilePlayerActionButton(
+              icon: (_danmakuEnabled || _danmakuHeatmap.isNotEmpty)
+                  ? Icons.comment
+                  : Icons.comment_outlined,
+              label: '弹幕',
+              compact: true,
+              onTap: controlsEnabled
+                  ? () {
+                      _showControls(scheduleHide: false);
+                      unawaited(_showDanmakuSheet());
+                    }
+                  : null,
+            ),
+            MobilePlayerActionButton(
+              icon: Icons.subtitles_outlined,
+              label: '字幕',
+              compact: true,
+              onTap: controlsEnabled
+                  ? () {
+                      _showControls(scheduleHide: false);
+                      _showSubtitleTracks(context);
+                    }
+                  : null,
+            ),
+            MobilePlayerActionButton(
+              icon: Icons.format_list_numbered,
+              label: '选集',
+              compact: true,
+              onTap: controlsEnabled && _canShowEpisodePickerButton
+                  ? () {
+                      _showControls(scheduleHide: false);
+                      unawaited(_toggleEpisodePicker());
+                    }
+                  : null,
+            ),
+          ],
+        ),
+      ),
+      onScrubStart: controlsEnabled ? _onScrubStart : null,
+      onSeekPreview: controlsEnabled
+          ? (target) => setState(() => _lastPosition = target)
+          : null,
+      onSeekCommit: controlsEnabled
+          ? (target) async {
+              await _playerService.seek(
+                target,
+                flushBuffer: _flushBufferOnSeek,
+              );
+              _lastPosition = target;
+              _syncDanmakuCursor(target);
+              _maybeReportPlaybackProgress(target, force: true);
+              _onScrubEnd();
+              if (mounted) setState(() {});
+            }
+          : null,
+    );
   }
 
   String _desktopRouteTooltipText() {
@@ -9817,8 +9764,6 @@ class _EpisodeMediaSpec {
     required this.bitrateBitsPerSecond,
   });
 }
-
-enum _PlayerMenuAction { anime4k, switchCore, switchVersion }
 
 enum _OrientationMode { auto, landscape, portrait }
 
