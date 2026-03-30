@@ -40,11 +40,13 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  // Non-TV: 0 home, 1 aggregate, 2 local, 3 settings.
+  // Non-TV: 0 home, 1 aggregate, 2 local player, 3 settings.
   int _index = 0;
   int _tvHomeTabIndex = 0;
   bool _loading = true;
   Future<MediaStats>? _mediaStatsFuture;
+  int _homeRefreshSignal = 0;
+  double _mobileHomeChromeVisibility = 1.0;
 
   @override
   void initState() {
@@ -65,6 +67,14 @@ class _HomePageState extends State<HomePage> {
           await widget.appState.refreshLibraries();
         }
         await widget.appState.loadHome(forceRefresh: true);
+        try {
+          await widget.appState.loadContinueWatching(
+            forceRefresh: true,
+            forceNewRequest: true,
+          );
+        } catch (_) {
+          // Keep the home refresh responsive even if continue watching fails.
+        }
         return;
       }
 
@@ -85,8 +95,35 @@ class _HomePageState extends State<HomePage> {
         unawaited(widget.appState.loadHome(forceRefresh: true));
       }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          if (forceRefresh) {
+            _homeRefreshSignal += 1;
+            _mobileHomeChromeVisibility = 1.0;
+          }
+        });
+      }
     }
+  }
+
+  void _setPageIndex(int index) {
+    if (!mounted) return;
+    setState(() {
+      _index = index;
+      _mobileHomeChromeVisibility = 1.0;
+    });
+  }
+
+  void _handleHomeScroll(double delta, ScrollMetrics metrics) {
+    if (_index != 0) return;
+    final normalizedDelta = delta.isFinite ? delta : 0.0;
+    final next = metrics.pixels <= 0
+        ? 1.0
+        : (_mobileHomeChromeVisibility - (normalizedDelta / 120))
+            .clamp(0.0, 1.0);
+    if ((next - _mobileHomeChromeVisibility).abs() < 0.001) return;
+    setState(() => _mobileHomeChromeVisibility = next);
   }
 
   bool _isTv(BuildContext context) => DeviceType.isTv;
@@ -508,7 +545,9 @@ class _HomePageState extends State<HomePage> {
           _HomeBody(
             appState: widget.appState,
             loading: _loading,
+            refreshSignal: _homeRefreshSignal,
             onRefresh: () => _load(forceRefresh: true),
+            onScrollDelta: _handleHomeScroll,
             isTv: isTv,
             showSearchBar: false,
           ),
@@ -529,6 +568,7 @@ class _HomePageState extends State<HomePage> {
             _HomeBody(
               appState: widget.appState,
               loading: _loading,
+              refreshSignal: _homeRefreshSignal,
               onRefresh: () => _load(forceRefresh: true),
               isTv: true,
               showSearchBar: false,
@@ -655,6 +695,39 @@ class _HomePageState extends State<HomePage> {
                 ],
               )
             : null;
+        final serverName = widget.appState.activeServer?.name ??
+            (widget.appState.servers.isNotEmpty
+                ? '选择服务器'
+                : AppConfigScope.of(context).displayName);
+        final iconUrl = widget.appState.activeServer?.iconUrl;
+        final homeChromeVisibility =
+            _index == 0 ? _mobileHomeChromeVisibility : 1.0;
+        final mobileAppBar = _index == 0
+            ? _MobileHomeAppBar(
+                topInset: MediaQuery.paddingOf(context).top,
+                visibility: homeChromeVisibility,
+                enableBlur: enableBlur,
+                useGlass: usesGlassSurfaces,
+                serverName: serverName,
+                iconUrl: iconUrl,
+                onTapServer: _openServerPage,
+                onTapSearch: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => SearchPage(appState: widget.appState),
+                    ),
+                  );
+                },
+                onTapLibrary: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => LibraryPage(appState: widget.appState),
+                    ),
+                  );
+                },
+                onTapRoute: _showRoutePicker,
+              )
+            : null;
 
         if (useRail) {
           return Scaffold(
@@ -665,7 +738,7 @@ class _HomePageState extends State<HomePage> {
                   enableBlur: enableBlur,
                   child: NavigationRail(
                     selectedIndex: _index,
-                    onDestinationSelected: (i) => setState(() => _index = i),
+                    onDestinationSelected: _setPageIndex,
                     labelType: NavigationRailLabelType.all,
                     destinations: const [
                       NavigationRailDestination(
@@ -695,16 +768,109 @@ class _HomePageState extends State<HomePage> {
         }
         return Scaffold(
           extendBody: _index == 0,
-          appBar: appBar,
+          appBar: mobileAppBar,
           body: pages[_index],
           bottomNavigationBar: _FloatingBottomNav(
             selectedIndex: _index,
-            onSelected: (i) => setState(() => _index = i),
+            onSelected: _setPageIndex,
             enableBlur: enableBlur,
             template: template,
+            visibility: homeChromeVisibility,
           ),
         );
       },
+    );
+  }
+}
+
+class _MobileHomeAppBar extends StatelessWidget implements PreferredSizeWidget {
+  const _MobileHomeAppBar({
+    required this.topInset,
+    required this.visibility,
+    required this.enableBlur,
+    required this.useGlass,
+    required this.serverName,
+    required this.iconUrl,
+    required this.onTapServer,
+    required this.onTapSearch,
+    required this.onTapLibrary,
+    required this.onTapRoute,
+  });
+
+  final double topInset;
+  final double visibility;
+  final bool enableBlur;
+  final bool useGlass;
+  final String serverName;
+  final String? iconUrl;
+  final VoidCallback onTapServer;
+  final VoidCallback onTapSearch;
+  final VoidCallback onTapLibrary;
+  final VoidCallback onTapRoute;
+
+  double get _clampedVisibility => visibility.clamp(0.0, 1.0);
+
+  @override
+  Size get preferredSize =>
+      Size.fromHeight((topInset + 56) * _clampedVisibility);
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = _clampedVisibility;
+    if (progress <= 0.001) return const SizedBox.shrink();
+
+    return ClipRect(
+      child: Align(
+        alignment: Alignment.topCenter,
+        heightFactor: progress,
+        child: Transform.translate(
+          offset: Offset(0, -20 * (1 - progress)),
+          child: Opacity(
+            opacity: progress,
+            child: SizedBox(
+              height: topInset + 56,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(16, topInset + 8, 12, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _ServerGlassButton(
+                        enableBlur: enableBlur,
+                        useGlass: useGlass,
+                        serverName: serverName,
+                        iconUrl: iconUrl,
+                        onTap: onTapServer,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _GlassActionIconButton(
+                      icon: Icons.search,
+                      tooltip: '搜索',
+                      enableBlur: enableBlur,
+                      useGlass: useGlass,
+                      onPressed: onTapSearch,
+                    ),
+                    _GlassActionIconButton(
+                      icon: Icons.video_library_outlined,
+                      tooltip: '媒体库',
+                      enableBlur: enableBlur,
+                      useGlass: useGlass,
+                      onPressed: onTapLibrary,
+                    ),
+                    _GlassActionIconButton(
+                      icon: Icons.alt_route_outlined,
+                      tooltip: '线路',
+                      enableBlur: enableBlur,
+                      useGlass: useGlass,
+                      onPressed: onTapRoute,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1312,12 +1478,14 @@ class _FloatingBottomNav extends StatelessWidget {
     required this.onSelected,
     required this.enableBlur,
     required this.template,
+    this.visibility = 1,
   });
 
   final int selectedIndex;
   final ValueChanged<int> onSelected;
   final bool enableBlur;
   final UiTemplate template;
+  final double visibility;
 
   bool get _usesGlassSurfaces =>
       template == UiTemplate.candyGlass ||
@@ -1329,6 +1497,7 @@ class _FloatingBottomNav extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isDark = scheme.brightness == Brightness.dark;
+    final progress = visibility.clamp(0.0, 1.0);
 
     Widget buildButton({
       required int index,
@@ -1385,15 +1554,27 @@ class _FloatingBottomNav extends StatelessWidget {
       );
     }
 
-    return SafeArea(
-      top: false,
-      left: false,
-      right: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
+    /*
+    return IgnorePointer(
+      ignoring: progress <= 0.02,
+      child: ClipRect(
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          heightFactor: progress,
+          child: Transform.translate(
+            offset: Offset(0, 24 * (1 - progress)),
+            child: Opacity(
+              opacity: progress,
+              child: SafeArea(
+                top: false,
+                left: false,
+                right: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                  /*
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
             buildButton(index: 0, icon: Icons.home_outlined, tooltip: '首页'),
             const SizedBox(width: 14),
             buildButton(index: 1, icon: Icons.hub_outlined, tooltip: '聚合'),
@@ -1405,6 +1586,54 @@ class _FloatingBottomNav extends StatelessWidget {
         ),
       ),
     );
+    */
+    */
+
+    return IgnorePointer(
+      ignoring: progress <= 0.02,
+      child: ClipRect(
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          heightFactor: progress,
+          child: Transform.translate(
+            offset: Offset(0, 24 * (1 - progress)),
+            child: Opacity(
+              opacity: progress,
+              child: SafeArea(
+                top: false,
+                left: false,
+                right: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      buildButton(
+                        index: 0,
+                        icon: Icons.home_outlined,
+                        tooltip: '首页',
+                      ),
+                      const SizedBox(width: 14),
+                      buildButton(
+                        index: 1,
+                        icon: Icons.hub_outlined,
+                        tooltip: '聚合',
+                      ),
+                      const SizedBox(width: 14),
+                      buildButton(
+                        index: 3,
+                        icon: Icons.settings_outlined,
+                        tooltip: '设置',
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -1412,16 +1641,20 @@ class _HomeBody extends StatelessWidget {
   const _HomeBody({
     required this.appState,
     required this.loading,
+    required this.refreshSignal,
     required this.onRefresh,
     required this.isTv,
     required this.showSearchBar,
+    this.onScrollDelta,
   });
 
   final AppState appState;
   final bool loading;
+  final int refreshSignal;
   final Future<void> Function() onRefresh;
   final bool isTv;
   final bool showSearchBar;
+  final void Function(double delta, ScrollMetrics metrics)? onScrollDelta;
 
   @override
   Widget build(BuildContext context) {
@@ -1463,78 +1696,116 @@ class _HomeBody extends StatelessWidget {
         Expanded(
           child: RefreshIndicator(
             onRefresh: onRefresh,
-            child: ListView(
-              padding: EdgeInsets.only(bottom: bottomPadding),
-              children: [
-                const SizedBox(height: 8),
-                if (!isTv)
-                  PluginSlotArea(
-                    appState: appState,
-                    slotId: 'home.feed.beforeSections',
-                    padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
-                    params: const <String, Object?>{
-                      'page': 'home',
-                      'source': 'mobile.home',
-                    },
-                  ),
-                if (isTv) ...[
-                  _ContinueWatchingSection(appState: appState, isTv: true),
-                ] else ...[
-                  if (appState.showHomeRandomRecommendations)
-                    _RandomRecommendSection(appState: appState, isTv: false),
-                  _ContinueWatchingSection(appState: appState, isTv: false),
-                  if (appState.showHomeLibraryQuickAccess)
-                    _LibraryQuickAccessSection(appState: appState, isTv: false),
-                ],
-                if (loading) const LinearProgressIndicator(),
-                for (final sec in sections)
-                  if (sec.items.isNotEmpty) ...[
-                    _HomeSectionHeader(
-                      template: appState.uiTemplate,
-                      title: sec.displayName,
-                      count: sec.key.startsWith('lib_')
-                          ? appState.getTotal(sec.key.substring(4))
-                          : 0,
-                      onTap: () {
-                        if (!sec.key.startsWith('lib_')) return;
-                        final libId = sec.key.substring(4);
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => LibraryItemsPage(
-                              appState: appState,
-                              parentId: libId,
-                              title: sec.displayName,
-                              isTv: isTv,
-                            ),
-                          ),
-                        );
+            child: NotificationListener<ScrollNotification>(
+              onNotification: (notification) {
+                if (isTv ||
+                    onScrollDelta == null ||
+                    notification.depth != 0 ||
+                    notification.metrics.axis != Axis.vertical) {
+                  return false;
+                }
+                if (notification is ScrollUpdateNotification) {
+                  final delta = notification.scrollDelta;
+                  if (delta != null && delta != 0) {
+                    onScrollDelta!(delta, notification.metrics);
+                  }
+                } else if (notification is OverscrollNotification &&
+                    notification.overscroll != 0) {
+                  onScrollDelta!(notification.overscroll, notification.metrics);
+                }
+                return false;
+              },
+              child: ListView(
+                padding: EdgeInsets.only(bottom: bottomPadding),
+                children: [
+                  const SizedBox(height: 8),
+                  if (!isTv)
+                    PluginSlotArea(
+                      appState: appState,
+                      slotId: 'home.feed.beforeSections',
+                      padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+                      params: const <String, Object?>{
+                        'page': 'home',
+                        'source': 'mobile.home',
                       },
                     ),
-                    _HomeSectionCarousel(
-                      items: sec.items,
+                  if (isTv) ...[
+                    _ContinueWatchingSection(
+                      key: ValueKey<String>('continue-tv-$refreshSignal'),
+                      appState: appState,
+                      isTv: true,
+                    ),
+                  ] else ...[
+                    if (appState.showHomeRandomRecommendations)
+                      _RandomRecommendSection(
+                        key: ValueKey<String>('random-$refreshSignal'),
+                        appState: appState,
+                        isTv: false,
+                      ),
+                    _ContinueWatchingSection(
+                      key: ValueKey<String>('continue-$refreshSignal'),
+                      appState: appState,
+                      isTv: false,
+                    ),
+                    if (appState.showHomeLibraryQuickAccess)
+                      _LibraryQuickAccessSection(
+                          appState: appState, isTv: false),
+                  ],
+                  if (loading) const LinearProgressIndicator(),
+                  for (final sec in sections)
+                    if (sec.items.isNotEmpty) ...[
+                      _HomeSectionHeader(
+                        template: appState.uiTemplate,
+                        title: sec.displayName,
+                        count: sec.key.startsWith('lib_')
+                            ? appState.getTotal(sec.key.substring(4))
+                            : 0,
+                        onTap: () {
+                          if (!sec.key.startsWith('lib_')) return;
+                          final libId = sec.key.substring(4);
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => LibraryItemsPage(
+                                appState: appState,
+                                parentId: libId,
+                                title: sec.displayName,
+                                isTv: isTv,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      _HomeSectionCarousel(
+                        items: sec.items,
+                        appState: appState,
+                        isTv: isTv,
+                      ),
+                    ] else
+                      const SizedBox.shrink(),
+                  if (sections.every((e) => e.items.isEmpty) && !loading)
+                    const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Center(child: Text('暂无可展示内容')),
+                    ),
+                  if (!isTv)
+                    PluginSlotArea(
+                      appState: appState,
+                      slotId: 'home.feed.afterSections',
+                      padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+                      params: const <String, Object?>{
+                        'page': 'home',
+                        'source': 'mobile.home',
+                      },
+                    ),
+                  const SizedBox(height: 8),
+                  if (!isTv)
+                    _MediaStatsSection(
+                      key: ValueKey<String>('stats-$refreshSignal'),
                       appState: appState,
                       isTv: isTv,
                     ),
-                  ] else
-                    const SizedBox.shrink(),
-                if (sections.every((e) => e.items.isEmpty) && !loading)
-                  const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Center(child: Text('暂无可展示内容')),
-                  ),
-                if (!isTv)
-                  PluginSlotArea(
-                    appState: appState,
-                    slotId: 'home.feed.afterSections',
-                    padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
-                    params: const <String, Object?>{
-                      'page': 'home',
-                      'source': 'mobile.home',
-                    },
-                  ),
-                const SizedBox(height: 8),
-                if (!isTv) _MediaStatsSection(appState: appState, isTv: isTv),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -1544,7 +1815,11 @@ class _HomeBody extends StatelessWidget {
 }
 
 class _MediaStatsSection extends StatefulWidget {
-  const _MediaStatsSection({required this.appState, required this.isTv});
+  const _MediaStatsSection({
+    super.key,
+    required this.appState,
+    required this.isTv,
+  });
 
   final AppState appState;
   final bool isTv;
@@ -1560,12 +1835,6 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
   void initState() {
     super.initState();
     _future = widget.appState.loadMediaStats();
-  }
-
-  void _reload() {
-    setState(
-      () => _future = widget.appState.loadMediaStats(forceRefresh: true),
-    );
   }
 
   Widget _statCard({
@@ -1662,6 +1931,7 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              /*
               if (hasError)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
@@ -1673,14 +1943,35 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
-                        ),
-                      ),
-                      TextButton.icon(
+                    ),
+                  ),
+                if (false)
+                TextButton.icon(
                         onPressed: _reload,
                         icon: const Icon(Icons.refresh),
                         label: const Text('重试'),
                       ),
                     ],
+                  ),
+                ),
+                  */
+              /*
+                  child: Text(
+                    '统计加载失败，下拉刷新后会重试',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              */
+              if (hasError)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    '统计加载失败，下拉刷新后会重试',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
               LayoutBuilder(
@@ -1729,6 +2020,7 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
                   );
                 },
               ),
+              /*
               Align(
                 alignment: Alignment.centerRight,
                 child: IconButton(
@@ -1737,6 +2029,7 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
                   icon: const Icon(Icons.refresh),
                 ),
               ),
+              */
             ],
           ),
         );
@@ -1746,7 +2039,11 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
 }
 
 class _RandomRecommendSection extends StatefulWidget {
-  const _RandomRecommendSection({required this.appState, required this.isTv});
+  const _RandomRecommendSection({
+    super.key,
+    required this.appState,
+    required this.isTv,
+  });
 
   final AppState appState;
   final bool isTv;
@@ -1758,6 +2055,7 @@ class _RandomRecommendSection extends StatefulWidget {
 
 class _ContinueWatchingSection extends StatefulWidget {
   const _ContinueWatchingSection({
+    super.key,
     required this.appState,
     required this.isTv,
   });
@@ -1883,11 +2181,17 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection>
                     ),
                   ),
                 ),
+                /*
+                /*
+                /*
                 TextButton.icon(
                   onPressed: _reload,
                   icon: const Icon(Icons.refresh),
                   label: const Text('重试'),
                 ),
+                */
+                */
+                */
               ],
             ),
           );
@@ -1963,11 +2267,6 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection>
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                      IconButton(
-                        tooltip: '刷新',
-                        onPressed: loading ? null : _reload,
-                        icon: const Icon(Icons.refresh),
                       ),
                     ],
                   ),
@@ -2345,7 +2644,6 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
   final PageController _controller = PageController();
   Future<List<MediaItem>>? _future;
   int _page = 0;
-  Set<String> _lastImageUrls = <String>{};
 
   @override
   void initState() {
@@ -2387,7 +2685,6 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
         ),
       );
     }
-    _lastImageUrls = urls;
     if (!mounted) return picked;
     for (final url in urls) {
       // ignore: unawaited_futures
@@ -2402,26 +2699,6 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
     }
 
     return picked;
-  }
-
-  void _reload() {
-    for (final url in _lastImageUrls) {
-      // ignore: unawaited_futures
-      CoverCacheManager.instance.removeFile(url);
-      PaintingBinding.instance.imageCache.evict(
-        CachedNetworkImageProvider(
-          url,
-          cacheManager: CoverCacheManager.instance,
-          headers: {'User-Agent': LinHttpClientFactory.userAgent},
-        ),
-      );
-    }
-    _lastImageUrls = <String>{};
-    setState(() {
-      _page = 0;
-      _future = _fetch(forceRefresh: true);
-    });
-    if (_controller.hasClients) _controller.jumpToPage(0);
   }
 
   String _yearOf(MediaItem item) {
@@ -2459,11 +2736,6 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
-                ),
-                TextButton.icon(
-                  onPressed: _reload,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('重试'),
                 ),
               ],
             ),
@@ -2538,6 +2810,7 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            /*
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
               child: Row(
@@ -2558,6 +2831,8 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
                 ],
               ),
             ),
+            */
+            const SizedBox(height: 6),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: AspectRatio(

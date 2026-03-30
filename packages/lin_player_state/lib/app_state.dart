@@ -203,6 +203,8 @@ class AppState extends ChangeNotifier {
   static const _kServerHomeCachePrefix = 'serverHomeCache_v1:';
   static const _kServerContinueWatchingCachePrefix =
       'serverContinueWatchingCache_v1:';
+  static const _kServerRandomRecommendationsCachePrefix =
+      'serverRandomRecommendationsCache_v1:';
 
   static const String _kDefaultServerIconLibraryUrl =
       'https://juhe.greentea520.xyz/share/78aspf.json';
@@ -252,6 +254,7 @@ class AppState extends ChangeNotifier {
   final Map<String, int> _itemsTotal = {};
   final Map<String, List<MediaItem>> _homeSections = {};
   List<MediaItem>? _randomRecommendations;
+  DateTime? _randomRecommendationsFetchedAt;
   Future<List<MediaItem>>? _randomRecommendationsInFlight;
   List<MediaItem>? _continueWatching;
   Future<List<MediaItem>>? _continueWatchingInFlight;
@@ -366,10 +369,13 @@ class AppState extends ChangeNotifier {
       '$_kServerHomeCachePrefix$serverId';
   static String _continueWatchingCacheKey(String serverId) =>
       '$_kServerContinueWatchingCachePrefix$serverId';
+  static String _randomRecommendationsCacheKey(String serverId) =>
+      '$_kServerRandomRecommendationsCachePrefix$serverId';
 
   void _restoreServerCaches(SharedPreferences prefs, String serverId) {
     _restoreLibrariesFromCache(prefs, serverId);
     _restoreHomeFromCache(prefs, serverId);
+    _restoreRandomRecommendationsFromCache(prefs, serverId);
     _restoreContinueWatchingFromCache(prefs, serverId);
   }
 
@@ -463,6 +469,39 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  void _restoreRandomRecommendationsFromCache(
+    SharedPreferences prefs,
+    String serverId,
+  ) {
+    final raw = prefs.getString(_randomRecommendationsCacheKey(serverId));
+    if (raw == null || raw.trim().isEmpty) return;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return;
+
+      final fetchedAtMs = decoded['fetchedAtMs'];
+      final itemsRaw = decoded['items'];
+      if (itemsRaw is! List) return;
+
+      final items = <MediaItem>[];
+      for (final entry in itemsRaw) {
+        final map = _coerceStringKeyedMap(entry);
+        if (map == null) continue;
+        final item = MediaItem.fromJson(map);
+        if (item.id.trim().isEmpty) continue;
+        items.add(item);
+      }
+
+      final fetchedAtValue = fetchedAtMs is num ? fetchedAtMs.toInt() : null;
+      _randomRecommendations = items;
+      _randomRecommendationsFetchedAt = fetchedAtValue == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(fetchedAtValue);
+    } catch (_) {
+      // ignore broken cache
+    }
+  }
+
   Future<void> _persistLibrariesCache() async {
     final serverId = activeServerId;
     if (serverId == null) return;
@@ -505,6 +544,33 @@ class AppState extends ChangeNotifier {
     }
     await prefs.setString(
         _continueWatchingCacheKey(serverId), jsonEncode(data));
+  }
+
+  Future<void> _persistRandomRecommendationsCache() async {
+    final serverId = activeServerId;
+    if (serverId == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final items = _randomRecommendations;
+    final fetchedAt = _randomRecommendationsFetchedAt;
+    if (items == null || fetchedAt == null) {
+      await prefs.remove(_randomRecommendationsCacheKey(serverId));
+      return;
+    }
+
+    final data = <String, dynamic>{
+      'fetchedAtMs': fetchedAt.millisecondsSinceEpoch,
+      'items': items.map((item) => item.toJson()).toList(growable: false),
+    };
+    await prefs.setString(
+      _randomRecommendationsCacheKey(serverId),
+      jsonEncode(data),
+    );
+  }
+
+  bool _isRandomRecommendationsCacheFresh() {
+    final fetchedAt = _randomRecommendationsFetchedAt;
+    if (fetchedAt == null) return false;
+    return DateTime.now().difference(fetchedAt) < const Duration(days: 1);
   }
 
   void _resetPerServerCaches() {
@@ -1934,6 +2000,7 @@ class AppState extends ChangeNotifier {
     _itemsTotal.clear();
     _homeSections.clear();
     _randomRecommendations = null;
+    _randomRecommendationsFetchedAt = null;
     _randomRecommendationsInFlight = null;
     _continueWatching = null;
     _continueWatchingInFlight = null;
@@ -2130,6 +2197,7 @@ class AppState extends ChangeNotifier {
     _itemsTotal.clear();
     _homeSections.clear();
     _randomRecommendations = null;
+    _randomRecommendationsFetchedAt = null;
     _randomRecommendationsInFlight = null;
     _continueWatching = null;
     _continueWatchingInFlight = null;
@@ -2256,6 +2324,7 @@ class AppState extends ChangeNotifier {
         _itemsTotal.clear();
         _homeSections.clear();
         _randomRecommendations = null;
+        _randomRecommendationsFetchedAt = null;
         _randomRecommendationsInFlight = null;
         _continueWatching = null;
         _continueWatchingInFlight = null;
@@ -2502,6 +2571,7 @@ class AppState extends ChangeNotifier {
       _itemsTotal.clear();
       _homeSections.clear();
       _randomRecommendations = null;
+      _randomRecommendationsFetchedAt = null;
       _randomRecommendationsInFlight = null;
       _continueWatching = null;
       _continueWatchingInFlight = null;
@@ -2536,6 +2606,7 @@ class AppState extends ChangeNotifier {
       _itemsTotal.clear();
       _homeSections.clear();
       _randomRecommendations = null;
+      _randomRecommendationsFetchedAt = null;
       _randomRecommendationsInFlight = null;
       _continueWatching = null;
       _continueWatchingInFlight = null;
@@ -3008,6 +3079,7 @@ class AppState extends ChangeNotifier {
       await _persistLibrariesCache();
       _itemsCache.clear();
       _randomRecommendations = null;
+      _randomRecommendationsFetchedAt = null;
       _randomRecommendationsInFlight = null;
       _error = null;
     } catch (e) {
@@ -3137,18 +3209,25 @@ class AppState extends ChangeNotifier {
   Future<List<MediaItem>> loadRandomRecommendations({
     bool forceRefresh = false,
   }) {
+    final cached = _randomRecommendations;
     if (!forceRefresh) {
-      final cached = _randomRecommendations;
-      if (cached != null) return Future.value(cached);
+      if (cached != null && _isRandomRecommendationsCacheFresh()) {
+        return Future.value(cached);
+      }
       final inFlight = _randomRecommendationsInFlight;
       if (inFlight != null) return inFlight;
     }
 
     final future = _fetchRandomRecommendations();
     _randomRecommendationsInFlight = future;
-    return future.then((items) {
+    return future.then((items) async {
       _randomRecommendations = items;
+      _randomRecommendationsFetchedAt = DateTime.now();
+      await _persistRandomRecommendationsCache();
       return items;
+    }).catchError((error) {
+      if (!forceRefresh && cached != null) return cached;
+      throw error;
     }).whenComplete(() {
       if (_randomRecommendationsInFlight == future) {
         _randomRecommendationsInFlight = null;

@@ -12,6 +12,7 @@ import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'mobile_ui/show_detail/episode_detail_mobile_view.dart';
+import 'mobile_ui/show_detail/movie_detail_mobile_view.dart';
 import 'mobile_ui/show_detail/mobile_text_widgets.dart';
 import 'mobile_ui/show_detail/show_detail_mobile_view.dart';
 import 'plugins/plugin_slot_area.dart';
@@ -34,6 +35,12 @@ class _DetailUiTokens {
   static const horizontalGap = 12.0;
   static const horizontalEpisodeCardWidth = 288.0;
   static const horizontalEpisodeStripHeight = 206.0;
+}
+
+enum _MovieMoreAction {
+  togglePlayed,
+  toggleFavorite,
+  togglePlayerCore,
 }
 
 String _mediaYearText(MediaItem item) {
@@ -875,6 +882,186 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     }
   }
 
+  Future<void> _showMovieMoreSheet(BuildContext context) async {
+    final played = _detail?.played ?? false;
+    final canSwitchCore =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+    final action = await showModalBottomSheet<_MovieMoreAction>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Icon(
+                  played ? Icons.radio_button_unchecked : Icons.check_circle,
+                ),
+                title: Text(played ? '标记为未播放' : '标记为已播放'),
+                onTap: _markBusy
+                    ? null
+                    : () => Navigator.of(sheetContext)
+                        .pop(_MovieMoreAction.togglePlayed),
+              ),
+              ListTile(
+                leading: Icon(
+                  _localFavorite
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
+                  color: _localFavorite ? Colors.pinkAccent : null,
+                ),
+                title: Text(_localFavorite ? '取消本地收藏' : '加入本地收藏'),
+                onTap: !_favoriteLoaded
+                    ? null
+                    : () => Navigator.of(sheetContext)
+                        .pop(_MovieMoreAction.toggleFavorite),
+              ),
+              if (canSwitchCore)
+                ListTile(
+                  leading: const Icon(Icons.memory_rounded),
+                  title: Text(
+                    widget.appState.playerCore == PlayerCore.exo
+                        ? '切换到 mpv'
+                        : '切换到 ExoPlayer',
+                  ),
+                  onTap: () => Navigator.of(sheetContext)
+                      .pop(_MovieMoreAction.togglePlayerCore),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (!mounted || action == null) return;
+
+    switch (action) {
+      case _MovieMoreAction.togglePlayed:
+        if (!_markBusy) {
+          await _toggleItemPlayedMark();
+        }
+        break;
+      case _MovieMoreAction.toggleFavorite:
+        if (_favoriteLoaded) {
+          await _toggleLocalFavorite();
+        }
+        break;
+      case _MovieMoreAction.togglePlayerCore:
+        await _togglePlayerCore();
+        break;
+    }
+  }
+
+  List<String> _movieMediaBadges(
+    MediaItem item, {
+    required Duration? runtime,
+    Map<String, dynamic>? mediaSource,
+  }) {
+    final badges = <String>[
+      if (_yearText(item).isNotEmpty) _yearText(item),
+      if (item.officialRating?.trim().isNotEmpty == true)
+        item.officialRating!.trim(),
+      ...item.genres.take(2),
+      if (item.communityRating != null &&
+          item.communityRating!.isFinite &&
+          item.communityRating! > 0)
+        '评分 ${item.communityRating!.toStringAsFixed(1)}',
+    ];
+
+    final resolution = _ShowDetailPageState._mediaSourceResolutionText(
+      mediaSource,
+    );
+    if (resolution.isNotEmpty) {
+      badges.add('分辨率 $resolution');
+    }
+
+    final bitrate = _ShowDetailPageState._mediaSourceBitrateText(
+      mediaSource,
+      fallbackSizeBytes: item.sizeBytes,
+      fallbackRuntimeTicks: item.runTimeTicks,
+    );
+    if (bitrate.isNotEmpty) {
+      badges.add('码率 $bitrate');
+    }
+
+    final size = _ShowDetailPageState._mediaSourceSizeText(
+      mediaSource,
+      fallbackSizeBytes: item.sizeBytes,
+    );
+    if (size.isNotEmpty) {
+      badges.add('大小 $size');
+    }
+
+    final runtimeText = _movieRuntimeText(runtime);
+    if (runtimeText.isNotEmpty) {
+      badges.add('时长 $runtimeText');
+    }
+
+    return badges;
+  }
+
+  String _movieRuntimeText(Duration? runtime) {
+    if (runtime == null || runtime <= Duration.zero) return '';
+    return _fmt(runtime);
+  }
+
+  String _movieSelectedAudioText(Map<String, dynamic> mediaSource) {
+    final audioStreams = _ShowDetailPageState._streamsOfType(
+      mediaSource,
+      'Audio',
+    );
+    final defaultAudio = _ShowDetailPageState._defaultStream(audioStreams);
+    final selectedAudio = _selectedAudioStreamIndex != null
+        ? audioStreams.firstWhere(
+            (stream) =>
+                _ShowDetailPageState._asInt(stream['Index']) ==
+                _selectedAudioStreamIndex,
+            orElse: () => defaultAudio ?? const <String, dynamic>{},
+          )
+        : defaultAudio;
+    if (selectedAudio == null || selectedAudio.isEmpty) return '默认';
+
+    return _ShowDetailPageState._streamLabel(
+          selectedAudio,
+          includeCodec: false,
+        ) +
+        (selectedAudio == defaultAudio ? ' (默认)' : '');
+  }
+
+  String _movieSelectedSubtitleText(Map<String, dynamic> mediaSource) {
+    final subtitleStreams = _ShowDetailPageState._streamsOfType(
+      mediaSource,
+      'Subtitle',
+    );
+    final defaultSubtitle =
+        _ShowDetailPageState._defaultStream(subtitleStreams);
+    final Map<String, dynamic>? selectedSubtitle;
+    if (_selectedSubtitleStreamIndex == -1) {
+      selectedSubtitle = null;
+    } else if (_selectedSubtitleStreamIndex != null) {
+      selectedSubtitle = subtitleStreams.firstWhere(
+        (stream) =>
+            _ShowDetailPageState._asInt(stream['Index']) ==
+            _selectedSubtitleStreamIndex,
+        orElse: () => defaultSubtitle ?? const <String, dynamic>{},
+      );
+    } else {
+      selectedSubtitle = defaultSubtitle;
+    }
+
+    final hasSubtitles = subtitleStreams.isNotEmpty;
+    if (_selectedSubtitleStreamIndex == -1) return '关闭';
+    if (selectedSubtitle != null && selectedSubtitle.isNotEmpty) {
+      return _ShowDetailPageState._streamLabel(
+        selectedSubtitle,
+        includeCodec: false,
+      );
+    }
+    return hasSubtitles ? '默认' : '关闭';
+  }
+
   Widget _heroActionButton(
     BuildContext context, {
     required IconData icon,
@@ -960,10 +1147,20 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     required PlaybackInfoResult? playInfo,
     required bool enableBlur,
     required String heroImageUrl,
-    required bool showFloatingSettings,
   }) {
+    if (!isSeries) {
+      return _buildMobileMovieDetailPage(
+        context,
+        item: item,
+        access: access,
+        runtime: runtime,
+        playInfo: playInfo,
+        enableBlur: enableBlur,
+      );
+    }
+
     final sections = <Widget>[
-      if (isSeries && _seasons.isNotEmpty)
+      if (_seasons.isNotEmpty)
         _mobileSeriesEpisodesSection(
           context,
           enableBlur: enableBlur,
@@ -977,8 +1174,6 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           enableBlur: enableBlur,
           people: item.people,
         ),
-      if (!isSeries && playInfo != null && !showFloatingSettings)
-        _moviePlaybackOptionsCard(context, playInfo),
       if (_chapters.isNotEmpty)
         _detailGlassPanel(
           enableBlur: enableBlur,
@@ -1073,17 +1268,193 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
         context,
         item: item,
         access: access,
-        isSeries: isSeries,
+        isSeries: true,
         runtime: runtime,
       ),
       sections: sections,
-      bottomDock: showFloatingSettings && playInfo != null
-          ? _floatingPlaybackSettingsDock(
-              context,
-              playInfo,
-              enableBlur: enableBlur,
-            )
-          : null,
+      bottomDock: null,
+    );
+  }
+
+  Widget _buildMobileMovieDetailPage(
+    BuildContext context, {
+    required MediaItem item,
+    required ServerAccess? access,
+    required Duration? runtime,
+    required PlaybackInfoResult? playInfo,
+    required bool enableBlur,
+  }) {
+    final currentMediaSource = playInfo == null
+        ? null
+        : _ShowDetailPageState._findMediaSource(
+            playInfo,
+            _selectedMediaSourceId,
+          );
+    final audioStreams = currentMediaSource == null
+        ? const <Map<String, dynamic>>[]
+        : _ShowDetailPageState._streamsOfType(currentMediaSource, 'Audio');
+    final subtitleStreams = currentMediaSource == null
+        ? const <Map<String, dynamic>>[]
+        : _ShowDetailPageState._streamsOfType(currentMediaSource, 'Subtitle');
+    final coverUrl = access == null
+        ? ''
+        : access.adapter.imageUrl(
+            access.auth,
+            itemId: item.id,
+            imageType: 'Primary',
+            maxWidth: 900,
+          );
+    final backdropUrl = access == null
+        ? ''
+        : access.adapter.imageUrl(
+            access.auth,
+            itemId: item.id,
+            imageType: 'Backdrop',
+            maxWidth: 1600,
+          );
+    final playLabel = item.playbackPositionTicks > 0
+        ? '继续播放 ${_fmtClock(_ticksToDuration(item.playbackPositionTicks))}'
+        : '播放';
+    final versionValue = playInfo == null
+        ? '加载中'
+        : (currentMediaSource == null
+            ? '暂无版本'
+            : _ShowDetailPageState._mediaSourceTitle(currentMediaSource));
+    final audioValue = currentMediaSource == null
+        ? '默认'
+        : _movieSelectedAudioText(currentMediaSource);
+    final subtitleValue = currentMediaSource == null
+        ? (_selectedSubtitleStreamIndex == -1 ? '关闭' : '默认')
+        : _movieSelectedSubtitleText(currentMediaSource);
+
+    final sections = <Widget>[
+      if (playInfo != null)
+        _episodeMediaInfoSection(
+          context,
+          playInfo,
+          selectedMediaSourceId: _selectedMediaSourceId,
+        ),
+      if (item.people.isNotEmpty && access != null)
+        _mobilePeopleSection(
+          context,
+          access: access,
+          enableBlur: enableBlur,
+          people: item.people,
+        ),
+      if (_chapters.isNotEmpty)
+        _detailGlassPanel(
+          enableBlur: enableBlur,
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+          radius: 22,
+          showBorder: false,
+          child: _chaptersSection(context, _chapters),
+        ),
+      if (_similar.isNotEmpty)
+        _detailGlassPanel(
+          enableBlur: enableBlur,
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+          radius: 22,
+          showBorder: false,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _sectionTitle(context, '更多类似'),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 236,
+                child: _withHorizontalEdgeFade(
+                  context,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _similar.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 12),
+                    itemBuilder: (context, index) {
+                      final similar = _similar[index];
+                      final imageUrl = similar.hasImage && access != null
+                          ? access.adapter.imageUrl(
+                              access.auth,
+                              itemId: similar.id,
+                              maxWidth: 400,
+                            )
+                          : null;
+                      final year = _yearText(similar);
+                      final badge = similar.type == 'Movie'
+                          ? '电影'
+                          : (similar.type == 'Series' ? '剧集' : '');
+                      return _HoverScale(
+                        child: SizedBox(
+                          width: 138,
+                          child: MediaPosterTile(
+                            title: similar.name,
+                            titleMaxLines: 2,
+                            imageUrl: imageUrl,
+                            year: year,
+                            rating: similar.communityRating,
+                            badgeText: badge,
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => ShowDetailPage(
+                                    itemId: similar.id,
+                                    title: similar.name,
+                                    appState: widget.appState,
+                                    server: widget.server,
+                                    isTv: widget.isTv,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      _detailGlassPanel(
+        enableBlur: enableBlur,
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+        radius: 22,
+        showBorder: false,
+        child: _externalLinksSection(context, item, widget.appState),
+      ),
+      PluginSlotArea(
+        appState: widget.appState,
+        slotId: 'detail.sections.bottom',
+        params: _buildDetailPluginParams(item),
+      ),
+    ];
+
+    return MovieDetailMobileView(
+      title: item.name,
+      overview: item.overview.trim(),
+      runtimeText: _movieRuntimeText(runtime),
+      mediaBadges: _movieMediaBadges(
+        item,
+        runtime: runtime,
+        mediaSource: currentMediaSource,
+      ),
+      coverUrl: coverUrl,
+      backdropUrl: backdropUrl,
+      versionValue: versionValue,
+      audioValue: audioValue,
+      subtitleValue: subtitleValue,
+      playLabel: playLabel,
+      onRefresh: _load,
+      onPlay: () => _playMovie(item),
+      onMore: () => _showMovieMoreSheet(context),
+      onPickVersion:
+          playInfo == null ? null : () => _pickMediaSource(context, playInfo),
+      onPickAudio: audioStreams.isEmpty
+          ? null
+          : () => _pickAudioStream(context, currentMediaSource!),
+      onPickSubtitle: subtitleStreams.isEmpty
+          ? null
+          : () => _pickSubtitleStream(context, currentMediaSource!),
+      sections: sections,
     );
   }
 
@@ -1241,10 +1612,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                 ],
                 if (overview.isNotEmpty) ...[
                   const SizedBox(height: 10),
-                  Text(
+                  ExpandableText(
                     overview,
-                    maxLines: 5,
-                    overflow: TextOverflow.ellipsis,
+                    collapsedLines: 5,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: Colors.white.withValues(alpha: 0.78),
                       height: 1.4,
@@ -4339,7 +4709,6 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       playInfo: playInfo,
       enableBlur: enableBlur,
       heroImageUrl: hero,
-      showFloatingSettings: showFloatingSettings,
     );
 
     // ignore: dead_code

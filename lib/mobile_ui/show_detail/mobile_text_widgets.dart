@@ -197,6 +197,14 @@ class _ExpandableTextState extends State<ExpandableText> {
   bool _expanded = false;
 
   @override
+  void didUpdateWidget(covariant ExpandableText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text && _expanded) {
+      setState(() => _expanded = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final style = widget.style ?? DefaultTextStyle.of(context).style;
 
