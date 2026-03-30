@@ -20,10 +20,8 @@ import 'package:video_player_platform_interface/video_player_platform_interface.
 import 'play_network_page.dart';
 import 'server_adapters/server_access.dart';
 import 'services/app_route_observer.dart';
-import 'services/subtitle_support.dart';
 import 'tv/tv_focusable.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
-import 'widgets/list_picker_dialog.dart';
 import 'widgets/mobile_player_status_bars.dart';
 
 class ExoPlayNetworkPage extends StatefulWidget {
@@ -171,10 +169,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   final List<String> _playbackRouteHistory = <String>[];
 
   // Subtitle options (EXO).
-  double _subtitleDelaySeconds = 0.0;
-  double _subtitleFontSize = 18.0;
-  int _subtitlePositionStep = 5; // 0..20, maps to padding-bottom in 5px steps.
-  bool _subtitleBold = false;
+  final double _subtitleDelaySeconds = 0.0;
+  final double _subtitleFontSize = 18.0;
+  final int _subtitlePositionStep = 5; // 0..20, maps to padding-bottom in 5px steps.
+  final bool _subtitleBold = false;
   String _subtitleText = '';
   bool _subtitlePollInFlight = false;
 
@@ -216,6 +214,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   MediaItem? _episodePickerItem;
   bool _episodePickerItemLoading = false;
   bool _episodePickerVisible = false;
+  _MobilePlayerPanel? _mobilePanel;
   bool _episodePickerLoading = false;
   String? _episodePickerError;
   List<MediaItem> _episodeSeasons = const [];
@@ -444,16 +443,37 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
   Future<void> _toggleEpisodePicker() async {
     if (_episodePickerVisible) {
-      setState(() => _episodePickerVisible = false);
+      _closeMobilePanels(scheduleHide: false);
       return;
     }
 
     _showControls(scheduleHide: false);
     setState(() {
+      _mobilePanel = null;
       _episodePickerVisible = true;
       _episodePickerError = null;
     });
     await _ensureEpisodePickerLoaded();
+  }
+
+  bool get _mobileSidePanelVisible =>
+      _mobilePanel != null || _episodePickerVisible;
+
+  void _openMobilePanel(_MobilePlayerPanel panel) {
+    _showControls(scheduleHide: false);
+    setState(() {
+      _mobilePanel = panel;
+      _episodePickerVisible = false;
+    });
+  }
+
+  void _closeMobilePanels({bool scheduleHide = true}) {
+    if (!_mobileSidePanelVisible) return;
+    setState(() {
+      _mobilePanel = null;
+      _episodePickerVisible = false;
+    });
+    _showControls(scheduleHide: scheduleHide);
   }
 
   Future<void> _ensureEpisodePickerLoaded() async {
@@ -898,9 +918,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                           : selectedSeason!.id,
                                       maxWidth: 520,
                                     );
-                                    final title = e.name.trim().isNotEmpty
-                                        ? e.name.trim()
-                                        : '第$epNo集';
                                     return Material(
                                       color:
                                           Colors.black.withValues(alpha: 0.18),
@@ -1010,16 +1027,98 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                               ),
                                               const SizedBox(width: 12),
                                               Expanded(
-                                                child: Text(
-                                                  title,
-                                                  maxLines: 2,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.w600,
-                                                  ),
+                                                child: Builder(
+                                                  builder: (context) {
+                                                    final sizeBytes =
+                                                        e.sizeBytes;
+                                                    final ticks =
+                                                        e.runTimeTicks ?? 0;
+                                                    final seconds =
+                                                        ticks > 0
+                                                            ? ticks /
+                                                                10000000.0
+                                                            : 0.0;
+                                                    final bitrate =
+                                                        sizeBytes != null &&
+                                                                sizeBytes > 0 &&
+                                                                seconds > 0
+                                                            ? ((sizeBytes * 8) /
+                                                                    seconds)
+                                                                .round()
+                                                            : null;
+                                                    String formatBytes(
+                                                        int? value) {
+                                                      if (value == null ||
+                                                          value <= 0) {
+                                                        return '--';
+                                                      }
+                                                      const kb = 1024;
+                                                      const mb = 1024 * 1024;
+                                                      const gb =
+                                                          1024 * 1024 * 1024;
+                                                      if (value >= gb) {
+                                                        return '${(value / gb).toStringAsFixed(1)} GB';
+                                                      }
+                                                      if (value >= mb) {
+                                                        return '${(value / mb).toStringAsFixed(1)} MB';
+                                                      }
+                                                      if (value >= kb) {
+                                                        return '${(value / kb).toStringAsFixed(1)} KB';
+                                                      }
+                                                      return '$value B';
+                                                    }
+
+                                                    String formatBitrate(
+                                                        int? value) {
+                                                      if (value == null ||
+                                                          value <= 0) {
+                                                        return '--';
+                                                      }
+                                                      return '${(value / 1000000).toStringAsFixed(1)} Mbps';
+                                                    }
+
+                                                    return Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      mainAxisAlignment:
+                                                          MainAxisAlignment
+                                                              .center,
+                                                      children: [
+                                                        Text(
+                                                          'E${epNo.toString().padLeft(2, '0')}',
+                                                          style:
+                                                              const TextStyle(
+                                                            color: Colors.white,
+                                                            fontSize: 14,
+                                                            fontWeight:
+                                                                FontWeight.w800,
+                                                            letterSpacing: 0.3,
+                                                          ),
+                                                        ),
+                                                        const SizedBox(
+                                                            height: 8),
+                                                        Wrap(
+                                                          spacing: 6,
+                                                          runSpacing: 6,
+                                                          children: [
+                                                            MobilePlayerInfoTag(
+                                                              label:
+                                                                  formatBytes(
+                                                                sizeBytes,
+                                                              ),
+                                                            ),
+                                                            MobilePlayerInfoTag(
+                                                              label:
+                                                                  formatBitrate(
+                                                                bitrate,
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ],
+                                                    );
+                                                  },
                                                 ),
                                               ),
                                             ],
@@ -1754,203 +1853,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     if (mounted) setState(() {});
   }
 
-  Future<void> _showDanmakuSheet() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) {
-        var onlineLoading = false;
-        var manualLoading = false;
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            final hasSources = _danmakuSources.isNotEmpty;
-            final selectedName = (_danmakuSourceIndex >= 0 &&
-                    _danmakuSourceIndex < _danmakuSources.length)
-                ? _danmakuSources[_danmakuSourceIndex].name
-                : '未选择';
-
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '弹幕',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                      ),
-                      TextButton.icon(
-                        onPressed: () async {
-                          await _pickDanmakuFile();
-                          setSheetState(() {});
-                        },
-                        icon: const Icon(Icons.upload_file),
-                        label: const Text('本地'),
-                      ),
-                      const SizedBox(width: 8),
-                      TextButton.icon(
-                        onPressed: onlineLoading || _loading
-                            ? null
-                            : () async {
-                                onlineLoading = true;
-                                setSheetState(() {});
-                                try {
-                                  await _loadOnlineDanmakuForNetwork(
-                                    showToast: true,
-                                  );
-                                } finally {
-                                  onlineLoading = false;
-                                  setSheetState(() {});
-                                }
-                              },
-                        icon: onlineLoading
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.cloud_download_outlined),
-                        label: const Text('在线'),
-                      ),
-                      const SizedBox(width: 8),
-                      TextButton.icon(
-                        onPressed: manualLoading || onlineLoading || _loading
-                            ? null
-                            : () async {
-                                manualLoading = true;
-                                setSheetState(() {});
-                                try {
-                                  await _manualMatchOnlineDanmakuForCurrent(
-                                    showToast: true,
-                                  );
-                                } finally {
-                                  manualLoading = false;
-                                  setSheetState(() {});
-                                }
-                              },
-                        icon: manualLoading
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.search),
-                        label: const Text('手动'),
-                      ),
-                    ],
-                  ),
-                  SwitchListTile(
-                    value: _danmakuEnabled,
-                    onChanged: (v) async {
-                      setState(() => _danmakuEnabled = v);
-                      if (!v) {
-                        _danmakuKey.currentState?.clear();
-                      } else if (hasSources) {
-                        await _ensureDanmakuVisible();
-                      }
-                      setSheetState(() {});
-                    },
-                    title: const Text('启用弹幕'),
-                    subtitle:
-                        Text(hasSources ? '当前：$selectedName' : '尚未加载弹幕文件'),
-                    contentPadding: EdgeInsets.zero,
-                  ),
-                  const Divider(height: 1),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.layers_outlined),
-                    title: const Text('弹幕源'),
-                    subtitle: Text(
-                      selectedName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: OutlinedButton(
-                      onPressed: !hasSources
-                          ? null
-                          : () async {
-                              final names = _danmakuSources
-                                  .map((e) => e.name)
-                                  .toList(growable: false);
-                              final picked = await showListPickerDialog(
-                                context: context,
-                                title: '选择弹幕源',
-                                items: names,
-                                initialIndex: _danmakuSourceIndex >= 0
-                                    ? _danmakuSourceIndex
-                                    : null,
-                                height: 320,
-                              );
-                              if (!mounted || picked == null) return;
-                              setState(() {
-                                _danmakuSourceIndex = picked;
-                                _danmakuEnabled = true;
-                                _rebuildDanmakuHeatmap();
-                                _syncDanmakuCursor(_position);
-                              });
-                              if (widget
-                                      .appState.danmakuRememberSelectedSource &&
-                                  picked >= 0 &&
-                                  picked < _danmakuSources.length) {
-                                // ignore: unawaited_futures
-                                widget.appState
-                                    .setDanmakuLastSelectedSourceName(
-                                  _danmakuSources[picked].name,
-                                );
-                              }
-                              await _ensureDanmakuVisible();
-                              setSheetState(() {});
-                            },
-                      child: const Text('选择'),
-                    ),
-                  ),
-                  const Divider(height: 1),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.opacity_outlined),
-                    title: const Text('不透明度'),
-                    subtitle: AppSlider(
-                      value: _danmakuOpacity,
-                      min: 0.2,
-                      max: 1.0,
-                      onChanged: (v) {
-                        setState(() => _danmakuOpacity = v);
-                        setSheetState(() {});
-                      },
-                    ),
-                  ),
-                  if (hasSources)
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () {
-                          setState(() {
-                            _danmakuSources.clear();
-                            _danmakuSourceIndex = -1;
-                            _danmakuEnabled = false;
-                            _danmakuHeatmap = const [];
-                            _danmakuKey.currentState?.clear();
-                          });
-                          setSheetState(() {});
-                        },
-                        icon: const Icon(Icons.delete_outline),
-                        label: const Text('清空弹幕'),
-                      ),
-                    ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
   void _showControls({bool scheduleHide = true}) {
     if (!_controlsVisible) {
       setState(() => _controlsVisible = true);
@@ -2114,10 +2016,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         label: '线路',
         compact: true,
         onTap: controlsEnabled
-            ? () {
-                _showControls(scheduleHide: false);
-                unawaited(_showPlaybackRouteSheet());
-              }
+            ? () => _openMobilePanel(_MobilePlayerPanel.route)
             : null,
       ),
       MobilePlayerActionButton(
@@ -2125,10 +2024,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         label: '版本',
         compact: true,
         onTap: controlsEnabled
-            ? () {
-                _showControls(scheduleHide: false);
-                unawaited(_switchVersion());
-              }
+            ? () => _openMobilePanel(_MobilePlayerPanel.version)
             : null,
       ),
       MobilePlayerActionButton(
@@ -2136,10 +2032,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         label: '音频',
         compact: true,
         onTap: controlsEnabled
-            ? () {
-                _showControls(scheduleHide: false);
-                unawaited(_showAudioTracks(context));
-              }
+            ? () => _openMobilePanel(_MobilePlayerPanel.audio)
             : null,
       ),
       MobilePlayerActionButton(
@@ -2148,10 +2041,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
             widget.appState.playerCore == PlayerCore.exo ? '内核 Exo' : '内核 mpv',
         compact: true,
         onTap: controlsEnabled
-            ? () {
-                _showControls(scheduleHide: false);
-                unawaited(_switchCore());
-              }
+            ? () => _openMobilePanel(_MobilePlayerPanel.core)
             : null,
       ),
       MobilePlayerActionButton(
@@ -2159,10 +2049,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         label: '超分 关',
         compact: true,
         onTap: controlsEnabled
-            ? () {
-                _showControls(scheduleHide: false);
-                _showNotSupported('超分');
-              }
+            ? () => _openMobilePanel(_MobilePlayerPanel.superResolution)
             : null,
       ),
     ];
@@ -2248,16 +2135,21 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           mainAxisSize: MainAxisSize.min,
           children: [
             MobilePlayerActionButton(
+              icon: Icons.speed_rounded,
+              label: '倍速',
+              compact: true,
+              onTap: controlsEnabled
+                  ? () => _openMobilePanel(_MobilePlayerPanel.speed)
+                  : null,
+            ),
+            MobilePlayerActionButton(
               icon: (_danmakuEnabled || _danmakuHeatmap.isNotEmpty)
                   ? Icons.comment
                   : Icons.comment_outlined,
               label: '弹幕',
               compact: true,
               onTap: controlsEnabled
-                  ? () {
-                      _showControls(scheduleHide: false);
-                      unawaited(_showDanmakuSheet());
-                    }
+                  ? () => _openMobilePanel(_MobilePlayerPanel.danmaku)
                   : null,
             ),
             MobilePlayerActionButton(
@@ -2265,10 +2157,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
               label: '字幕',
               compact: true,
               onTap: controlsEnabled
-                  ? () {
-                      _showControls(scheduleHide: false);
-                      unawaited(_showSubtitleTracks(context));
-                    }
+                  ? () => _openMobilePanel(_MobilePlayerPanel.subtitle)
                   : null,
             ),
             MobilePlayerActionButton(
@@ -2298,6 +2187,545 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
               if (mounted) setState(() {});
             }
           : null,
+    );
+  }
+
+  String _mobilePanelTitle(_MobilePlayerPanel panel) {
+    return switch (panel) {
+      _MobilePlayerPanel.route => '线路',
+      _MobilePlayerPanel.version => '版本',
+      _MobilePlayerPanel.audio => '音频',
+      _MobilePlayerPanel.core => '内核',
+      _MobilePlayerPanel.superResolution => '超分',
+      _MobilePlayerPanel.danmaku => '弹幕',
+      _MobilePlayerPanel.subtitle => '字幕',
+      _MobilePlayerPanel.speed => '倍速',
+    };
+  }
+
+  List<double> _mobilePlaybackRateOptions() {
+    final values = <double>[];
+    var current = 0.1;
+    while (current <= 10.0001) {
+      values.add(double.parse(current.toStringAsFixed(2)));
+      current += 0.15;
+    }
+    if ((10.0 - values.last).abs() > 0.001) {
+      values.add(10.0);
+    }
+    return values;
+  }
+
+  Future<List<Map<String, dynamic>>> _loadMobileVersionSources() async {
+    if (_availableMediaSources.isNotEmpty) {
+      return List<Map<String, dynamic>>.from(_availableMediaSources);
+    }
+    final access = _serverAccess;
+    if (access == null) return const <Map<String, dynamic>>[];
+    final info = await access.adapter.fetchPlaybackInfo(
+      access.auth,
+      itemId: widget.itemId,
+      exoPlayer: true,
+    );
+    final sources = List<Map<String, dynamic>>.from(
+      info.mediaSources.cast<Map<String, dynamic>>(),
+    );
+    _availableMediaSources = List<Map<String, dynamic>>.from(sources);
+    return sources;
+  }
+
+  Future<List<vp_platform.VideoAudioTrack>> _loadMobileAudioTracks() async {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) {
+      return const <vp_platform.VideoAudioTrack>[];
+    }
+    final platform = vp_platform.VideoPlayerPlatform.instance;
+    if (!platform.isAudioTrackSupportAvailable()) {
+      return const <vp_platform.VideoAudioTrack>[];
+    }
+    // ignore: invalid_use_of_visible_for_testing_member
+    return platform.getAudioTracks(_videoPlayerId(controller));
+  }
+
+  int _videoPlayerId(VideoPlayerController controller) {
+    // ignore: invalid_use_of_visible_for_testing_member
+    return controller.playerId;
+  }
+
+  Future<List<vp_android.ExoPlayerSubtitleTrackData>>
+      _loadMobileSubtitleTracks() async {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) {
+      return const <vp_android.ExoPlayerSubtitleTrackData>[];
+    }
+    // ignore: invalid_use_of_visible_for_testing_member
+    final playerId = _videoPlayerId(controller);
+    final api = vp_android.VideoPlayerInstanceApi(
+      messageChannelSuffix: playerId.toString(),
+    );
+    final data = await api.getSubtitleTracks();
+    return data.exoPlayerTracks ??
+        const <vp_android.ExoPlayerSubtitleTrackData>[];
+  }
+
+  Widget _buildMobileSpeedPanel({required bool controlsEnabled}) {
+    final controller = _controller;
+    final currentRate = controller?.value.playbackSpeed ?? 1.0;
+    final options = _mobilePlaybackRateOptions();
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final rate in options)
+            _buildMobileRateChip(
+              rate: rate,
+              currentRate: currentRate,
+              enabled: controlsEnabled && controller != null,
+              onTap: () async {
+                await controller?.setPlaybackSpeed(rate);
+                if (!mounted) return;
+                setState(() {});
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMobileRateChip({
+    required double rate,
+    required double currentRate,
+    required bool enabled,
+    required Future<void> Function() onTap,
+  }) {
+    final selected = (currentRate - rate).abs() < 0.01;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: !enabled
+            ? null
+            : () {
+                _showControls(scheduleHide: false);
+                unawaited(onTap());
+              },
+        borderRadius: BorderRadius.circular(999),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            color: Colors.white.withValues(alpha: selected ? 0.18 : 0.08),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: selected ? 0.34 : 0.12),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Text(
+              '${rate.toStringAsFixed(rate == rate.roundToDouble() ? 0 : 2)}x',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMobileCorePanel({required bool controlsEnabled}) {
+    final current = widget.appState.playerCore;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+      children: [
+        MobilePlayerOptionTile(
+          title: 'Exo',
+          subtitle: '当前使用 Android Exo 播放内核',
+          selected: current == PlayerCore.exo,
+          trailing: current == PlayerCore.exo
+              ? const Icon(Icons.check_circle, color: Colors.white)
+              : null,
+        ),
+        const SizedBox(height: 8),
+        MobilePlayerOptionTile(
+          title: 'mpv',
+          subtitle: '切换到 media_kit/mpv 播放内核',
+          selected: current == PlayerCore.mpv,
+          trailing: current == PlayerCore.mpv
+              ? const Icon(Icons.check_circle, color: Colors.white)
+              : null,
+          onTap: current == PlayerCore.mpv || !controlsEnabled
+              ? null
+              : () {
+                  _closeMobilePanels(scheduleHide: false);
+                  unawaited(_switchCore());
+                },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileRoutePanel({required bool controlsEnabled}) {
+    return FutureBuilder<List<RouteEntry>>(
+      future: _resolvePlaybackRouteEntries(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final entries = snapshot.data ?? const <RouteEntry>[];
+        if (entries.isEmpty) {
+          return const Center(child: Text('暂无可用线路', style: TextStyle(color: Colors.white70)));
+        }
+        return ListView.separated(
+          padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+          itemCount: entries.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          itemBuilder: (context, index) {
+            final entry = entries[index];
+            final domain = entry.domain;
+            final selected = (_baseUrl ?? '').trim() == domain.url;
+            final remark = (_playbackDomainRemark(domain.url) ?? '').trim();
+            return MobilePlayerOptionTile(
+              title: domain.name.trim().isEmpty ? domain.url : domain.name.trim(),
+              subtitle: remark.isEmpty ? domain.url : '$remark\n${domain.url}',
+              selected: selected,
+              trailing: selected
+                  ? const Icon(Icons.check_circle_rounded, color: Colors.white)
+                  : null,
+              onTap: !controlsEnabled || selected
+                  ? null
+                  : () {
+                      _closeMobilePanels(scheduleHide: false);
+                      unawaited(_switchPlaybackRoute(domain.url));
+                    },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildMobileVersionPanel({required bool controlsEnabled}) {
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _loadMobileVersionSources(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final sources = List<Map<String, dynamic>>.from(
+          snapshot.data ?? const <Map<String, dynamic>>[],
+        )..sort(_compareMediaSourcesByQuality);
+        if (sources.isEmpty) {
+          return const Center(child: Text('无法获取版本列表', style: TextStyle(color: Colors.white70)));
+        }
+        final current = (_mediaSourceId ?? _selectedMediaSourceId ?? '').trim();
+        return ListView.separated(
+          padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+          itemCount: sources.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          itemBuilder: (context, index) {
+            final ms = sources[index];
+            final selected = (ms['Id']?.toString() ?? '').trim() == current;
+            return MobilePlayerOptionTile(
+              title: _mediaSourceTitle(ms),
+              subtitle: _mediaSourceSubtitle(ms),
+              selected: selected,
+              trailing: selected
+                  ? const Icon(Icons.check_circle_rounded, color: Colors.white)
+                  : null,
+              onTap: !controlsEnabled || selected
+                  ? null
+                  : () {
+                      unawaited(() async {
+                        final selectedId = (ms['Id']?.toString() ?? '').trim();
+                        if (selectedId.isEmpty) return;
+                        final sid = (widget.seriesId ?? '').trim();
+                        final serverId =
+                            widget.server?.id ?? widget.appState.activeServerId;
+                        if (serverId != null &&
+                            serverId.isNotEmpty &&
+                            sid.isNotEmpty) {
+                          final idx = sources.indexWhere(
+                            (item) =>
+                                (item['Id']?.toString() ?? '').trim() ==
+                                selectedId,
+                          );
+                          if (idx >= 0) {
+                            unawaited(
+                              widget.appState.setSeriesMediaSourceIndex(
+                                serverId: serverId,
+                                seriesId: sid,
+                                mediaSourceIndex: idx,
+                              ),
+                            );
+                          }
+                        }
+                        _closeMobilePanels(scheduleHide: false);
+                        setState(() {
+                          _selectedMediaSourceId = selectedId;
+                          _selectedAudioStreamIndex = null;
+                          _selectedSubtitleStreamIndex = null;
+                          _overrideStartPosition = _position;
+                          _overrideResumeImmediately = true;
+                        });
+                        await _init();
+                      }());
+                    },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildMobileAudioPanel({required bool controlsEnabled}) {
+    return FutureBuilder<List<vp_platform.VideoAudioTrack>>(
+      future: _loadMobileAudioTracks(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final tracks = snapshot.data ?? const <vp_platform.VideoAudioTrack>[];
+        if (tracks.isEmpty) {
+          return const Center(child: Text('暂无音频可选', style: TextStyle(color: Colors.white70)));
+        }
+        final controller = _controller;
+        return ListView.separated(
+          padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+          itemCount: tracks.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          itemBuilder: (context, index) {
+            final track = tracks[index];
+            return MobilePlayerOptionTile(
+              title: _audioTrackTitle(track),
+              subtitle: _audioTrackSubtitle(track),
+              selected: track.isSelected,
+              trailing: track.isSelected
+                  ? const Icon(Icons.check_circle_rounded, color: Colors.white)
+                  : null,
+              onTap: !controlsEnabled || track.isSelected || controller == null
+                  ? null
+                  : () {
+                      unawaited(() async {
+                        final platform = vp_platform.VideoPlayerPlatform.instance;
+                        // ignore: invalid_use_of_visible_for_testing_member
+                        await platform.selectAudioTrack(
+                          _videoPlayerId(controller),
+                          track.id,
+                        );
+                        if (!mounted) return;
+                        setState(() {});
+                      }());
+                    },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildMobileSubtitlePanel({required bool controlsEnabled}) {
+    return FutureBuilder<List<vp_android.ExoPlayerSubtitleTrackData>>(
+      future: _loadMobileSubtitleTracks(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final tracks =
+            snapshot.data ?? const <vp_android.ExoPlayerSubtitleTrackData>[];
+        final controller = _controller;
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+          children: [
+            MobilePlayerOptionTile(
+              title: '关闭字幕',
+              selected: !tracks.any((track) => track.isSelected),
+              trailing: !tracks.any((track) => track.isSelected)
+                  ? const Icon(Icons.check_circle_rounded, color: Colors.white)
+                  : null,
+              onTap: !controlsEnabled || controller == null
+                  ? null
+                  : () {
+                      unawaited(() async {
+                        // ignore: invalid_use_of_visible_for_testing_member
+                        final api = vp_android.VideoPlayerInstanceApi(
+                          messageChannelSuffix:
+                              _videoPlayerId(controller).toString(),
+                        );
+                        await api.deselectSubtitleTrack();
+                        if (!mounted) return;
+                        setState(() {});
+                      }());
+                    },
+            ),
+            if (tracks.isNotEmpty) const SizedBox(height: 8),
+            for (final track in tracks) ...[
+              MobilePlayerOptionTile(
+                title: _subtitleTrackTitle(track),
+                subtitle: _subtitleTrackSubtitle(track),
+                selected: track.isSelected,
+                trailing: track.isSelected
+                    ? const Icon(Icons.check_circle_rounded, color: Colors.white)
+                    : null,
+                onTap: !controlsEnabled || controller == null
+                    ? null
+                    : () {
+                        unawaited(() async {
+                          // ignore: invalid_use_of_visible_for_testing_member
+                          final api = vp_android.VideoPlayerInstanceApi(
+                            messageChannelSuffix:
+                                _videoPlayerId(controller).toString(),
+                          );
+                          await api.selectSubtitleTrack(
+                            track.groupIndex,
+                            track.trackIndex,
+                          );
+                          if (!mounted) return;
+                          setState(() {});
+                        }());
+                      },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildMobileSuperResolutionPanel() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+      children: const [
+        MobilePlayerOptionTile(
+          title: 'Exo 内核暂不支持超分',
+          subtitle: '如需 Anime4K/超分，可在上方内核面板切换到 mpv',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileDanmakuPanel({required bool controlsEnabled}) {
+    final hasSources = _danmakuSources.isNotEmpty;
+    final selectedName = (_danmakuSourceIndex >= 0 &&
+            _danmakuSourceIndex < _danmakuSources.length)
+        ? _danmakuSources[_danmakuSourceIndex].name
+        : '未选择';
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+      children: [
+        MobilePlayerOptionTile(
+          title: '启用弹幕',
+          subtitle: hasSources ? selectedName : '尚未加载弹幕',
+          trailing: Switch(
+            value: _danmakuEnabled,
+            onChanged: !controlsEnabled
+                ? null
+                : (value) {
+                    setState(() => _danmakuEnabled = value);
+                    if (!value) {
+                      _danmakuKey.currentState?.clear();
+                    }
+                  },
+          ),
+        ),
+        const SizedBox(height: 8),
+        MobilePlayerOptionTile(
+          title: '导入本地弹幕',
+          leading: const Icon(Icons.upload_file_outlined, color: Colors.white),
+          onTap: controlsEnabled
+              ? () {
+                  unawaited(_pickDanmakuFile());
+                }
+              : null,
+        ),
+        const SizedBox(height: 8),
+        MobilePlayerOptionTile(
+          title: '加载在线弹幕',
+          leading: const Icon(Icons.cloud_download_outlined, color: Colors.white),
+          onTap: controlsEnabled
+              ? () {
+                  unawaited(_loadOnlineDanmakuForNetwork(showToast: true));
+                }
+              : null,
+        ),
+        const SizedBox(height: 8),
+        MobilePlayerOptionTile(
+          title: '手动匹配弹幕',
+          leading: const Icon(Icons.search, color: Colors.white),
+          onTap: controlsEnabled
+              ? () {
+                  unawaited(_manualMatchOnlineDanmakuForCurrent(showToast: true));
+                }
+              : null,
+        ),
+        const SizedBox(height: 12),
+        Text(
+          '透明度 ${(_danmakuOpacity * 100).round()}%',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        Slider(
+          value: _danmakuOpacity.clamp(0.2, 1.0),
+          min: 0.2,
+          max: 1.0,
+          onChanged: !controlsEnabled
+              ? null
+              : (value) {
+                  setState(() => _danmakuOpacity = value);
+                },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileSidePanelOverlay({
+    required BuildContext context,
+    required bool controlsEnabled,
+  }) {
+    final panel = _mobilePanel;
+    if (panel == null) {
+      return const SizedBox.shrink();
+    }
+
+    Widget child;
+    switch (panel) {
+      case _MobilePlayerPanel.route:
+        child = _buildMobileRoutePanel(controlsEnabled: controlsEnabled);
+        break;
+      case _MobilePlayerPanel.version:
+        child = _buildMobileVersionPanel(controlsEnabled: controlsEnabled);
+        break;
+      case _MobilePlayerPanel.audio:
+        child = _buildMobileAudioPanel(controlsEnabled: controlsEnabled);
+        break;
+      case _MobilePlayerPanel.core:
+        child = _buildMobileCorePanel(controlsEnabled: controlsEnabled);
+        break;
+      case _MobilePlayerPanel.superResolution:
+        child = _buildMobileSuperResolutionPanel();
+        break;
+      case _MobilePlayerPanel.danmaku:
+        child = _buildMobileDanmakuPanel(controlsEnabled: controlsEnabled);
+        break;
+      case _MobilePlayerPanel.subtitle:
+        child = _buildMobileSubtitlePanel(controlsEnabled: controlsEnabled);
+        break;
+      case _MobilePlayerPanel.speed:
+        child = _buildMobileSpeedPanel(controlsEnabled: controlsEnabled);
+        break;
+    }
+
+    return MobilePlayerSidePanel(
+      title: _mobilePanelTitle(panel),
+      visible: true,
+      onDismiss: _closeMobilePanels,
+      child: child,
     );
   }
 
@@ -3424,99 +3852,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     );
   }
 
-  Future<void> _switchVersion() async {
-    final pos = _position;
-    _maybeReportPlaybackProgress(pos, force: true);
-
-    var sources = _availableMediaSources;
-    if (sources.isEmpty) {
-      try {
-        final access = _serverAccess;
-        if (access == null) {
-          sources = const [];
-        } else {
-          final info = await access.adapter.fetchPlaybackInfo(
-            access.auth,
-            itemId: widget.itemId,
-            exoPlayer: true,
-          );
-          sources = info.mediaSources.cast<Map<String, dynamic>>();
-          _availableMediaSources = List<Map<String, dynamic>>.from(sources);
-        }
-      } catch (_) {
-        sources = const [];
-      }
-    }
-
-    if (sources.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('无法获取版本列表')),
-      );
-      return;
-    }
-
-    final current = _mediaSourceId ?? _selectedMediaSourceId ?? '';
-    final sortedSources = List<Map<String, dynamic>>.from(sources)
-      ..sort(_compareMediaSourcesByQuality);
-    if (!mounted) return;
-    final selected = await showModalBottomSheet<String>(
-      context: context,
-      builder: (ctx) {
-        return SafeArea(
-          child: ListView(
-            children: [
-              const ListTile(title: Text('版本选择')),
-              for (final ms in sortedSources)
-                ListTile(
-                  leading: Icon(
-                    (ms['Id']?.toString() ?? '') == current
-                        ? Icons.check_circle
-                        : Icons.circle_outlined,
-                  ),
-                  title: Text(_mediaSourceTitle(ms)),
-                  subtitle: Text(_mediaSourceSubtitle(ms)),
-                  onTap: () =>
-                      Navigator.of(ctx).pop(ms['Id']?.toString() ?? ''),
-                ),
-            ],
-          ),
-        );
-      },
-    );
-
-    if (!mounted) return;
-    if (selected == null || selected.trim().isEmpty) return;
-    if (selected.trim() == current) return;
-
-    final sid = (widget.seriesId ?? '').trim();
-    final serverId = widget.server?.id ?? widget.appState.activeServerId;
-    if (serverId != null && serverId.isNotEmpty && sid.isNotEmpty) {
-      final idx = sources.indexWhere(
-        (ms) => (ms['Id']?.toString() ?? '') == selected.trim(),
-      );
-      if (idx >= 0) {
-        // ignore: unawaited_futures
-        unawaited(
-          widget.appState.setSeriesMediaSourceIndex(
-            serverId: serverId,
-            seriesId: sid,
-            mediaSourceIndex: idx,
-          ),
-        );
-      }
-    }
-
-    setState(() {
-      _selectedMediaSourceId = selected.trim();
-      _selectedAudioStreamIndex = null;
-      _selectedSubtitleStreamIndex = null;
-      _overrideStartPosition = pos;
-      _overrideResumeImmediately = true;
-    });
-    await _init();
-  }
-
   String? get _playbackServerId =>
       widget.server?.id ?? widget.appState.activeServerId;
 
@@ -3673,151 +4008,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         SnackBar(content: Text('线路切换失败：$e')),
       );
     }
-  }
-
-  Future<void> _showPlaybackRouteSheet() async {
-    if (!mounted) return;
-    _showControls(scheduleHide: false);
-    Future<List<RouteEntry>> entriesFuture = _resolvePlaybackRouteEntries();
-
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (ctx) {
-        return SafeArea(
-          child: StatefulBuilder(
-            builder: (context, setSheetState) {
-              return SizedBox(
-                height: math.min(MediaQuery.sizeOf(context).height * 0.72, 620),
-                child: FutureBuilder<List<RouteEntry>>(
-                  future: entriesFuture,
-                  builder: (context, snapshot) {
-                    final loading =
-                        snapshot.connectionState != ConnectionState.done;
-                    final entries = snapshot.data ?? const <RouteEntry>[];
-                    final isDark =
-                        Theme.of(context).brightness == Brightness.dark;
-                    return Column(
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 6, 10, 6),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  '线路切换',
-                                  style:
-                                      Theme.of(context).textTheme.titleMedium,
-                                ),
-                              ),
-                              IconButton(
-                                tooltip: '刷新线路',
-                                onPressed: loading
-                                    ? null
-                                    : () {
-                                        setSheetState(() {
-                                          entriesFuture =
-                                              _resolvePlaybackRouteEntries(
-                                            forceRefresh: true,
-                                          );
-                                        });
-                                      },
-                                icon: const Icon(Icons.refresh),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const Divider(height: 1),
-                        if (loading)
-                          const Expanded(
-                            child: Center(child: CircularProgressIndicator()),
-                          )
-                        else if (entries.isEmpty)
-                          const Expanded(
-                            child: Center(child: Text('当前服务器暂无可用线路')),
-                          )
-                        else
-                          Expanded(
-                            child: ListView.separated(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                              itemCount: entries.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(height: 6),
-                              itemBuilder: (context, index) {
-                                final entry = entries[index];
-                                final domain = entry.domain;
-                                final selected =
-                                    (_baseUrl ?? '').trim() == domain.url;
-                                final name = domain.name.trim().isEmpty
-                                    ? domain.url
-                                    : domain.name.trim();
-                                final remark =
-                                    (_playbackDomainRemark(domain.url) ?? '')
-                                        .trim();
-                                return ListTile(
-                                  dense: true,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  tileColor: isDark
-                                      ? Colors.white.withValues(
-                                          alpha: selected ? 0.16 : 0.06,
-                                        )
-                                      : Colors.black.withValues(
-                                          alpha: selected ? 0.10 : 0.04,
-                                        ),
-                                  title: Text(
-                                    name,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  subtitle: remark.isEmpty
-                                      ? Text(
-                                          domain.url,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        )
-                                      : Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              remark,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                            Text(
-                                              domain.url,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ],
-                                        ),
-                                  trailing: selected
-                                      ? const Icon(Icons.check_circle_rounded)
-                                      : null,
-                                  onTap: () async {
-                                    Navigator.of(ctx).pop();
-                                    await _switchPlaybackRoute(domain.url);
-                                  },
-                                );
-                              },
-                            ),
-                          ),
-                      ],
-                    );
-                  },
-                ),
-              );
-            },
-          ),
-        );
-      },
-    );
   }
 
   Future<void> _init() async {
@@ -4886,13 +5076,52 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     } catch (_) {}
   }
 
-  void _showNotSupported(String feature) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(content: Text('Exo 内核暂不支持：$feature')),
-      );
+  Future<void> _applyOrientationForMode() async {
+    if (!_shouldControlSystemUi) return;
+
+    List<DeviceOrientation>? orientations;
+    switch (_orientationMode) {
+      case _OrientationMode.landscape:
+        orientations = const [
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ];
+        break;
+      case _OrientationMode.portrait:
+        orientations = const [DeviceOrientation.portraitUp];
+        break;
+      case _OrientationMode.auto:
+        final controller = _controller;
+        if (controller == null || !controller.value.isInitialized) return;
+        var aspect = controller.value.aspectRatio;
+        if (aspect <= 0) {
+          final size = controller.value.size;
+          if (size.width > 0 && size.height > 0) {
+            aspect = size.width / size.height;
+          }
+        }
+        if (aspect <= 0) return;
+
+        final rotation = controller.value.rotationCorrection;
+        if (rotation == 90 || rotation == 270) {
+          aspect = 1.0 / aspect;
+        }
+
+        orientations = aspect < 1.0
+            ? const [DeviceOrientation.portraitUp]
+            : const [
+                DeviceOrientation.landscapeLeft,
+                DeviceOrientation.landscapeRight,
+              ];
+        break;
+    }
+
+    final key = orientations.map((o) => o.name).join(',');
+    if (_lastOrientationKey == key) return;
+    _lastOrientationKey = key;
+    try {
+      await SystemChrome.setPreferredOrientations(orientations);
+    } catch (_) {}
   }
 
   String _audioTrackTitle(vp_platform.VideoAudioTrack t) {
@@ -4917,66 +5146,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       parts.add('${(t.bitrate! / 1000).round()} kbps');
     }
     return parts.join('  ');
-  }
-
-  Future<void> _showAudioTracks(BuildContext context) async {
-    final controller = _controller;
-    if (controller == null || !controller.value.isInitialized) return;
-
-    // ignore: invalid_use_of_visible_for_testing_member
-    final playerId = controller.playerId;
-
-    final platform = vp_platform.VideoPlayerPlatform.instance;
-    if (!platform.isAudioTrackSupportAvailable()) {
-      _showNotSupported('音轨切换');
-      return;
-    }
-
-    late final List<vp_platform.VideoAudioTrack> tracks;
-    try {
-      tracks = await platform.getAudioTracks(playerId);
-    } catch (e) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('获取音轨失败：$e')),
-      );
-      return;
-    }
-
-    if (!context.mounted) return;
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) {
-        if (tracks.isEmpty) {
-          return const Padding(
-            padding: EdgeInsets.all(16),
-            child: Text('暂无音轨'),
-          );
-        }
-        return ListView(
-          children: tracks
-              .map(
-                (t) => ListTile(
-                  title: Text(_audioTrackTitle(t)),
-                  subtitle: Text(_audioTrackSubtitle(t)),
-                  trailing: t.isSelected ? const Icon(Icons.check) : null,
-                  onTap: () async {
-                    Navigator.of(ctx).pop();
-                    try {
-                      await platform.selectAudioTrack(playerId, t.id);
-                    } catch (e) {
-                      if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('切换音轨失败：$e')),
-                      );
-                    }
-                  },
-                ),
-              )
-              .toList(),
-        );
-      },
-    );
   }
 
   String _subtitleTrackTitle(vp_android.ExoPlayerSubtitleTrackData t) {
@@ -5118,406 +5287,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     } finally {
       _subtitlePollInFlight = false;
     }
-  }
-
-  Future<void> _showSubtitleTracks(BuildContext context) async {
-    final controller = _controller;
-    if (controller == null || !controller.value.isInitialized) return;
-
-    // ignore: invalid_use_of_visible_for_testing_member
-    final playerId = controller.playerId;
-
-    final api = vp_android.VideoPlayerInstanceApi(
-      messageChannelSuffix: playerId.toString(),
-    );
-
-    Future<List<vp_android.ExoPlayerSubtitleTrackData>> fetchTracks() async {
-      final data = await api.getSubtitleTracks();
-      return data.exoPlayerTracks ??
-          const <vp_android.ExoPlayerSubtitleTrackData>[];
-    }
-
-    late List<vp_android.ExoPlayerSubtitleTrackData> tracks;
-    try {
-      tracks = await fetchTracks();
-    } catch (e) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('获取字幕失败：$e')),
-      );
-      return;
-    }
-
-    if (!context.mounted) return;
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (ctx) {
-        var tracksExpanded = true;
-        final messenger = ScaffoldMessenger.of(context);
-
-        IconButton miniIconButton({
-          required VoidCallback? onPressed,
-          required IconData icon,
-          String? tooltip,
-        }) {
-          return IconButton(
-            onPressed: onPressed,
-            tooltip: tooltip,
-            icon: Icon(icon),
-            padding: EdgeInsets.zero,
-            visualDensity: VisualDensity.compact,
-            constraints: const BoxConstraints.tightFor(width: 34, height: 34),
-          );
-        }
-
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            String selectedKey = 'off';
-            for (final t in tracks) {
-              if (t.isSelected) {
-                selectedKey = '${t.groupIndex}_${t.trackIndex}';
-                break;
-              }
-            }
-
-            Future<void> refreshTracks() async {
-              try {
-                tracks = await fetchTracks();
-                setSheetState(() {});
-              } catch (e) {
-                messenger.showSnackBar(
-                  SnackBar(content: Text('获取字幕失败：$e')),
-                );
-              }
-            }
-
-            Future<void> selectTrackKey(String key) async {
-              try {
-                if (key == 'off') {
-                  await api.deselectSubtitleTrack();
-                } else {
-                  final parts = key.split('_');
-                  final g = int.parse(parts[0]);
-                  final t = int.parse(parts[1]);
-                  await api.selectSubtitleTrack(g, t);
-                }
-                await refreshTracks();
-              } catch (e) {
-                messenger.showSnackBar(
-                  SnackBar(content: Text('切换字幕失败：$e')),
-                );
-              }
-            }
-
-            Future<void> pickAndAddSubtitle() async {
-              final result = await FilePicker.platform.pickFiles(
-                type: FileType.custom,
-                allowedExtensions: kSupportedExternalSubtitleExtensions,
-              );
-              if (result == null || result.files.isEmpty) return;
-              final f = result.files.first;
-              final path = (f.path ?? '').trim();
-              if (path.isEmpty) {
-                messenger.showSnackBar(
-                  const SnackBar(content: Text('无法读取字幕文件路径')),
-                );
-                return;
-              }
-              try {
-                await api.addSubtitleSource(
-                  path,
-                  externalSubtitleMimeTypeForPath(path),
-                  null,
-                  f.name,
-                );
-                await refreshTracks();
-              } catch (e) {
-                messenger.showSnackBar(
-                  SnackBar(content: Text('添加字幕失败：$e')),
-                );
-              }
-            }
-
-            Future<void> editSubtitleDelay() async {
-              final controller = TextEditingController(
-                text: _subtitleDelaySeconds.toStringAsFixed(1),
-              );
-              final value = await showDialog<double>(
-                context: ctx,
-                builder: (dctx) => AlertDialog(
-                  title: const Text('字幕同步'),
-                  content: TextField(
-                    controller: controller,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                      signed: false,
-                    ),
-                    decoration: const InputDecoration(
-                      hintText: '单位：秒，例如 0.5',
-                    ),
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.of(dctx).pop(),
-                      child: const Text('取消'),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        final v = double.tryParse(controller.text.trim());
-                        Navigator.of(dctx).pop(v);
-                      },
-                      child: const Text('确定'),
-                    ),
-                  ],
-                ),
-              );
-              if (value == null) return;
-              setState(() => _subtitleDelaySeconds = value.clamp(0.0, 60.0));
-              await _applyExoSubtitleOptions();
-              setSheetState(() {});
-            }
-
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                child: ListView(
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '字幕',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: '关闭',
-                          icon: const Icon(Icons.close),
-                          onPressed: () => Navigator.of(ctx).pop(),
-                        ),
-                      ],
-                    ),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.closed_caption_outlined),
-                      title: const Text('轨道'),
-                      trailing: IconButton(
-                        icon: Icon(
-                          tracksExpanded
-                              ? Icons.expand_less
-                              : Icons.expand_more,
-                        ),
-                        onPressed: () {
-                          tracksExpanded = !tracksExpanded;
-                          setSheetState(() {});
-                        },
-                      ),
-                    ),
-                    if (tracksExpanded) ...[
-                      RadioGroup<String>(
-                        groupValue: selectedKey,
-                        onChanged: (value) {
-                          if (value == null) return;
-                          // ignore: unawaited_futures
-                          selectTrackKey(value);
-                        },
-                        child: Column(
-                          children: [
-                            const RadioListTile<String>(
-                              value: 'off',
-                              title: Text('关闭'),
-                              contentPadding: EdgeInsets.zero,
-                              dense: true,
-                            ),
-                            if (tracks.isEmpty)
-                              const Padding(
-                                padding: EdgeInsets.fromLTRB(40, 0, 0, 8),
-                                child: Text('暂无字幕'),
-                              ),
-                            for (final t in tracks)
-                              RadioListTile<String>(
-                                value: '${t.groupIndex}_${t.trackIndex}',
-                                title: Text(_subtitleTrackTitle(t)),
-                                subtitle: Text(_subtitleTrackSubtitle(t)),
-                                contentPadding: EdgeInsets.zero,
-                                dense: true,
-                              ),
-                          ],
-                        ),
-                      ),
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.add),
-                        title: const Text('添加字幕'),
-                        onTap: pickAndAddSubtitle,
-                      ),
-                    ],
-                    const Divider(height: 1),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('字幕同步'),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          miniIconButton(
-                            onPressed: () async {
-                              setState(() {
-                                _subtitleDelaySeconds =
-                                    (_subtitleDelaySeconds - 0.1)
-                                        .clamp(0.0, 60.0)
-                                        .toDouble();
-                              });
-                              await _applyExoSubtitleOptions();
-                              setSheetState(() {});
-                            },
-                            icon: Icons.remove,
-                            tooltip: '-0.1s',
-                          ),
-                          Text('${_subtitleDelaySeconds.toStringAsFixed(1)}s'),
-                          miniIconButton(
-                            onPressed: () async {
-                              setState(() {
-                                _subtitleDelaySeconds =
-                                    (_subtitleDelaySeconds + 0.1)
-                                        .clamp(0.0, 60.0)
-                                        .toDouble();
-                              });
-                              await _applyExoSubtitleOptions();
-                              setSheetState(() {});
-                            },
-                            icon: Icons.add,
-                            tooltip: '+0.1s',
-                          ),
-                          const SizedBox(width: 6),
-                          miniIconButton(
-                            onPressed: editSubtitleDelay,
-                            icon: Icons.edit_outlined,
-                            tooltip: '输入',
-                          ),
-                          miniIconButton(
-                            onPressed: () async {
-                              setState(() => _subtitleDelaySeconds = 0.0);
-                              await _applyExoSubtitleOptions();
-                              setSheetState(() {});
-                            },
-                            icon: Icons.history,
-                            tooltip: '重置',
-                          ),
-                        ],
-                      ),
-                    ),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('字幕大小'),
-                      subtitle: AppSlider(
-                        value: _subtitleFontSize.clamp(12.0, 60.0),
-                        min: 12.0,
-                        max: 60.0,
-                        divisions: 48,
-                        onChanged: (v) {
-                          setState(() => _subtitleFontSize = v);
-                          setSheetState(() {});
-                        },
-                        onChangeEnd: (_) async {
-                          await _applyExoSubtitleOptions();
-                          setSheetState(() {});
-                        },
-                      ),
-                      trailing: Text('${_subtitleFontSize.round()}'),
-                    ),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('字幕位置'),
-                      subtitle: AppSlider(
-                        value: _subtitlePositionStep.toDouble().clamp(0, 20),
-                        min: 0,
-                        max: 20,
-                        divisions: 20,
-                        onChanged: (v) {
-                          setState(() => _subtitlePositionStep = v.round());
-                          setSheetState(() {});
-                        },
-                        onChangeEnd: (_) async {
-                          await _applyExoSubtitleOptions();
-                          setSheetState(() {});
-                        },
-                      ),
-                      trailing: Text('$_subtitlePositionStep'),
-                    ),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('粗体'),
-                      value: _subtitleBold,
-                      onChanged: (v) async {
-                        setState(() => _subtitleBold = v);
-                        await _applyExoSubtitleOptions();
-                        setSheetState(() {});
-                      },
-                    ),
-                    const ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      enabled: false,
-                      title: Text('强制覆盖 ASS/SSA 字幕'),
-                      subtitle: Text('仅 MPV 支持'),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Future<void> _applyOrientationForMode() async {
-    if (!_shouldControlSystemUi) return;
-
-    List<DeviceOrientation>? orientations;
-    switch (_orientationMode) {
-      case _OrientationMode.landscape:
-        orientations = const [
-          DeviceOrientation.landscapeLeft,
-          DeviceOrientation.landscapeRight,
-        ];
-        break;
-      case _OrientationMode.portrait:
-        orientations = const [DeviceOrientation.portraitUp];
-        break;
-      case _OrientationMode.auto:
-        final controller = _controller;
-        if (controller == null || !controller.value.isInitialized) return;
-        var aspect = controller.value.aspectRatio;
-        if (aspect <= 0) {
-          final size = controller.value.size;
-          if (size.width > 0 && size.height > 0) {
-            aspect = size.width / size.height;
-          }
-        }
-        if (aspect <= 0) return;
-
-        final rotation = controller.value.rotationCorrection;
-        if (rotation == 90 || rotation == 270) {
-          aspect = 1.0 / aspect;
-        }
-
-        orientations = aspect < 1.0
-            ? const [DeviceOrientation.portraitUp]
-            : const [
-                DeviceOrientation.landscapeLeft,
-                DeviceOrientation.landscapeRight,
-              ];
-        break;
-    }
-
-    final key = orientations.map((o) => o.name).join(',');
-    if (_lastOrientationKey == key) return;
-    _lastOrientationKey = key;
-    try {
-      await SystemChrome.setPreferredOrientations(orientations);
-    } catch (_) {}
   }
 
   @override
@@ -5943,7 +5712,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                 ),
                               ),
                             ),
-                          if (!widget.isTv)
+                          if (!widget.isTv && !_mobileSidePanelVisible)
                             Align(
                               alignment: Alignment.topCenter,
                               child: SafeArea(
@@ -6286,7 +6055,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                 ),
                               ),
                             ),
-                          if (!widget.isTv)
+                          if (!widget.isTv && !_mobileSidePanelVisible)
                             Align(
                               alignment: Alignment.bottomCenter,
                               child: SafeArea(
@@ -6345,6 +6114,11 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                             ),
                           if (!widget.isTv)
                             _buildEpisodePickerOverlay(enableBlur: enableBlur),
+                          if (!widget.isTv)
+                            _buildMobileSidePanelOverlay(
+                              context: context,
+                              controlsEnabled: controlsEnabled,
+                            ),
                         ],
                       )
                     : _playError != null
@@ -6364,6 +6138,17 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       ),
     );
   }
+}
+
+enum _MobilePlayerPanel {
+  route,
+  version,
+  audio,
+  core,
+  superResolution,
+  danmaku,
+  subtitle,
+  speed,
 }
 
 enum _OrientationMode { auto, landscape, portrait }

@@ -105,6 +105,11 @@ class MobilePlayerTopStatusBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final actionMaxWidth = math.min(
+      MediaQuery.sizeOf(context).width * 0.58,
+      360.0,
+    );
+
     return DefaultTextStyle.merge(
       style: _overlayLabelStyle(
         fontSize: 12,
@@ -133,12 +138,14 @@ class MobilePlayerTopStatusBar extends StatelessWidget {
             ),
             if (actions.isNotEmpty) ...[
               const SizedBox(width: 12),
-              Flexible(
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: actionMaxWidth),
                 child: Align(
-                  alignment: Alignment.centerRight,
+                  alignment: Alignment.topRight,
                   child: SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         for (final entry in actions) ...[
@@ -152,6 +159,250 @@ class MobilePlayerTopStatusBar extends StatelessWidget {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class MobilePlayerSidePanel extends StatelessWidget {
+  const MobilePlayerSidePanel({
+    super.key,
+    required this.title,
+    required this.visible,
+    required this.onDismiss,
+    required this.child,
+    this.headerTrailing,
+  });
+
+  final String title;
+  final bool visible;
+  final VoidCallback onDismiss;
+  final Widget child;
+  final Widget? headerTrailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final panelWidth = math.min(
+      480.0,
+      size.width * (size.width > size.height ? 0.50 : 0.56),
+    );
+
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          IgnorePointer(
+            ignoring: !visible,
+            child: AnimatedOpacity(
+              opacity: visible ? 1 : 0,
+              duration: const Duration(milliseconds: 180),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onDismiss,
+                child: ColoredBox(
+                  color: Colors.black.withValues(alpha: 0.22),
+                  child: const SizedBox.expand(),
+                ),
+              ),
+            ),
+          ),
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            top: 0,
+            bottom: 0,
+            right: visible ? 0 : -panelWidth - 20,
+            width: panelWidth,
+            child: IgnorePointer(
+              ignoring: !visible,
+              child: SafeArea(
+                left: false,
+                minimum: const EdgeInsets.fromLTRB(0, 10, 10, 10),
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 12),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(28),
+                      color: Colors.black.withValues(alpha: 0.10),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.16),
+                      ),
+                      gradient: LinearGradient(
+                        begin: Alignment.topRight,
+                        end: Alignment.bottomLeft,
+                        colors: [
+                          Colors.white.withValues(alpha: 0.08),
+                          Colors.white.withValues(alpha: 0.02),
+                        ],
+                      ),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(28),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(18, 14, 14, 14),
+                        child: Column(
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: _overlayLabelStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                                if (headerTrailing != null) ...[
+                                  const SizedBox(width: 8),
+                                  headerTrailing!,
+                                ],
+                                const SizedBox(width: 4),
+                                IconButton(
+                                  tooltip: 'Close',
+                                  onPressed: onDismiss,
+                                  icon: const Icon(Icons.close_rounded),
+                                  color: Colors.white,
+                                  splashRadius: 20,
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Expanded(child: child),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class MobilePlayerOptionTile extends StatelessWidget {
+  const MobilePlayerOptionTile({
+    super.key,
+    required this.title,
+    this.subtitle,
+    this.leading,
+    this.trailing,
+    this.selected = false,
+    this.onTap,
+    this.contentPadding,
+  });
+
+  final String title;
+  final String? subtitle;
+  final Widget? leading;
+  final Widget? trailing;
+  final bool selected;
+  final VoidCallback? onTap;
+  final EdgeInsetsGeometry? contentPadding;
+
+  @override
+  Widget build(BuildContext context) {
+    final borderColor = selected
+        ? Colors.white.withValues(alpha: 0.32)
+        : Colors.white.withValues(alpha: 0.10);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            color: Colors.black.withValues(alpha: selected ? 0.16 : 0.08),
+            border: Border.all(color: borderColor),
+          ),
+          child: Padding(
+            padding: contentPadding ??
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                if (leading != null) ...[
+                  leading!,
+                  const SizedBox(width: 12),
+                ],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: _overlayLabelStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                      if ((subtitle ?? '').trim().isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          subtitle!,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: _overlayLabelStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.white70,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (trailing != null) ...[
+                  const SizedBox(width: 12),
+                  trailing!,
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class MobilePlayerInfoTag extends StatelessWidget {
+  const MobilePlayerInfoTag({
+    super.key,
+    required this.label,
+  });
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Text(
+          label,
+          style: _overlayLabelStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: Colors.white70,
+          ),
         ),
       ),
     );

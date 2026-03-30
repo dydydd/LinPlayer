@@ -259,6 +259,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   bool _episodePickerItemLoading = false;
 
   bool _episodePickerVisible = false;
+  _MobilePlayerPanel? _mobilePanel;
   bool _episodePickerLoading = false;
   String? _episodePickerError;
   List<MediaItem> _episodeSeasons = const [];
@@ -1235,16 +1236,37 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
   Future<void> _toggleEpisodePicker() async {
     if (_episodePickerVisible) {
-      setState(() => _episodePickerVisible = false);
+      _closeMobilePanels(scheduleHide: false);
       return;
     }
 
     _showControls(scheduleHide: false);
     setState(() {
+      _mobilePanel = null;
       _episodePickerVisible = true;
       _episodePickerError = null;
     });
     await _ensureEpisodePickerLoaded();
+  }
+
+  bool get _mobileSidePanelVisible =>
+      _mobilePanel != null || _episodePickerVisible;
+
+  void _openMobilePanel(_MobilePlayerPanel panel) {
+    _showControls(scheduleHide: false);
+    setState(() {
+      _mobilePanel = panel;
+      _episodePickerVisible = false;
+    });
+  }
+
+  void _closeMobilePanels({bool scheduleHide = true}) {
+    if (!_mobileSidePanelVisible) return;
+    setState(() {
+      _mobilePanel = null;
+      _episodePickerVisible = false;
+    });
+    _showControls(scheduleHide: scheduleHide);
   }
 
   Future<void> _ensureEpisodePickerLoaded() async {
@@ -1769,9 +1791,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                           : selectedSeason!.id,
                                       maxWidth: 520,
                                     );
-                                    final title = e.name.trim().isNotEmpty
-                                        ? e.name.trim()
-                                        : '第$epNo集';
                                     return Material(
                                       color:
                                           Colors.black.withValues(alpha: 0.18),
@@ -1881,16 +1900,55 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                               ),
                                               const SizedBox(width: 12),
                                               Expanded(
-                                                child: Text(
-                                                  title,
-                                                  maxLines: 2,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.w600,
-                                                  ),
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  mainAxisAlignment:
+                                                      MainAxisAlignment.center,
+                                                  children: [
+                                                    Text(
+                                                      'E${epNo.toString().padLeft(2, '0')}',
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 14,
+                                                        fontWeight:
+                                                            FontWeight.w800,
+                                                        letterSpacing: 0.3,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(height: 8),
+                                                    FutureBuilder<
+                                                        _EpisodeMediaSpec>(
+                                                      future:
+                                                          _episodeMediaSpecFuture(
+                                                        e,
+                                                      ),
+                                                      builder:
+                                                          (context, snapshot) {
+                                                        final spec =
+                                                            snapshot.data;
+                                                        return Wrap(
+                                                          spacing: 6,
+                                                          runSpacing: 6,
+                                                          children: [
+                                                            MobilePlayerInfoTag(
+                                                              label:
+                                                                  _formatBytes(
+                                                                spec?.sizeBytes,
+                                                              ),
+                                                            ),
+                                                            MobilePlayerInfoTag(
+                                                              label:
+                                                                  _formatBitrateMbps(
+                                                                spec
+                                                                    ?.bitrateBitsPerSecond,
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        );
+                                                      },
+                                                    ),
+                                                  ],
                                                 ),
                                               ),
                                             ],
@@ -2814,7 +2872,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   }
 
   static String _fmtRate(double rate) {
-    final v = rate.clamp(0.1, 5.0).toDouble();
+    final v = rate.clamp(0.1, 10.0).toDouble();
     final asInt = v.roundToDouble();
     if ((v - asInt).abs() < 0.001) return asInt.toStringAsFixed(0);
     if (((v * 10) - (v * 10).roundToDouble()).abs() < 0.001) {
@@ -5595,7 +5653,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                       ),
                                     ),
                                   ),
-                                if (!widget.isTv)
+                                if (!widget.isTv && !_mobileSidePanelVisible)
                                   Align(
                                     alignment: Alignment.topCenter,
                                     child: SafeArea(
@@ -5952,7 +6010,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                       ),
                                     ),
                                   ),
-                                if (!widget.isTv)
+                                if (!widget.isTv && !_mobileSidePanelVisible)
                                   Align(
                                     alignment: Alignment.bottomCenter,
                                     child: SafeArea(
@@ -6023,6 +6081,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                 if (!widget.isTv)
                                   _buildEpisodePickerOverlay(
                                       enableBlur: enableBlur),
+                                if (!widget.isTv)
+                                  _buildMobileSidePanelOverlay(
+                                    context: context,
+                                    controlsEnabled: controlsEnabled,
+                                  ),
                               ],
                             )
                           : _playError != null
@@ -6631,10 +6694,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         label: '线路',
         compact: true,
         onTap: controlsEnabled
-            ? () {
-                _showControls(scheduleHide: false);
-                unawaited(_showDesktopRouteSheet());
-              }
+            ? () => _openMobilePanel(_MobilePlayerPanel.route)
             : null,
       ),
       MobilePlayerActionButton(
@@ -6642,10 +6702,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         label: '版本',
         compact: true,
         onTap: controlsEnabled
-            ? () {
-                _showControls(scheduleHide: false);
-                unawaited(_switchVersion());
-              }
+            ? () => _openMobilePanel(_MobilePlayerPanel.version)
             : null,
       ),
       MobilePlayerActionButton(
@@ -6653,10 +6710,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         label: '音频',
         compact: true,
         onTap: controlsEnabled
-            ? () {
-                _showControls(scheduleHide: false);
-                _showAudioTracks(context);
-              }
+            ? () => _openMobilePanel(_MobilePlayerPanel.audio)
             : null,
       ),
       MobilePlayerActionButton(
@@ -6665,10 +6719,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
             widget.appState.playerCore == PlayerCore.mpv ? '内核 mpv' : '内核 Exo',
         compact: true,
         onTap: controlsEnabled
-            ? () {
-                _showControls(scheduleHide: false);
-                unawaited(_switchCore());
-              }
+            ? () => _openMobilePanel(_MobilePlayerPanel.core)
             : null,
       ),
       MobilePlayerActionButton(
@@ -6678,10 +6729,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         label: _anime4kPreset.isOff ? '超分 关' : '超分 开',
         compact: true,
         onTap: controlsEnabled
-            ? () {
-                _showControls(scheduleHide: false);
-                unawaited(_showAnime4kSheet());
-              }
+            ? () => _openMobilePanel(_MobilePlayerPanel.superResolution)
             : null,
       ),
     ];
@@ -6768,16 +6816,21 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
           mainAxisSize: MainAxisSize.min,
           children: [
             MobilePlayerActionButton(
+              icon: Icons.speed_rounded,
+              label: '倍速',
+              compact: true,
+              onTap: controlsEnabled
+                  ? () => _openMobilePanel(_MobilePlayerPanel.speed)
+                  : null,
+            ),
+            MobilePlayerActionButton(
               icon: (_danmakuEnabled || _danmakuHeatmap.isNotEmpty)
                   ? Icons.comment
                   : Icons.comment_outlined,
               label: '弹幕',
               compact: true,
               onTap: controlsEnabled
-                  ? () {
-                      _showControls(scheduleHide: false);
-                      unawaited(_showDanmakuSheet());
-                    }
+                  ? () => _openMobilePanel(_MobilePlayerPanel.danmaku)
                   : null,
             ),
             MobilePlayerActionButton(
@@ -6785,10 +6838,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
               label: '字幕',
               compact: true,
               onTap: controlsEnabled
-                  ? () {
-                      _showControls(scheduleHide: false);
-                      _showSubtitleTracks(context);
-                    }
+                  ? () => _openMobilePanel(_MobilePlayerPanel.subtitle)
                   : null,
             ),
             MobilePlayerActionButton(
@@ -6822,6 +6872,613 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
               if (mounted) setState(() {});
             }
           : null,
+    );
+  }
+
+  String _mobilePanelTitle(_MobilePlayerPanel panel) {
+    return switch (panel) {
+      _MobilePlayerPanel.route => '线路',
+      _MobilePlayerPanel.version => '版本',
+      _MobilePlayerPanel.audio => '音频',
+      _MobilePlayerPanel.core => '内核',
+      _MobilePlayerPanel.superResolution => '超分',
+      _MobilePlayerPanel.danmaku => '弹幕',
+      _MobilePlayerPanel.subtitle => '字幕',
+      _MobilePlayerPanel.speed => '倍速',
+    };
+  }
+
+  List<double> _mobilePlaybackRateOptions() {
+    final values = <double>[];
+    var current = 0.1;
+    while (current <= 10.0001) {
+      values.add(double.parse(current.toStringAsFixed(2)));
+      current += 0.15;
+    }
+    if ((10.0 - values.last).abs() > 0.001) {
+      values.add(10.0);
+    }
+    return values;
+  }
+
+  Widget _buildMobileSpeedPanel({required bool controlsEnabled}) {
+    final currentRate = _playerService.player.state.rate;
+    final options = _mobilePlaybackRateOptions();
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final rate in options)
+            _buildMobileRateChip(
+              rate: rate,
+              currentRate: currentRate,
+              enabled: controlsEnabled,
+              onTap: () async {
+                _playerService.player.setRate(rate);
+                if (!mounted) return;
+                setState(() {});
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMobileRateChip({
+    required double rate,
+    required double currentRate,
+    required bool enabled,
+    required Future<void> Function() onTap,
+  }) {
+    final selected = (currentRate - rate).abs() < 0.01;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: !enabled
+            ? null
+            : () {
+                _showControls(scheduleHide: false);
+                unawaited(onTap());
+              },
+        borderRadius: BorderRadius.circular(999),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            color: Colors.white.withValues(alpha: selected ? 0.18 : 0.08),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: selected ? 0.34 : 0.12),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Text(
+              '${rate.toStringAsFixed(rate == rate.roundToDouble() ? 0 : 2)}x',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMobileCorePanel({required bool controlsEnabled}) {
+    final current = widget.appState.playerCore;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+      children: [
+        MobilePlayerOptionTile(
+          title: 'mpv',
+          subtitle: '当前使用 media_kit / mpv 播放内核',
+          selected: current == PlayerCore.mpv,
+          trailing: current == PlayerCore.mpv
+              ? const Icon(Icons.check_circle, color: Colors.white)
+              : null,
+        ),
+        const SizedBox(height: 8),
+        MobilePlayerOptionTile(
+          title: 'Exo',
+          subtitle: '切换到 Android Exo 播放内核',
+          selected: current == PlayerCore.exo,
+          trailing: current == PlayerCore.exo
+              ? const Icon(Icons.check_circle, color: Colors.white)
+              : null,
+          onTap: current == PlayerCore.exo || !controlsEnabled
+              ? null
+              : () {
+                  _closeMobilePanels(scheduleHide: false);
+                  unawaited(_switchCore());
+                },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileRoutePanel({required bool controlsEnabled}) {
+    return FutureBuilder<List<RouteEntry>>(
+      future: _resolveDesktopRouteEntries(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final entries = snapshot.data ?? const <RouteEntry>[];
+        if (entries.isEmpty) {
+          return const Center(
+            child: Text(
+              '暂无可用线路',
+              style: TextStyle(color: Colors.white70),
+            ),
+          );
+        }
+
+        final currentUrl = (_baseUrl ?? '').trim();
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+          children: [
+            for (final entry in entries) ...[
+              Builder(
+                builder: (context) {
+                  final domain = entry.domain;
+                  final selected =
+                      currentUrl.isNotEmpty && currentUrl == domain.url;
+                  final remark = (_playbackDomainRemark(domain.url) ?? '').trim();
+
+                  return MobilePlayerOptionTile(
+                    title: domain.name.trim().isEmpty
+                        ? domain.url
+                        : domain.name.trim(),
+                    subtitle:
+                        remark.isEmpty ? domain.url : '$remark\n${domain.url}',
+                    selected: selected,
+                    trailing: selected
+                        ? const Icon(
+                            Icons.check_circle_rounded,
+                            color: Colors.white,
+                          )
+                        : null,
+                    onTap: !controlsEnabled || selected
+                        ? null
+                        : () {
+                            _closeMobilePanels(scheduleHide: false);
+                            unawaited(_switchPlaybackRoute(domain.url));
+                          },
+                  );
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+            MobilePlayerOptionTile(
+              title: '更多线路选项',
+              leading: const Icon(Icons.tune, color: Colors.white),
+              onTap: controlsEnabled
+                  ? () {
+                      _closeMobilePanels(scheduleHide: false);
+                      unawaited(_showDesktopRouteSheet());
+                    }
+                  : null,
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildMobileVersionPanel({required bool controlsEnabled}) {
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _ensureMediaSourcesLoaded(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final sources = List<Map<String, dynamic>>.from(
+          snapshot.data ?? const <Map<String, dynamic>>[],
+        )..sort(_compareMediaSourcesByQuality);
+        if (sources.isEmpty) {
+          return const Center(
+            child: Text(
+              '无法获取版本列表',
+              style: TextStyle(color: Colors.white70),
+            ),
+          );
+        }
+
+        final current = (_mediaSourceId ?? _selectedMediaSourceId ?? '').trim();
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+          children: [
+            for (final ms in sources) ...[
+              Builder(
+                builder: (context) {
+                  final selected =
+                      (ms['Id']?.toString() ?? '').trim() == current;
+
+                  return MobilePlayerOptionTile(
+                    title: _mediaSourceTitle(ms),
+                    subtitle: _mediaSourceSubtitle(ms),
+                    selected: selected,
+                    trailing: selected
+                        ? const Icon(
+                            Icons.check_circle_rounded,
+                            color: Colors.white,
+                          )
+                        : null,
+                    onTap: !controlsEnabled || selected
+                        ? null
+                        : () {
+                            unawaited(() async {
+                              final selectedId =
+                                  (ms['Id']?.toString() ?? '').trim();
+                              if (selectedId.isEmpty) return;
+                              _closeMobilePanels(scheduleHide: false);
+                              await _switchMediaSourceById(
+                                selectedId,
+                                knownSources: sources,
+                              );
+                            }());
+                          },
+                  );
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+            MobilePlayerOptionTile(
+              title: '更多版本选项',
+              leading: const Icon(Icons.view_list_outlined, color: Colors.white),
+              onTap: controlsEnabled
+                  ? () {
+                      _closeMobilePanels(scheduleHide: false);
+                      unawaited(_switchVersion());
+                    }
+                  : null,
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildMobileAudioPanel({required bool controlsEnabled}) {
+    final audios = List<AudioTrack>.from(_tracks.audio);
+    final current = _playerService.player.state.track.audio;
+
+    if (audios.isEmpty) {
+      return const Center(
+        child: Text(
+          '暂无音轨',
+          style: TextStyle(color: Colors.white70),
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+      children: [
+        for (final track in audios) ...[
+          Builder(
+            builder: (context) {
+              final selected = current == track;
+              return MobilePlayerOptionTile(
+                title: track.title ?? track.language ?? '音轨 ${track.id}',
+                subtitle: track.codec ?? '',
+                selected: selected,
+                trailing: selected
+                    ? const Icon(
+                        Icons.check_circle_rounded,
+                        color: Colors.white,
+                      )
+                    : null,
+                onTap: !controlsEnabled || selected
+                    ? null
+                    : () {
+                        unawaited(() async {
+                          await _playerService.player.setAudioTrack(track);
+                          _tracks = _playerService.player.state.tracks;
+                          if (!mounted) return;
+                          setState(() {});
+                        }());
+                      },
+              );
+            },
+          ),
+          const SizedBox(height: 8),
+        ],
+        MobilePlayerOptionTile(
+          title: '更多音轨选项',
+          leading: const Icon(Icons.tune, color: Colors.white),
+          onTap: controlsEnabled
+              ? () {
+                  _closeMobilePanels(scheduleHide: false);
+                  _showAudioTracks(context);
+                }
+              : null,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileSubtitlePanel({required bool controlsEnabled}) {
+    final subs = List<SubtitleTrack>.from(_tracks.subtitle);
+    final current = _playerService.player.state.track.subtitle;
+    final subtitlesEnabled = current.id != 'no';
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+      children: [
+        MobilePlayerOptionTile(
+          title: '关闭字幕',
+          selected: !subtitlesEnabled,
+          trailing: !subtitlesEnabled
+              ? const Icon(Icons.check_circle_rounded, color: Colors.white)
+              : null,
+          onTap: !controlsEnabled || !subtitlesEnabled
+              ? null
+              : () {
+                  unawaited(() async {
+                    _selectedSubtitleStreamIndex = -1;
+                    await _playerService.player.setSubtitleTrack(
+                      SubtitleTrack.no(),
+                    );
+                    _tracks = _playerService.player.state.tracks;
+                    if (!mounted) return;
+                    setState(() {});
+                  }());
+                },
+        ),
+        if (subs.isNotEmpty) const SizedBox(height: 8),
+        for (final track in subs) ...[
+          MobilePlayerOptionTile(
+            title: _subtitleTrackTitle(track),
+            subtitle: _subtitleTrackSubtitle(track),
+            selected: current == track,
+            trailing: current == track
+                ? const Icon(Icons.check_circle_rounded, color: Colors.white)
+                : null,
+            onTap: !controlsEnabled || current == track
+                ? null
+                : () {
+                    unawaited(() async {
+                      _selectedSubtitleStreamIndex =
+                          _tryMapMpvSubtitleTrackToEmbyStreamIndex(track);
+                      await _playerService.player.setSubtitleTrack(track);
+                      _tracks = _playerService.player.state.tracks;
+                      if (!mounted) return;
+                      setState(() {});
+                    }());
+                  },
+          ),
+          const SizedBox(height: 8),
+        ],
+        MobilePlayerOptionTile(
+          title: '更多字幕设置',
+          leading: const Icon(Icons.tune, color: Colors.white),
+          onTap: controlsEnabled
+              ? () {
+                  _closeMobilePanels(scheduleHide: false);
+                  _showSubtitleTracks(context);
+                }
+              : null,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileDanmakuPanel({required bool controlsEnabled}) {
+    final hasSources = _danmakuSources.isNotEmpty;
+    final selectedName = (_danmakuSourceIndex >= 0 &&
+            _danmakuSourceIndex < _danmakuSources.length)
+        ? _danmakuSources[_danmakuSourceIndex].name
+        : '未选择';
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+      children: [
+        MobilePlayerOptionTile(
+          title: '启用弹幕',
+          subtitle: hasSources ? selectedName : '尚未加载弹幕',
+          trailing: Switch(
+            value: _danmakuEnabled,
+            onChanged: !controlsEnabled
+                ? null
+                : (value) {
+                    setState(() => _danmakuEnabled = value);
+                    if (!value) {
+                      _danmakuKey.currentState?.clear();
+                    }
+                  },
+          ),
+        ),
+        const SizedBox(height: 8),
+        MobilePlayerOptionTile(
+          title: '导入本地弹幕',
+          leading: const Icon(Icons.upload_file_outlined, color: Colors.white),
+          onTap: controlsEnabled
+              ? () {
+                  unawaited(_pickDanmakuFile());
+                }
+              : null,
+        ),
+        const SizedBox(height: 8),
+        MobilePlayerOptionTile(
+          title: '加载在线弹幕',
+          leading:
+              const Icon(Icons.cloud_download_outlined, color: Colors.white),
+          onTap: controlsEnabled
+              ? () {
+                  unawaited(_loadOnlineDanmakuForNetwork(showToast: true));
+                }
+              : null,
+        ),
+        const SizedBox(height: 8),
+        MobilePlayerOptionTile(
+          title: '手动匹配弹幕',
+          leading: const Icon(Icons.search, color: Colors.white),
+          onTap: controlsEnabled
+              ? () {
+                  unawaited(_manualMatchOnlineDanmakuForCurrent(showToast: true));
+                }
+              : null,
+        ),
+        const SizedBox(height: 12),
+        Text(
+          '透明度 ${(_danmakuOpacity * 100).round()}%',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        Slider(
+          value: _danmakuOpacity.clamp(0.2, 1.0),
+          min: 0.2,
+          max: 1.0,
+          onChanged: !controlsEnabled
+              ? null
+              : (value) {
+                  setState(() => _danmakuOpacity = value);
+                },
+        ),
+        const SizedBox(height: 8),
+        MobilePlayerOptionTile(
+          title: '更多弹幕设置',
+          leading: const Icon(Icons.tune, color: Colors.white),
+          onTap: controlsEnabled
+              ? () {
+                  _closeMobilePanels(scheduleHide: false);
+                  unawaited(_showDanmakuSheet());
+                }
+              : null,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileSuperResolutionPanel({required bool controlsEnabled}) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+      children: [
+        for (final preset in Anime4kPreset.values) ...[
+          Builder(
+            builder: (context) {
+              final selected = preset == _anime4kPreset;
+              return MobilePlayerOptionTile(
+                title: preset.label,
+                subtitle: preset.description,
+                selected: selected,
+                trailing: selected
+                    ? const Icon(
+                        Icons.check_circle_rounded,
+                        color: Colors.white,
+                      )
+                    : null,
+                onTap: !controlsEnabled || selected
+                    ? null
+                    : () {
+                        unawaited(() async {
+                          setState(() => _anime4kPreset = preset);
+                          unawaited(widget.appState.setAnime4kPreset(preset));
+
+                          if (!_playerService.isInitialized ||
+                              _playerService.isExternalPlayback) {
+                            return;
+                          }
+
+                          final messenger = ScaffoldMessenger.of(context);
+                          try {
+                            await Anime4k.apply(_playerService.player, preset);
+                            if (!mounted) return;
+                            final text = preset.isOff
+                                ? '已关闭 Anime4K'
+                                : '已启用 Anime4K：${preset.label}';
+                            messenger.showSnackBar(
+                              SnackBar(content: Text(text)),
+                            );
+                            setState(() {});
+                          } catch (_) {
+                            if (!mounted) return;
+                            setState(() => _anime4kPreset = Anime4kPreset.off);
+                            unawaited(
+                              widget.appState.setAnime4kPreset(
+                                Anime4kPreset.off,
+                              ),
+                            );
+                            try {
+                              await Anime4k.clear(_playerService.player);
+                            } catch (_) {}
+                            messenger.showSnackBar(
+                              const SnackBar(
+                                content: Text('Anime4K 初始化失败'),
+                              ),
+                            );
+                          }
+                        }());
+                      },
+              );
+            },
+          ),
+          const SizedBox(height: 8),
+        ],
+        MobilePlayerOptionTile(
+          title: '更多超分选项',
+          leading: const Icon(Icons.tune, color: Colors.white),
+          onTap: controlsEnabled
+              ? () {
+                  _closeMobilePanels(scheduleHide: false);
+                  unawaited(_showAnime4kSheet());
+                }
+              : null,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileSidePanelOverlay({
+    required BuildContext context,
+    required bool controlsEnabled,
+  }) {
+    final panel = _mobilePanel;
+    if (panel == null) {
+      return const SizedBox.shrink();
+    }
+
+    Widget child;
+    switch (panel) {
+      case _MobilePlayerPanel.route:
+        child = _buildMobileRoutePanel(controlsEnabled: controlsEnabled);
+        break;
+      case _MobilePlayerPanel.version:
+        child = _buildMobileVersionPanel(controlsEnabled: controlsEnabled);
+        break;
+      case _MobilePlayerPanel.audio:
+        child = _buildMobileAudioPanel(controlsEnabled: controlsEnabled);
+        break;
+      case _MobilePlayerPanel.core:
+        child = _buildMobileCorePanel(controlsEnabled: controlsEnabled);
+        break;
+      case _MobilePlayerPanel.superResolution:
+        child = _buildMobileSuperResolutionPanel(
+          controlsEnabled: controlsEnabled,
+        );
+        break;
+      case _MobilePlayerPanel.danmaku:
+        child = _buildMobileDanmakuPanel(controlsEnabled: controlsEnabled);
+        break;
+      case _MobilePlayerPanel.subtitle:
+        child = _buildMobileSubtitlePanel(controlsEnabled: controlsEnabled);
+        break;
+      case _MobilePlayerPanel.speed:
+        child = _buildMobileSpeedPanel(controlsEnabled: controlsEnabled);
+        break;
+    }
+
+    return MobilePlayerSidePanel(
+      title: _mobilePanelTitle(panel),
+      visible: true,
+      onDismiss: _closeMobilePanels,
+      child: child,
     );
   }
 
@@ -9763,6 +10420,17 @@ class _EpisodeMediaSpec {
     required this.sizeBytes,
     required this.bitrateBitsPerSecond,
   });
+}
+
+enum _MobilePlayerPanel {
+  route,
+  version,
+  audio,
+  core,
+  superResolution,
+  danmaku,
+  subtitle,
+  speed,
 }
 
 enum _OrientationMode { auto, landscape, portrait }
