@@ -12,6 +12,7 @@ import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'mobile_ui/show_detail/episode_detail_mobile_view.dart';
+import 'mobile_ui/show_detail/mobile_text_widgets.dart';
 import 'mobile_ui/show_detail/show_detail_mobile_view.dart';
 import 'plugins/plugin_slot_area.dart';
 import 'server_adapters/server_access.dart';
@@ -981,15 +982,17 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       if (_chapters.isNotEmpty)
         _detailGlassPanel(
           enableBlur: enableBlur,
-          padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
-          radius: 18,
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+          radius: 22,
+          showBorder: false,
           child: _chaptersSection(context, _chapters),
         ),
       if (_similar.isNotEmpty)
         _detailGlassPanel(
           enableBlur: enableBlur,
-          padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
-          radius: 18,
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+          radius: 22,
+          showBorder: false,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1051,8 +1054,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
         ),
       _detailGlassPanel(
         enableBlur: enableBlur,
-        padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
-        radius: 18,
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+        radius: 22,
+        showBorder: false,
         child: _externalLinksSection(context, item, widget.appState),
       ),
       PluginSlotArea(
@@ -1122,16 +1126,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
 
     return _detailGlassPanel(
       enableBlur: !widget.isTv && widget.appState.enableBlurEffects,
-      radius: 18,
-      padding: const EdgeInsets.all(14),
-      gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [
-          scheme.primary.withValues(alpha: 0.12),
-          Colors.black.withValues(alpha: 0.42),
-        ],
-      ),
+      radius: 22,
+      showBorder: false,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1229,9 +1226,6 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                             decoration: BoxDecoration(
                               color: Colors.white.withValues(alpha: 0.08),
                               borderRadius: BorderRadius.circular(999),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.12),
-                              ),
                             ),
                             child: Text(
                               value,
@@ -1292,12 +1286,13 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final selectedSeason = _selectedSeason;
+    const episodeStripHeight = 160.0;
     final buttonStyle = OutlinedButton.styleFrom(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       foregroundColor: Colors.white,
-      backgroundColor: Colors.white.withValues(alpha: 0.04),
-      side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      backgroundColor: Colors.white.withValues(alpha: 0.08),
+      side: BorderSide.none,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       textStyle: theme.textTheme.labelLarge?.copyWith(
         fontWeight: FontWeight.w700,
       ),
@@ -1318,8 +1313,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
         future: _episodesForSeason(selectedSeason),
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
-            return const SizedBox(
-              height: 168,
+            return SizedBox(
+              height: episodeStripHeight,
               child: Center(child: CircularProgressIndicator()),
             );
           }
@@ -1345,13 +1340,13 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           }
 
           return SizedBox(
-            height: 176,
+            height: episodeStripHeight,
             child: _withHorizontalEdgeFade(
               context,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: episodes.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                separatorBuilder: (_, __) => const SizedBox(width: 14),
                 itemBuilder: (context, index) {
                   final episode = episodes[index];
                   final coverUrl = access == null
@@ -1367,66 +1362,82 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                         );
                   final episodeName = episode.name.trim();
                   return SizedBox(
-                    width: 138,
+                    width: 168,
                     child: Material(
                       color: Colors.transparent,
                       child: InkWell(
-                        borderRadius: BorderRadius.circular(14),
+                        borderRadius: BorderRadius.circular(22),
                         onTap: () => _openEpisode(context, episode),
-                        child: Ink(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.05),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.12),
-                            ),
-                          ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
                           child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: AspectRatio(
-                                  aspectRatio: 16 / 9,
-                                  child: coverUrl.isEmpty
-                                      ? const ColoredBox(color: Colors.black26)
-                                      : Image.network(
-                                          coverUrl,
-                                          fit: BoxFit.cover,
-                                          headers: {
-                                            'User-Agent':
-                                                LinHttpClientFactory.userAgent,
-                                          },
-                                          errorBuilder: (_, __, ___) =>
-                                              const ColoredBox(
-                                            color: Colors.black26,
+                              DecoratedBox(
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(22),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color:
+                                          Colors.black.withValues(alpha: 0.18),
+                                      blurRadius: 18,
+                                      offset: const Offset(0, 10),
+                                    ),
+                                  ],
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(22),
+                                  child: AspectRatio(
+                                    aspectRatio: 16 / 9,
+                                    child: coverUrl.isEmpty
+                                        ? ColoredBox(
+                                            color: Colors.white.withValues(
+                                              alpha: 0.08,
+                                            ),
+                                          )
+                                        : Image.network(
+                                            coverUrl,
+                                            fit: BoxFit.cover,
+                                            headers: {
+                                              'User-Agent': LinHttpClientFactory
+                                                  .userAgent,
+                                            },
+                                            errorBuilder: (_, __, ___) =>
+                                                const ColoredBox(
+                                              color: Colors.black26,
+                                            ),
                                           ),
-                                        ),
+                                  ),
                                 ),
                               ),
-                              const SizedBox(height: 8),
+                              const SizedBox(height: 10),
                               Text(
                                 _episodeStripLabel(episode, index),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.labelLarge?.copyWith(
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.titleSmall?.copyWith(
                                   color: Colors.white,
                                   fontWeight: FontWeight.w800,
                                 ),
                               ),
-                              if (episodeName.isNotEmpty) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  episodeName,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: Colors.white70,
-                                    height: 1.3,
-                                  ),
-                                ),
-                              ],
+                              const SizedBox(height: 4),
+                              SizedBox(
+                                height: 18,
+                                child: episodeName.isEmpty
+                                    ? const SizedBox.shrink()
+                                    : CenteredMarqueeText(
+                                        episodeName,
+                                        style:
+                                            theme.textTheme.bodySmall?.copyWith(
+                                          color: Colors.white.withValues(
+                                            alpha: 0.74,
+                                          ),
+                                          height: 1.2,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                              ),
                             ],
                           ),
                         ),
@@ -1443,8 +1454,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
 
     return _detailGlassPanel(
       enableBlur: enableBlur,
-      radius: 18,
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+      radius: 22,
+      showBorder: false,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1504,7 +1516,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           buildEpisodeList(),
         ],
       ),
@@ -1523,8 +1535,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
 
     return _detailGlassPanel(
       enableBlur: enableBlur,
-      radius: 18,
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+      radius: 22,
+      showBorder: false,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1557,9 +1570,13 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                           decoration: BoxDecoration(
                             color: Colors.white.withValues(alpha: 0.05),
                             borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.12),
-                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.12),
+                                blurRadius: 14,
+                                offset: const Offset(0, 8),
+                              ),
+                            ],
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.center,
@@ -2202,6 +2219,80 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     return (ms['Name'] as String?) ?? (ms['Container'] as String?) ?? '默认版本';
   }
 
+  static int? _estimateBitrateFromSizeAndRuntime(
+    int? sizeBytes,
+    int? runtimeTicks,
+  ) {
+    if (sizeBytes == null || sizeBytes <= 0) return null;
+    final ticks = runtimeTicks ?? 0;
+    if (ticks <= 0) return null;
+    final seconds = ticks / 10000000.0;
+    if (!seconds.isFinite || seconds <= 0) return null;
+    return ((sizeBytes * 8) / seconds).round();
+  }
+
+  static String _formatCompactBitrate(int? bitrate) {
+    if (bitrate == null || bitrate <= 0) return '';
+    if (bitrate >= 1000000) {
+      final value = bitrate / 1000000;
+      return '${value.toStringAsFixed(value >= 10 ? 0 : 1)} Mbps';
+    }
+    if (bitrate >= 1000) {
+      return '${(bitrate / 1000).toStringAsFixed(0)} Kbps';
+    }
+    return '$bitrate bps';
+  }
+
+  static String _formatCompactFileSize(int? bytes) {
+    if (bytes == null || bytes <= 0) return '';
+    const kb = 1024;
+    const mb = kb * 1024;
+    const gb = mb * 1024;
+    if (bytes >= gb) {
+      final value = bytes / gb;
+      return '${value.toStringAsFixed(value >= 10 ? 0 : 1)} GB';
+    }
+    if (bytes >= mb) {
+      final value = bytes / mb;
+      return '${value.toStringAsFixed(value >= 10 ? 0 : 1)} MB';
+    }
+    if (bytes >= kb) return '${(bytes / kb).toStringAsFixed(0)} KB';
+    return '$bytes B';
+  }
+
+  static String _mediaSourceResolutionText(Map<String, dynamic>? ms) {
+    if (ms == null) return '';
+    final videoStreams = _streamsOfType(ms, 'Video');
+    final video = videoStreams.isNotEmpty ? videoStreams.first : null;
+    final width = _asInt(video?['Width']);
+    final height = _asInt(video?['Height']);
+    if (width != null && height != null && width > 0 && height > 0) {
+      return '${width}x$height';
+    }
+    if (height != null && height > 0) return '${height}P';
+    return '';
+  }
+
+  static String _mediaSourceBitrateText(
+    Map<String, dynamic>? ms, {
+    required int? fallbackSizeBytes,
+    required int? fallbackRuntimeTicks,
+  }) {
+    final sizeBytes = _asInt(ms?['Size']) ?? fallbackSizeBytes;
+    var bitrate = _asInt(ms?['Bitrate']);
+    bitrate ??=
+        _estimateBitrateFromSizeAndRuntime(sizeBytes, fallbackRuntimeTicks);
+    return _formatCompactBitrate(bitrate);
+  }
+
+  static String _mediaSourceSizeText(
+    Map<String, dynamic>? ms, {
+    required int? fallbackSizeBytes,
+  }) {
+    final sizeBytes = _asInt(ms?['Size']) ?? fallbackSizeBytes;
+    return _formatCompactFileSize(sizeBytes);
+  }
+
   static int _compareMediaSourcesByQuality(
     Map<String, dynamic> a,
     Map<String, dynamic> b,
@@ -2515,7 +2606,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
 
     return _detailGlassPanel(
       enableBlur: !widget.isTv && widget.appState.enableBlurEffects,
-      radius: 16,
+      radius: 22,
+      showBorder: false,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -5834,6 +5926,43 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     return _ShowDetailPageState._streamLabel(selected, includeCodec: false);
   }
 
+  List<String> _episodeMediaBadges(
+    MediaItem episode, {
+    required Duration? runtime,
+    Map<String, dynamic>? mediaSource,
+  }) {
+    final badges = <String>[];
+    final resolution = _ShowDetailPageState._mediaSourceResolutionText(
+      mediaSource,
+    );
+    if (resolution.isNotEmpty) {
+      badges.add('分辨率 $resolution');
+    }
+
+    final bitrate = _ShowDetailPageState._mediaSourceBitrateText(
+      mediaSource,
+      fallbackSizeBytes: episode.sizeBytes,
+      fallbackRuntimeTicks: episode.runTimeTicks,
+    );
+    if (bitrate.isNotEmpty) {
+      badges.add('码率 $bitrate');
+    }
+
+    final size = _ShowDetailPageState._mediaSourceSizeText(
+      mediaSource,
+      fallbackSizeBytes: episode.sizeBytes,
+    );
+    if (size.isNotEmpty) {
+      badges.add('大小 $size');
+    }
+
+    final durationText = _episodeRuntimeText(runtime).trim();
+    if (durationText.isNotEmpty) {
+      badges.add('时长 $durationText');
+    }
+    return badges;
+  }
+
   Future<void> _playCurrentEpisode({Duration? startPosition}) async {
     final ep = _detail ?? _episode;
     final useExoCore = !kIsWeb &&
@@ -7193,6 +7322,11 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
             : _ShowDetailPageState._mediaSourceTitle(currentMs));
     final audioText = _currentAudioText().trim();
     final subtitleText = _currentSubtitleText().trim();
+    final mediaBadges = _episodeMediaBadges(
+      ep,
+      runtime: runtime,
+      mediaSource: currentMs,
+    );
     final audioValue =
         currentMs == null ? '默认' : (audioText.isEmpty ? '默认' : audioText);
     final subtitleValue = currentMs == null
@@ -7206,7 +7340,6 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
           playInfo,
           selectedMediaSourceId: _selectedMediaSourceId,
         ),
-      if ((_seriesId ?? '').trim().isNotEmpty) _otherEpisodesSection(context),
       if (_detail?.people.isNotEmpty == true && access != null)
         _castSection(
           context,
@@ -7216,8 +7349,9 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       if (_chapters.isNotEmpty)
         _detailGlassPanel(
           enableBlur: enableBlur,
-          padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
-          radius: 18,
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+          radius: 22,
+          showBorder: false,
           child: _chaptersSection(context, _chapters),
         ),
       PluginSlotArea(
@@ -7231,6 +7365,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       title: _episodeDisplayTitle(ep),
       overview: (_detail?.overview ?? ep.overview).trim(),
       runtimeText: _episodeRuntimeText(runtime),
+      mediaBadges: mediaBadges,
       coverUrl: coverUrl,
       backdropUrl: backdropUrl,
       versionValue: versionValue,

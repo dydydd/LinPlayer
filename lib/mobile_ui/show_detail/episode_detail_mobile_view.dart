@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:lin_player_server_api/network/lin_http_client.dart';
 
+import 'mobile_text_widgets.dart';
+
 class EpisodeDetailMobileView extends StatelessWidget {
   const EpisodeDetailMobileView({
     super.key,
     required this.title,
     required this.overview,
     required this.runtimeText,
+    this.mediaBadges = const <String>[],
     required this.coverUrl,
     required this.backdropUrl,
     required this.versionValue,
@@ -25,6 +28,7 @@ class EpisodeDetailMobileView extends StatelessWidget {
   final String title;
   final String overview;
   final String runtimeText;
+  final List<String> mediaBadges;
   final String coverUrl;
   final String backdropUrl;
   final String versionValue;
@@ -41,7 +45,6 @@ class EpisodeDetailMobileView extends StatelessWidget {
 
   static const _surfaceTop = Color(0xEE151D27);
   static const _surfaceBottom = Color(0xEE0B1016);
-  static const _lineColor = Color(0x1FFFFFFF);
   static const _accentA = Color(0xFF8CC6FF);
   static const _accentB = Color(0xFF7BE0C3);
 
@@ -163,65 +166,56 @@ class EpisodeDetailMobileView extends StatelessWidget {
   }
 
   Widget _heroCard(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final coverWidth = screenWidth >= 430 ? 156.0 : 136.0;
-    final coverHeight = coverWidth * 9 / 16;
     final theme = Theme.of(context);
+    final badges = mediaBadges
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toList();
+    if (badges.isEmpty && runtimeText.trim().isNotEmpty) {
+      badges.add(runtimeText.trim());
+    }
     final description = overview.trim().isEmpty ? '暂无简介' : overview.trim();
 
     return _panel(
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           ClipRRect(
-            borderRadius: BorderRadius.circular(18),
-            child: SizedBox(
-              width: coverWidth,
-              height: coverHeight,
+            borderRadius: BorderRadius.circular(24),
+            child: AspectRatio(
+              aspectRatio: 16 / 9,
               child: _coverImage(context),
             ),
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: SizedBox(
-              height: coverHeight,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            height: 1.18,
-                          ),
-                        ),
-                      ),
-                      if (runtimeText.trim().isNotEmpty) ...[
-                        const SizedBox(width: 10),
-                        _metaChip(runtimeText.trim()),
-                      ],
-                    ],
-                  ),
-                  Text(
-                    description,
-                    maxLines: 4,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.78),
-                      height: 1.42,
-                    ),
-                  ),
-                ],
-              ),
+          const SizedBox(height: 16),
+          Text(
+            title,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleLarge?.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.w900,
+              height: 1.12,
             ),
+          ),
+          if (badges.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: badges.map(_metaChip).toList(growable: false),
+            ),
+          ],
+          const SizedBox(height: 14),
+          ExpandableText(
+            description,
+            collapsedLines: 4,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: Colors.white.withValues(alpha: 0.82),
+              height: 1.5,
+            ),
+            actionColor: Colors.white.withValues(alpha: 0.86),
           ),
         ],
       ),
@@ -246,7 +240,7 @@ class EpisodeDetailMobileView extends StatelessWidget {
           child: Icon(
             Icons.movie_outlined,
             color: Colors.white70,
-            size: 34,
+            size: 40,
           ),
         ),
       );
@@ -262,7 +256,7 @@ class EpisodeDetailMobileView extends StatelessWidget {
 
   Widget _selectorCard(BuildContext context) {
     return _panel(
-      padding: EdgeInsets.zero,
+      padding: const EdgeInsets.all(6),
       child: Column(
         children: [
           _selectorRow(
@@ -272,7 +266,7 @@ class EpisodeDetailMobileView extends StatelessWidget {
             value: versionValue,
             onTap: onPickVersion,
           ),
-          _divider(),
+          const SizedBox(height: 4),
           _selectorRow(
             context,
             icon: Icons.audiotrack_rounded,
@@ -280,7 +274,7 @@ class EpisodeDetailMobileView extends StatelessWidget {
             value: audioValue,
             onTap: onPickAudio,
           ),
-          _divider(),
+          const SizedBox(height: 4),
           _selectorRow(
             context,
             icon: Icons.closed_caption_rounded,
@@ -309,16 +303,17 @@ class EpisodeDetailMobileView extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
+        borderRadius: BorderRadius.circular(22),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           child: Row(
             children: [
               Container(
-                width: 34,
-                height: 34,
+                width: 38,
+                height: 38,
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: enabled ? 0.08 : 0.04),
-                  borderRadius: BorderRadius.circular(12),
+                  color: Colors.white.withValues(alpha: enabled ? 0.10 : 0.05),
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 child: Icon(icon, color: textColor, size: 18),
               ),
@@ -336,7 +331,7 @@ class EpisodeDetailMobileView extends StatelessWidget {
               Flexible(
                 child: Text(
                   value.trim().isEmpty ? '默认' : value.trim(),
-                  maxLines: 2,
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.end,
                   style: theme.textTheme.bodyMedium?.copyWith(
@@ -427,7 +422,13 @@ class EpisodeDetailMobileView extends StatelessWidget {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(22),
                 color: Colors.white.withValues(alpha: 0.08),
-                border: Border.all(color: _lineColor),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.12),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
               ),
               child: Material(
                 color: Colors.transparent,
@@ -456,21 +457,20 @@ class EpisodeDetailMobileView extends StatelessWidget {
     return Container(
       padding: padding,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(26),
+        borderRadius: BorderRadius.circular(28),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            _surfaceTop.withValues(alpha: 0.92),
+            _surfaceTop.withValues(alpha: 0.90),
             _surfaceBottom.withValues(alpha: 0.94),
           ],
         ),
-        border: Border.all(color: _lineColor),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.20),
-            blurRadius: 22,
-            offset: const Offset(0, 12),
+            color: Colors.black.withValues(alpha: 0.18),
+            blurRadius: 26,
+            offset: const Offset(0, 14),
           ),
         ],
       ),
@@ -483,8 +483,7 @@ class EpisodeDetailMobileView extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        color: Colors.white.withValues(alpha: 0.08),
-        border: Border.all(color: _lineColor),
+        color: Colors.white.withValues(alpha: 0.10),
       ),
       child: Text(
         text,
@@ -494,13 +493,6 @@ class EpisodeDetailMobileView extends StatelessWidget {
           fontWeight: FontWeight.w700,
         ),
       ),
-    );
-  }
-
-  Widget _divider() {
-    return const Padding(
-      padding: EdgeInsets.symmetric(horizontal: 14),
-      child: Divider(height: 1, color: _lineColor),
     );
   }
 }
