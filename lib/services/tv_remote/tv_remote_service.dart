@@ -380,8 +380,10 @@ class TvRemoteService extends ChangeNotifier {
         }
 
         final url = (map['url'] ?? '').toString().trim();
-        final timeoutMs = int.tryParse((map['timeoutMs'] ?? '').toString()) ?? 5000;
-        final delays = await BuiltInProxyService.instance.fetchProxyDelayMsBatch(
+        final timeoutMs =
+            int.tryParse((map['timeoutMs'] ?? '').toString()) ?? 5000;
+        final delays =
+            await BuiltInProxyService.instance.fetchProxyDelayMsBatch(
           nodes,
           url: url.isEmpty ? 'http://1.1.1.1/generate_204' : url,
           timeout: Duration(milliseconds: timeoutMs.clamp(500, 15000)),
@@ -937,7 +939,8 @@ class TvRemoteService extends ChangeNotifier {
           case 'tvBuiltInProxySubscriptionUrl':
             await BuiltInProxyService.instance
                 .setSubscriptionUrl((value ?? '').toString());
-            await BuiltInProxyService.instance.applyConfig(restartIfRunning: true);
+            await BuiltInProxyService.instance
+                .applyConfig(restartIfRunning: true);
             break;
           case 'tvBuiltInProxyProxyNodeSelect':
             final node = (value ?? '').toString().trim();
@@ -1187,7 +1190,7 @@ const String _indexHtml = r'''<!doctype html>
         </div>
         <div>
           <label>端口（可选）</label>
-          <input id="port" placeholder="例如：8096" inputmode="numeric" autocomplete="off" />
+          <input id="port" placeholder="例如：80 或 443" inputmode="numeric" autocomplete="off" />
         </div>
       </div>
 

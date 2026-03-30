@@ -1843,7 +1843,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 textInputAction: TextInputAction.done,
                 maxLines: 3,
                 decoration: const InputDecoration(
-                  hintText: 'https://example.com:8920\nexample.com\n1.2.3.4/32',
+                  hintText: 'https://example.com\nexample.com\n1.2.3.4/32',
                   helperText:
                       '支持 URL / 域名 / IP / CIDR（每行一个）\n命中的域名/IP 将走 Proxy 组\n保存后写入 mihomo 规则，并在内置代理运行中时自动重启生效',
                 ),

@@ -29,7 +29,7 @@ env:
 
 jobs:
   build-android:
-    name: Build Android APK
+    name: Build Android APK (PHONE + TV)
     runs-on: ubuntu-latest
     env:
       PUB_CACHE: /home/runner/.pub-cache
@@ -117,7 +117,7 @@ jobs:
             exit 1
           fi
 
-      - name: Build APKs (split + universal)
+      - name: Build APKs (PHONE + TV)
         shell: bash
         run: |
           set -euo pipefail
@@ -133,15 +133,11 @@ jobs:
             DART_DEFINE_ARGS+=(--dart-define=TMDB_API_KEY="${TMDB_API_KEY}")
           fi
 
-          flutter build apk --release --split-per-abi --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" "${DART_DEFINE_ARGS[@]}"
-          cp -v build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "$OUT_DIR/LinPlayer-Android-arm64-v8a.apk"
+          flutter build apk --release --split-per-abi --target-platform android-arm64 --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" "${DART_DEFINE_ARGS[@]}"
+          cp -v build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "$OUT_DIR/LinPlayer-Android-PHONE-arm64-v8a.apk"
 
-          # TV build: force TV mode even on non-TV Android devices (phone / tablet / boxes).
-          flutter build apk --release --target-platform android-arm,android-arm64 --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" --dart-define=LINPLAYER_FORCE_TV=true "${DART_DEFINE_ARGS[@]}"
-          cp -v build/app/outputs/flutter-apk/app-release.apk "$OUT_DIR/LinPlayer-Android-TV.apk"
-
-          flutter build apk --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" "${DART_DEFINE_ARGS[@]}"
-          cp -v build/app/outputs/flutter-apk/app-release.apk "$OUT_DIR/LinPlayer-Android.apk"
+          flutter build apk --release --split-per-abi --target-platform android-arm --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" --dart-define=LINPLAYER_FORCE_TV=true "${DART_DEFINE_ARGS[@]}"
+          cp -v build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "$OUT_DIR/LinPlayer-Android-TV-armeabi-v7a.apk"
 
           echo "--- Staged APKs ---"
           ls -la "$OUT_DIR"
@@ -149,7 +145,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LinPlayer-Android-APKs-${{ env.VERSION_FULL }}
+          name: LinPlayer-Android-PHONE-TV-APKs-${{ env.VERSION_FULL }}
           path: build/ci-android-apks/*.apk
 
   build-windows:
@@ -582,13 +578,13 @@ jobs:
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
 
-          /usr/bin/zip -qry LinPlayer-iOS-unsigned.ipa Payload
+          /usr/bin/zip -qry LinPlayer-iPhone-unsigned.ipa Payload
 
       - name: Upload unsigned IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LinPlayer-iOS-Unsigned-IPA-${{ env.VERSION_FULL }}
-          path: LinPlayer-iOS-unsigned.ipa
+          name: LinPlayer-iPhone-Unsigned-IPA-${{ env.VERSION_FULL }}
+          path: LinPlayer-iPhone-unsigned.ipa
 
   build-macos:
     name: Build macOS DMG (${{ matrix.arch }})
@@ -833,12 +829,11 @@ jobs:
           set -euo pipefail
           source .github/scripts/retry.sh
 
-          gh_retry release upload nightly "dist/LinPlayer-Android-arm64-v8a.apk" --clobber
-          gh_retry release upload nightly "dist/LinPlayer-Android-TV.apk" --clobber
-          gh_retry release upload nightly "dist/LinPlayer-Android.apk" --clobber
+          gh_retry release upload nightly "dist/LinPlayer-Android-PHONE-arm64-v8a.apk" --clobber
+          gh_retry release upload nightly "dist/LinPlayer-Android-TV-armeabi-v7a.apk" --clobber
           gh_retry release upload nightly "dist/LinPlayer-Windows-Setup-x64.exe" --clobber
           gh_retry release upload nightly "dist/LinPlayer-Linux-x86_64.tar.gz" --clobber
-          gh_retry release upload nightly "dist/LinPlayer-iOS-unsigned.ipa" --clobber
+          gh_retry release upload nightly "dist/LinPlayer-iPhone-unsigned.ipa" --clobber
           gh_retry release upload nightly "dist/LinPlayer-macOS-arm64.dmg" --clobber
           gh_retry release upload nightly "dist/LinPlayer-macOS-x86_64.dmg" --clobber
 
@@ -856,12 +851,11 @@ jobs:
           # Keep only the latest asset for each expected filename, and remove any older/stale
           # LinPlayer-* assets that may have been left behind by previous workflow versions.
           expected_assets=(
-            "LinPlayer-Android-arm64-v8a.apk"
-            "LinPlayer-Android-TV.apk"
-            "LinPlayer-Android.apk"
+            "LinPlayer-Android-PHONE-arm64-v8a.apk"
+            "LinPlayer-Android-TV-armeabi-v7a.apk"
             "LinPlayer-Windows-Setup-x64.exe"
             "LinPlayer-Linux-x86_64.tar.gz"
-            "LinPlayer-iOS-unsigned.ipa"
+            "LinPlayer-iPhone-unsigned.ipa"
             "LinPlayer-macOS-arm64.dmg"
             "LinPlayer-macOS-x86_64.dmg"
           )

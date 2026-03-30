@@ -251,7 +251,8 @@ class _ServerPageState extends State<ServerPage> {
                           child: _ServerListTile(
                             server: server,
                             active: isActive,
-                            subtitleText: isTv ? _tvServerSubtitle(server) : null,
+                            subtitleText:
+                                isTv ? _tvServerSubtitle(server) : null,
                             autofocus: isTv && isActive,
                             onTap: loading
                                 ? null
@@ -263,8 +264,10 @@ class _ServerPageState extends State<ServerPage> {
                                                 .isNotEmpty;
                                     if (hasError) {
                                       final msg =
-                                          (server.lastErrorMessage ?? '').trim();
-                                      ScaffoldMessenger.of(context).showSnackBar(
+                                          (server.lastErrorMessage ?? '')
+                                              .trim();
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
                                         SnackBar(
                                           content: Text(
                                             msg.isNotEmpty
@@ -277,7 +280,8 @@ class _ServerPageState extends State<ServerPage> {
                                     }
                                     if (server.serverType ==
                                         MediaServerType.plex) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
                                         SnackBar(
                                           content: Text(
                                             '${server.serverType.label} 暂未支持浏览/播放（仅可保存登录信息）。',
@@ -303,7 +307,8 @@ class _ServerPageState extends State<ServerPage> {
                                             '')
                                         .trim();
                                     if (msg.isNotEmpty) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
                                         SnackBar(content: Text(msg)),
                                       );
                                     }
@@ -337,11 +342,10 @@ class _ServerPageState extends State<ServerPage> {
                         onTap: loading
                             ? null
                             : () async {
-                                final hasError =
-                                    server.lastErrorCode != null ||
-                                        (server.lastErrorMessage ?? '')
-                                            .trim()
-                                            .isNotEmpty;
+                                final hasError = server.lastErrorCode != null ||
+                                    (server.lastErrorMessage ?? '')
+                                        .trim()
+                                        .isNotEmpty;
                                 if (hasError) {
                                   final msg =
                                       (server.lastErrorMessage ?? '').trim();
@@ -366,12 +370,13 @@ class _ServerPageState extends State<ServerPage> {
                                   );
                                   return;
                                 }
-                                if (server.id == widget.appState.activeServerId) {
+                                if (server.id ==
+                                    widget.appState.activeServerId) {
                                   await Navigator.of(context).maybePop();
                                   return;
                                 }
-                                final ok =
-                                    await widget.appState.enterServer(server.id);
+                                final ok = await widget.appState
+                                    .enterServer(server.id);
                                 if (!context.mounted) return;
                                 if (ok) {
                                   await Navigator.of(context).maybePop();
@@ -452,7 +457,8 @@ class _ServerPageState extends State<ServerPage> {
                       color: theme.colorScheme.surfaceContainerHighest
                           .withValues(alpha: 0.65),
                       borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: theme.colorScheme.outlineVariant),
+                      border:
+                          Border.all(color: theme.colorScheme.outlineVariant),
                     ),
                     child: url == null
                         ? SizedBox(
@@ -617,7 +623,7 @@ class _ServerPageState extends State<ServerPage> {
                   controller: urlCtrl,
                   decoration: const InputDecoration(
                     labelText: '地址',
-                    hintText: '例如：https://emby.example.com:8920',
+                    hintText: '例如：https://emby.example.com',
                   ),
                   keyboardType: TextInputType.url,
                 ),
@@ -658,7 +664,8 @@ class _ServerPageState extends State<ServerPage> {
     return result;
   }
 
-  Future<String?> _pickTvRouteUrl(ServerProfile server, {required String title}) async {
+  Future<String?> _pickTvRouteUrl(ServerProfile server,
+      {required String title}) async {
     final currentUrl = server.baseUrl.trim();
     final customDomains = widget.appState.customDomainsOfServer(server.id);
 
@@ -699,10 +706,11 @@ class _ServerPageState extends State<ServerPage> {
                   final entry = items[index];
                   final selected = entry.url == currentUrl;
                   final remark = (widget.appState
-                          .serverDomainRemark(server.id, entry.url) ??
-                      '')
+                              .serverDomainRemark(server.id, entry.url) ??
+                          '')
                       .trim();
-                  final subtitle = remark.isEmpty ? entry.url : '$remark · ${entry.url}';
+                  final subtitle =
+                      remark.isEmpty ? entry.url : '$remark · ${entry.url}';
                   return ListTile(
                     title: Text(
                       entry.name,
@@ -714,7 +722,8 @@ class _ServerPageState extends State<ServerPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    trailing: selected ? const Icon(Icons.check, size: 18) : null,
+                    trailing:
+                        selected ? const Icon(Icons.check, size: 18) : null,
                     onTap: () => Navigator.of(dialogContext).pop(entry.url),
                   );
                 },
@@ -923,7 +932,9 @@ class _ServerPageState extends State<ServerPage> {
                         suffixIcon: IconButton(
                           tooltip: pwdVisible ? '隐藏密码' : '显示密码',
                           icon: Icon(
-                            pwdVisible ? Icons.visibility_off : Icons.visibility,
+                            pwdVisible
+                                ? Icons.visibility_off
+                                : Icons.visibility,
                           ),
                           onPressed: () => setDialogState(() {
                             pwdVisible = !pwdVisible;
@@ -1171,7 +1182,9 @@ class _ServerCardState extends State<_ServerCard> {
     final highlighted = _focused || _hovered;
     final remark = (server.remark ?? '').trim();
     final subtitleText = widget.subtitleText ??
-        (remark.isNotEmpty ? '${server.serverType.label} · $remark' : server.serverType.label);
+        (remark.isNotEmpty
+            ? '${server.serverType.label} · $remark'
+            : server.serverType.label);
 
     final borderColor = active
         ? colorScheme.primary.withValues(alpha: 0.55)
@@ -1301,7 +1314,9 @@ class _ServerListTileState extends State<_ServerListTile> {
     final highlighted = _focused || _hovered;
     final remark = (server.remark ?? '').trim();
     final subtitleText = widget.subtitleText ??
-        (remark.isNotEmpty ? '${server.serverType.label} · $remark' : server.serverType.label);
+        (remark.isNotEmpty
+            ? '${server.serverType.label} · $remark'
+            : server.serverType.label);
 
     final borderColor = active
         ? scheme.primary.withValues(alpha: 0.55)

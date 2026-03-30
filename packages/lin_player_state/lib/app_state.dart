@@ -2261,14 +2261,14 @@ class AppState extends ChangeNotifier {
         _continueWatchingInFlight = null;
         await prefs.setString(_kActiveServerIdKey, server.id);
       } catch (e) {
-        final msg = e.toString();
+        final msg = _userFacingErrorText(e);
         _error = msg;
         server.lastErrorCode = _extractHttpStatusCode(msg);
         server.lastErrorMessage = msg;
         await _persistServers(prefs);
       }
     } catch (e) {
-      final msg = e.toString();
+      final msg = _userFacingErrorText(e);
       _error = msg;
 
       final code = _extractHttpStatusCode(msg);
@@ -3813,6 +3813,15 @@ class AppState extends ChangeNotifier {
     final parsed = Uri.tryParse(v);
     if (parsed != null && parsed.hasScheme) return v;
     return '$defaultScheme://$v';
+  }
+
+  static String _userFacingErrorText(Object error) {
+    var message = error.toString().trim();
+    const prefix = 'Exception:';
+    if (message.startsWith(prefix)) {
+      message = message.substring(prefix.length).trim();
+    }
+    return message;
   }
 
   static int? _extractHttpStatusCode(String message) {

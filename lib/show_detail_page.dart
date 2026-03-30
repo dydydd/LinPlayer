@@ -11,6 +11,8 @@ import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher_string.dart';
+import 'mobile_ui/show_detail/episode_detail_mobile_view.dart';
+import 'mobile_ui/show_detail/show_detail_mobile_view.dart';
 import 'plugins/plugin_slot_area.dart';
 import 'server_adapters/server_access.dart';
 import 'services/playback_proxy/playback_proxy.dart';
@@ -888,52 +890,6 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     );
   }
 
-  Widget _topNavOverlay(BuildContext context) {
-    return SafeArea(
-      bottom: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
-        child: IconTheme(
-          data: const IconThemeData(color: Colors.white),
-          child: Row(
-            children: [
-              IconButton(
-                onPressed: () {
-                  if (Navigator.of(context).canPop()) {
-                    Navigator.of(context).pop();
-                  }
-                },
-                icon: const Icon(Icons.arrow_back),
-              ),
-              IconButton(
-                onPressed: () =>
-                    Navigator.of(context).popUntil((r) => r.isFirst),
-                icon: const Icon(Icons.home),
-              ),
-              IconButton(
-                onPressed: () => _showTopActionHint('菜单'),
-                icon: const Icon(Icons.menu),
-              ),
-              const Spacer(),
-              IconButton(
-                onPressed: () => _showTopActionHint('投屏'),
-                icon: const Icon(Icons.cast),
-              ),
-              IconButton(
-                onPressed: () => _showTopActionHint('搜索'),
-                icon: const Icon(Icons.search),
-              ),
-              IconButton(
-                onPressed: () => _showTopActionHint('设置'),
-                icon: const Icon(Icons.settings),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Map<String, Object?> _buildDetailPluginParams(MediaItem item) {
     final yearText = _mediaYearText(item);
     final year = int.tryParse(yearText);
@@ -1005,235 +961,125 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     required String heroImageUrl,
     required bool showFloatingSettings,
   }) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final topInset = MediaQuery.of(context).padding.top;
-    final contentTop = topInset + 72;
-    final bottomPadding = showFloatingSettings ? 108.0 : 28.0;
-
-    Widget backdrop = heroImageUrl.isEmpty
-        ? DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  scheme.primary.withValues(alpha: 0.18),
-                  const Color(0xFF171B22),
-                  const Color(0xFF090B0E),
-                ],
-              ),
-            ),
-          )
-        : Image.network(
-            heroImageUrl,
-            fit: BoxFit.cover,
-            headers: {'User-Agent': LinHttpClientFactory.userAgent},
-            errorBuilder: (_, __, ___) => DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    scheme.primary.withValues(alpha: 0.18),
-                    const Color(0xFF171B22),
-                    const Color(0xFF090B0E),
-                  ],
-                ),
-              ),
-            ),
-          );
-
-    backdrop = ColorFiltered(
-      colorFilter: ColorFilter.mode(
-        Colors.black.withValues(alpha: 0.16),
-        BlendMode.darken,
-      ),
-      child: backdrop,
-    );
-
-    return Scaffold(
-      body: Stack(
-        children: [
-          Positioned.fill(child: backdrop),
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  stops: const [0, 0.30, 0.72, 1],
-                  colors: [
-                    Colors.black.withValues(alpha: 0.22),
-                    Colors.black.withValues(alpha: 0.52),
-                    const Color(0xFF0D1014).withValues(alpha: 0.96),
-                    const Color(0xFF060708),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: RadialGradient(
-                  center: const Alignment(0, -0.92),
-                  radius: 1.1,
-                  colors: [
-                    scheme.primary.withValues(alpha: 0.18),
-                    Colors.transparent,
-                  ],
-                ),
-              ),
-            ),
-          ),
-          RefreshIndicator(
-            onRefresh: _load,
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(
-                parent: BouncingScrollPhysics(),
-              ),
-              padding: EdgeInsets.fromLTRB(16, contentTop, 16, bottomPadding),
-              children: [
-                _mobileHeroSection(
+    final sections = <Widget>[
+      if (isSeries && _seasons.isNotEmpty)
+        _mobileSeriesEpisodesSection(
+          context,
+          enableBlur: enableBlur,
+          seriesItem: item,
+          access: access,
+        ),
+      if (item.people.isNotEmpty && access != null)
+        _mobilePeopleSection(
+          context,
+          access: access,
+          enableBlur: enableBlur,
+          people: item.people,
+        ),
+      if (!isSeries && playInfo != null && !showFloatingSettings)
+        _moviePlaybackOptionsCard(context, playInfo),
+      if (_chapters.isNotEmpty)
+        _detailGlassPanel(
+          enableBlur: enableBlur,
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+          radius: 18,
+          child: _chaptersSection(context, _chapters),
+        ),
+      if (_similar.isNotEmpty)
+        _detailGlassPanel(
+          enableBlur: enableBlur,
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+          radius: 18,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _sectionTitle(context, '更多类似'),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 236,
+                child: _withHorizontalEdgeFade(
                   context,
-                  item: item,
-                  access: access,
-                  isSeries: isSeries,
-                  runtime: runtime,
-                ),
-                if (isSeries && _seasons.isNotEmpty) ...[
-                  const SizedBox(height: 14),
-                  _mobileSeriesEpisodesSection(
-                    context,
-                    enableBlur: enableBlur,
-                    seriesItem: item,
-                    access: access,
-                  ),
-                ],
-                if (item.people.isNotEmpty && access != null) ...[
-                  const SizedBox(height: 14),
-                  _mobilePeopleSection(
-                    context,
-                    access: access,
-                    enableBlur: enableBlur,
-                    people: item.people,
-                  ),
-                ],
-                if (!isSeries && playInfo != null && !showFloatingSettings) ...[
-                  const SizedBox(height: 14),
-                  _moviePlaybackOptionsCard(context, playInfo),
-                ],
-                if (_chapters.isNotEmpty) ...[
-                  const SizedBox(height: 14),
-                  _detailGlassPanel(
-                    enableBlur: enableBlur,
-                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
-                    radius: 18,
-                    child: _chaptersSection(context, _chapters),
-                  ),
-                ],
-                if (_similar.isNotEmpty) ...[
-                  const SizedBox(height: 14),
-                  _detailGlassPanel(
-                    enableBlur: enableBlur,
-                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
-                    radius: 18,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _sectionTitle(context, '更多类似'),
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          height: 236,
-                          child: _withHorizontalEdgeFade(
-                            context,
-                            child: ListView.separated(
-                              scrollDirection: Axis.horizontal,
-                              itemCount: _similar.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(width: 12),
-                              itemBuilder: (context, index) {
-                                final similar = _similar[index];
-                                final img = similar.hasImage && access != null
-                                    ? access.adapter.imageUrl(
-                                        access.auth,
-                                        itemId: similar.id,
-                                        maxWidth: 400,
-                                      )
-                                    : null;
-                                final year = _yearText(similar);
-                                final badge = similar.type == 'Movie'
-                                    ? '电影'
-                                    : (similar.type == 'Series' ? '剧集' : '');
-                                return _HoverScale(
-                                  child: SizedBox(
-                                    width: 138,
-                                    child: MediaPosterTile(
-                                      title: similar.name,
-                                      titleMaxLines: 2,
-                                      imageUrl: img,
-                                      year: year,
-                                      rating: similar.communityRating,
-                                      badgeText: badge,
-                                      onTap: () {
-                                        Navigator.of(context).push(
-                                          MaterialPageRoute(
-                                            builder: (_) => ShowDetailPage(
-                                              itemId: similar.id,
-                                              title: similar.name,
-                                              appState: widget.appState,
-                                              server: widget.server,
-                                              isTv: widget.isTv,
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                    ),
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _similar.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 12),
+                    itemBuilder: (context, index) {
+                      final similar = _similar[index];
+                      final img = similar.hasImage && access != null
+                          ? access.adapter.imageUrl(
+                              access.auth,
+                              itemId: similar.id,
+                              maxWidth: 400,
+                            )
+                          : null;
+                      final year = _yearText(similar);
+                      final badge = similar.type == 'Movie'
+                          ? '电影'
+                          : (similar.type == 'Series' ? '剧集' : '');
+                      return _HoverScale(
+                        child: SizedBox(
+                          width: 138,
+                          child: MediaPosterTile(
+                            title: similar.name,
+                            titleMaxLines: 2,
+                            imageUrl: img,
+                            year: year,
+                            rating: similar.communityRating,
+                            badgeText: badge,
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => ShowDetailPage(
+                                    itemId: similar.id,
+                                    title: similar.name,
+                                    appState: widget.appState,
+                                    server: widget.server,
+                                    isTv: widget.isTv,
                                   ),
-                                );
-                              },
-                            ),
+                                ),
+                              );
+                            },
                           ),
                         ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
-                ],
-                const SizedBox(height: 14),
-                _detailGlassPanel(
-                  enableBlur: enableBlur,
-                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
-                  radius: 18,
-                  child: _externalLinksSection(context, item, widget.appState),
-                ),
-                const SizedBox(height: 14),
-                PluginSlotArea(
-                  appState: widget.appState,
-                  slotId: 'detail.sections.bottom',
-                  params: _buildDetailPluginParams(item),
-                ),
-              ],
-            ),
-          ),
-          Positioned.fill(child: _topNavOverlay(context)),
-          if (showFloatingSettings && playInfo != null)
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: SafeArea(
-                top: false,
-                left: false,
-                right: false,
-                minimum: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: _floatingPlaybackSettingsDock(
-                  context,
-                  playInfo,
-                  enableBlur: enableBlur,
                 ),
               ),
-            ),
-        ],
+            ],
+          ),
+        ),
+      _detailGlassPanel(
+        enableBlur: enableBlur,
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+        radius: 18,
+        child: _externalLinksSection(context, item, widget.appState),
       ),
+      PluginSlotArea(
+        appState: widget.appState,
+        slotId: 'detail.sections.bottom',
+        params: _buildDetailPluginParams(item),
+      ),
+    ];
+
+    return ShowDetailMobileView(
+      heroImageUrl: heroImageUrl,
+      onRefresh: _load,
+      heroSection: _mobileHeroSection(
+        context,
+        item: item,
+        access: access,
+        isSeries: isSeries,
+        runtime: runtime,
+      ),
+      sections: sections,
+      bottomDock: showFloatingSettings && playInfo != null
+          ? _floatingPlaybackSettingsDock(
+              context,
+              playInfo,
+              enableBlur: enableBlur,
+            )
+          : null,
     );
   }
 
@@ -4289,620 +4135,6 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     );
   }
 
-/*
-  String _episodeDisplayTitle(MediaItem ep) {
-    final episodeNo = ep.episodeNumber ?? 1;
-    final name = ep.name.trim();
-    return name.isNotEmpty ? '第$episodeNo集 $name' : '第$episodeNo集';
-  }
-
-  String _episodeRuntimeText(Duration? runtime) {
-    if (runtime == null) return '';
-    final hours = runtime.inHours;
-    final minutes = runtime.inMinutes.remainder(60);
-    if (hours > 0) {
-      return minutes > 0 ? '$hours小时$minutes分' : '$hours小时';
-    }
-    if (runtime.inMinutes > 0) return '${runtime.inMinutes}分钟';
-    return '${runtime.inSeconds}秒';
-  }
-
-  Future<void> _showEpisodeMoreSheet(
-    BuildContext context, {
-    required bool played,
-  }) async {
-    final season = _selectedSeason;
-    final canSwitchCore =
-        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
-    final current = _detail ?? _episode;
-    final currentSeriesTitle = _seriesName.trim().isNotEmpty
-        ? _seriesName.trim()
-        : current.seriesName.trim();
-
-    final action = await showModalBottomSheet<_EpisodeMoreAction>(
-      context: context,
-      builder: (ctx) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                title: Text(_episodeDisplayTitle(current)),
-                subtitle: currentSeriesTitle.isEmpty
-                    ? null
-                    : Text(currentSeriesTitle),
-              ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.format_list_numbered_rounded),
-                title: const Text('选集'),
-                onTap: season == null
-                    ? null
-                    : () =>
-                        Navigator.of(ctx).pop(_EpisodeMoreAction.pickEpisode),
-              ),
-              ListTile(
-                leading: const Icon(Icons.layers_outlined),
-                title: const Text('切换季'),
-                onTap: _seasons.isEmpty
-                    ? null
-                    : () =>
-                        Navigator.of(ctx).pop(_EpisodeMoreAction.pickSeason),
-              ),
-              ListTile(
-                leading: const Icon(Icons.grid_view_rounded),
-                title: const Text('查看本季全部'),
-                onTap: season == null
-                    ? null
-                    : () => Navigator.of(ctx)
-                        .pop(_EpisodeMoreAction.openSeasonEpisodes),
-              ),
-              ListTile(
-                leading: Icon(
-                  played
-                      ? Icons.visibility_off_outlined
-                      : Icons.check_circle_outline_rounded,
-                ),
-                title: Text(played ? '标记为未播放' : '标记为已播放'),
-                onTap: _markBusy
-                    ? null
-                    : () =>
-                        Navigator.of(ctx).pop(_EpisodeMoreAction.togglePlayed),
-              ),
-              ListTile(
-                leading: Icon(
-                  _localFavorite
-                      ? Icons.favorite_rounded
-                      : Icons.favorite_border_rounded,
-                ),
-                title: Text(_localFavorite ? '取消本地收藏' : '加入本地收藏'),
-                onTap: !_favoriteLoaded
-                    ? null
-                    : () => Navigator.of(ctx)
-                        .pop(_EpisodeMoreAction.toggleFavorite),
-              ),
-              if (canSwitchCore)
-                ListTile(
-                  leading: const Icon(Icons.memory_rounded),
-                  title: Text(
-                    widget.appState.playerCore == PlayerCore.exo
-                        ? '切换到 mpv'
-                        : '切换到 ExoPlayer',
-                  ),
-                  onTap: () => Navigator.of(ctx)
-                      .pop(_EpisodeMoreAction.togglePlayerCore),
-                ),
-            ],
-          ),
-        );
-      },
-    );
-
-    if (!mounted || action == null) return;
-
-    switch (action) {
-      case _EpisodeMoreAction.pickEpisode:
-        await _pickEpisode(this.context);
-        break;
-      case _EpisodeMoreAction.pickSeason:
-        await _pickSeason(this.context);
-        break;
-      case _EpisodeMoreAction.openSeasonEpisodes:
-        final currentSeason = _selectedSeason;
-        if (currentSeason != null) {
-          _openSeasonEpisodesPage(this.context, currentSeason);
-        }
-        break;
-      case _EpisodeMoreAction.togglePlayed:
-        if (!_markBusy) {
-          await _toggleEpisodePlayedMark();
-        }
-        break;
-      case _EpisodeMoreAction.toggleFavorite:
-        if (_favoriteLoaded) {
-          await _toggleLocalFavorite();
-        }
-        break;
-      case _EpisodeMoreAction.togglePlayerCore:
-        await _togglePlayerCore();
-        break;
-    }
-  }
-
-  Widget _mobileEpisodeHeroCard(
-    BuildContext context, {
-    required MediaItem ep,
-    required String coverUrl,
-    required Duration? runtime,
-    required bool enableBlur,
-  }) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final screenWidth = MediaQuery.of(context).size.width;
-    final coverWidth = screenWidth >= 430 ? 152.0 : 134.0;
-    final title = _episodeDisplayTitle(ep);
-    final overview = (_detail?.overview ?? ep.overview).trim();
-    final runtimeText = _episodeRuntimeText(runtime);
-
-    return _detailGlassPanel(
-      enableBlur: enableBlur,
-      radius: 18,
-      padding: const EdgeInsets.all(14),
-      gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [
-          scheme.primary.withValues(alpha: 0.14),
-          Colors.black.withValues(alpha: 0.42),
-        ],
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: coverWidth,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: AspectRatio(
-                aspectRatio: 16 / 9,
-                child: coverUrl.isEmpty
-                    ? DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              scheme.primary.withValues(alpha: 0.28),
-                              Colors.black.withValues(alpha: 0.52),
-                            ],
-                          ),
-                        ),
-                        child: const Center(
-                          child: Icon(Icons.movie_creation_outlined),
-                        ),
-                      )
-                    : Image.network(
-                        coverUrl,
-                        fit: BoxFit.cover,
-                        headers: {
-                          'User-Agent': LinHttpClientFactory.userAgent,
-                        },
-                        errorBuilder: (_, __, ___) =>
-                            const ColoredBox(color: Colors.black26),
-                      ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: SizedBox(
-              height: coverWidth * 9 / 16,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            height: 1.2,
-                          ),
-                        ),
-                      ),
-                      if (runtimeText.isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 5,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.14),
-                            ),
-                          ),
-                          child: Text(
-                            runtimeText,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Expanded(
-                    child: Text(
-                      overview.isEmpty ? '暂无简介' : overview,
-                      maxLines: 4,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: Colors.white.withValues(alpha: 0.80),
-                        height: 1.45,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _mobileEpisodeSelectorCard(
-    BuildContext context, {
-    required bool enableBlur,
-  }) {
-    final theme = Theme.of(context);
-    final playInfo = _playInfo;
-    final currentMs = _currentMediaSource();
-    final audioStreams = currentMs == null
-        ? const <Map<String, dynamic>>[]
-        : _ShowDetailPageState._streamsOfType(currentMs, 'Audio');
-    final subtitleStreams = currentMs == null
-        ? const <Map<String, dynamic>>[]
-        : _ShowDetailPageState._streamsOfType(currentMs, 'Subtitle');
-
-    final versionValue = playInfo == null
-        ? '加载中'
-        : (currentMs == null
-            ? '暂无版本'
-            : _ShowDetailPageState._mediaSourceTitle(currentMs));
-    final audioText = _currentAudioText().trim();
-    final subtitleText = _currentSubtitleText().trim();
-    final audioValue =
-        currentMs == null ? '默认' : (audioText.isEmpty ? '默认' : audioText);
-    final subtitleValue = currentMs == null
-        ? (_selectedSubtitleStreamIndex == -1 ? '关闭' : '默认')
-        : (subtitleText.isEmpty ? '默认' : subtitleText);
-
-    Widget selectorRow({
-      required IconData icon,
-      required String label,
-      required String value,
-      required VoidCallback? onTap,
-      bool showDivider = true,
-    }) {
-      final enabled = onTap != null;
-      final fg = enabled ? Colors.white : Colors.white38;
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: onTap,
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                child: Row(
-                  children: [
-                    Icon(icon, size: 18, color: fg),
-                    const SizedBox(width: 10),
-                    Text(
-                      label,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: fg,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        value,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.end,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: fg,
-                          height: 1.3,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Icon(
-                      Icons.chevron_right_rounded,
-                      color: fg,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          if (showDivider)
-            Divider(
-              height: 1,
-              color: Colors.white.withValues(alpha: 0.10),
-            ),
-        ],
-      );
-    }
-
-    return _detailGlassPanel(
-      enableBlur: enableBlur,
-      radius: 18,
-      padding: EdgeInsets.zero,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          selectorRow(
-            icon: Icons.movie_filter_rounded,
-            label: '版本选择',
-            value: versionValue,
-            onTap: playInfo == null
-                ? null
-                : () => _pickMediaSource(context, playInfo),
-          ),
-          selectorRow(
-            icon: Icons.audiotrack_rounded,
-            label: '音频选择',
-            value: audioValue,
-            onTap: audioStreams.isEmpty
-                ? null
-                : () => _pickAudioStream(context, currentMs!),
-          ),
-          selectorRow(
-            icon: Icons.closed_caption_rounded,
-            label: '字幕选择',
-            value: subtitleValue,
-            onTap: subtitleStreams.isEmpty
-                ? null
-                : () => _pickSubtitleStream(context, currentMs!),
-            showDivider: false,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _mobileEpisodePrimaryActions(
-    BuildContext context, {
-    required String playLabel,
-    required bool played,
-    required bool hasResume,
-    required int ticks,
-  }) {
-    return Row(
-      children: [
-        Expanded(
-          flex: 4,
-          child: _playButton(
-            context,
-            label: playLabel,
-            onTap: () => _playCurrentEpisode(
-              startPosition: hasResume ? _ticksToDuration(ticks) : null,
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          flex: 1,
-          child: SizedBox(
-            height: 52,
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(30),
-                onTap: () => _showEpisodeMoreSheet(context, played: played),
-                child: Ink(
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.30),
-                    borderRadius: BorderRadius.circular(30),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.18),
-                    ),
-                  ),
-                  child: const Center(
-                    child: Icon(
-                      Icons.more_horiz_rounded,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMobileEpisodeDetailPage(
-    BuildContext context, {
-    required MediaItem ep,
-    required ServerAccess? access,
-    required String playLabel,
-    required bool played,
-    required bool hasResume,
-    required int ticks,
-    required Duration? runtime,
-    required String backdropUrl,
-    required String coverUrl,
-    required bool enableBlur,
-  }) {
-    final topInset = MediaQuery.of(context).padding.top;
-    Widget background;
-    if (backdropUrl.isNotEmpty) {
-      background = Image.network(
-        backdropUrl,
-        fit: BoxFit.cover,
-        headers: {'User-Agent': LinHttpClientFactory.userAgent},
-        errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black26),
-      );
-    } else if (coverUrl.isNotEmpty) {
-      background = Image.network(
-        coverUrl,
-        fit: BoxFit.cover,
-        headers: {'User-Agent': LinHttpClientFactory.userAgent},
-        errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black26),
-      );
-    } else {
-      background = DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Theme.of(context).colorScheme.primary.withValues(alpha: 0.18),
-              const Color(0xFF13171C),
-              const Color(0xFF070809),
-            ],
-          ),
-        ),
-      );
-    }
-
-    background = ColorFiltered(
-      colorFilter: ColorFilter.mode(
-        Colors.black.withValues(alpha: 0.18),
-        BlendMode.darken,
-      ),
-      child: background,
-    );
-
-    return Scaffold(
-      body: Stack(
-        children: [
-          Positioned.fill(child: background),
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  stops: const [0, 0.26, 0.72, 1],
-                  colors: [
-                    Colors.black.withValues(alpha: 0.18),
-                    Colors.black.withValues(alpha: 0.48),
-                    const Color(0xFF0D1014).withValues(alpha: 0.96),
-                    const Color(0xFF060708),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: RadialGradient(
-                  center: const Alignment(0, -0.90),
-                  radius: 1.08,
-                  colors: [
-                    Theme.of(context)
-                        .colorScheme
-                        .primary
-                        .withValues(alpha: 0.16),
-                    Colors.transparent,
-                  ],
-                ),
-              ),
-            ),
-          ),
-          RefreshIndicator(
-            onRefresh: _load,
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(
-                parent: BouncingScrollPhysics(),
-              ),
-              padding: EdgeInsets.fromLTRB(16, topInset + 68, 16, 28),
-              children: [
-                _mobileEpisodeHeroCard(
-                  context,
-                  ep: ep,
-                  coverUrl: coverUrl,
-                  runtime: runtime,
-                  enableBlur: enableBlur,
-                ),
-                const SizedBox(height: 12),
-                _mobileEpisodeSelectorCard(
-                  context,
-                  enableBlur: enableBlur,
-                ),
-                const SizedBox(height: 12),
-                _mobileEpisodePrimaryActions(
-                  context,
-                  playLabel: playLabel,
-                  played: played,
-                  hasResume: hasResume,
-                  ticks: ticks,
-                ),
-                if (_playInfo != null) ...[
-                  const SizedBox(height: 16),
-                  _episodeMediaInfoSection(
-                    context,
-                    _playInfo!,
-                    selectedMediaSourceId: _selectedMediaSourceId,
-                  ),
-                ],
-                if ((_seriesId ?? '').trim().isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  _otherEpisodesSection(context),
-                ],
-                if (_detail?.people.isNotEmpty == true && access != null) ...[
-                  const SizedBox(height: 16),
-                  _castSection(
-                    context,
-                    _detail!.people,
-                    access: access,
-                  ),
-                ],
-                if (_chapters.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  _detailGlassPanel(
-                    enableBlur: enableBlur,
-                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
-                    radius: 18,
-                    child: _chaptersSection(context, _chapters),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                PluginSlotArea(
-                  appState: widget.appState,
-                  slotId: 'detail.sections.bottom',
-                  params: _buildDetailPluginParams(_detail ?? _episode),
-                ),
-              ],
-            ),
-          ),
-          Positioned.fill(child: _episodeTopNavOverlay()),
-        ],
-      ),
-    );
-  }
-
-*/
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -4913,11 +4145,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       return widget.isTv
           ? Scaffold(body: Center(child: Text(_error ?? '加载失败')))
           : Scaffold(
-              appBar: GlassAppBar(
-                enableBlur: enableBlur,
-                child: AppBar(title: Text(widget.title)),
+              body: SafeArea(
+                child: Center(child: Text(_error ?? '加载失败')),
               ),
-              body: Center(child: Text(_error ?? '加载失败')),
             );
     }
     final item = _detail!;
@@ -5061,9 +4291,6 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                               colors: [Colors.transparent, scrimBottom],
                             ),
                           ),
-                        ),
-                        Positioned.fill(
-                          child: _topNavOverlay(context),
                         ),
                         if (widget.itemId.isEmpty)
                           Positioned(
@@ -6661,60 +5888,6 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     );
   }
 
-  Widget _episodeTopNavOverlay() {
-    void showHint(String label) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$label 功能待接入')),
-      );
-    }
-
-    return SafeArea(
-      bottom: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
-        child: IconTheme(
-          data: const IconThemeData(color: Colors.white),
-          child: Row(
-            children: [
-              IconButton(
-                onPressed: () {
-                  if (Navigator.of(context).canPop()) {
-                    Navigator.of(context).pop();
-                  }
-                },
-                icon: const Icon(Icons.arrow_back),
-              ),
-              IconButton(
-                onPressed: () =>
-                    Navigator.of(context).popUntil((r) => r.isFirst),
-                icon: const Icon(Icons.home),
-              ),
-              IconButton(
-                onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('菜单功能待接入')),
-                ),
-                icon: const Icon(Icons.menu),
-              ),
-              const Spacer(),
-              IconButton(
-                onPressed: () => showHint('投屏'),
-                icon: const Icon(Icons.cast),
-              ),
-              IconButton(
-                onPressed: () => showHint('搜索'),
-                icon: const Icon(Icons.search),
-              ),
-              IconButton(
-                onPressed: () => showHint('设置'),
-                icon: const Icon(Icons.settings),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   static const int _kTvPickerDefault = -99999;
 
   String _episodeMark(MediaItem ep) {
@@ -7991,143 +7164,19 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     }
   }
 
-  Widget _mobileEpisodeHeroCard(
+  Widget _buildMobileEpisodeDetailPage(
     BuildContext context, {
     required MediaItem ep,
-    required String coverUrl,
+    required ServerAccess? access,
+    required String playLabel,
+    required bool played,
+    required bool hasResume,
+    required int ticks,
     required Duration? runtime,
+    required String backdropUrl,
+    required String coverUrl,
     required bool enableBlur,
   }) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final screenWidth = MediaQuery.of(context).size.width;
-    final coverWidth = screenWidth >= 430 ? 152.0 : 134.0;
-    final title = _episodeDisplayTitle(ep);
-    final overview = (_detail?.overview ?? ep.overview).trim();
-    final runtimeText = _episodeRuntimeText(runtime);
-
-    return _detailGlassPanel(
-      enableBlur: enableBlur,
-      radius: 18,
-      padding: const EdgeInsets.all(14),
-      gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [
-          scheme.primary.withValues(alpha: 0.14),
-          Colors.black.withValues(alpha: 0.42),
-        ],
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: coverWidth,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: AspectRatio(
-                aspectRatio: 16 / 9,
-                child: coverUrl.isEmpty
-                    ? DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              scheme.primary.withValues(alpha: 0.28),
-                              Colors.black.withValues(alpha: 0.52),
-                            ],
-                          ),
-                        ),
-                        child: const Center(
-                          child: Icon(Icons.movie_creation_outlined),
-                        ),
-                      )
-                    : Image.network(
-                        coverUrl,
-                        fit: BoxFit.cover,
-                        headers: {
-                          'User-Agent': LinHttpClientFactory.userAgent,
-                        },
-                        errorBuilder: (_, __, ___) =>
-                            const ColoredBox(color: Colors.black26),
-                      ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: SizedBox(
-              height: coverWidth * 9 / 16,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w800,
-                            height: 1.2,
-                          ),
-                        ),
-                      ),
-                      if (runtimeText.isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 5,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.14),
-                            ),
-                          ),
-                          child: Text(
-                            runtimeText,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Expanded(
-                    child: Text(
-                      overview.isEmpty ? '暂无简介' : overview,
-                      maxLines: 4,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: Colors.white.withValues(alpha: 0.80),
-                        height: 1.45,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _mobileEpisodeSelectorCard(
-    BuildContext context, {
-    required bool enableBlur,
-  }) {
-    final theme = Theme.of(context);
     final playInfo = _playInfo;
     final currentMs = _currentMediaSource();
     final audioStreams = currentMs == null
@@ -8150,317 +7199,58 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         ? (_selectedSubtitleStreamIndex == -1 ? '关闭' : '默认')
         : (subtitleText.isEmpty ? '默认' : subtitleText);
 
-    Widget selectorRow({
-      required IconData icon,
-      required String label,
-      required String value,
-      required VoidCallback? onTap,
-      bool showDivider = true,
-    }) {
-      final enabled = onTap != null;
-      final fg = enabled ? Colors.white : Colors.white38;
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: onTap,
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                child: Row(
-                  children: [
-                    Icon(icon, size: 18, color: fg),
-                    const SizedBox(width: 10),
-                    Text(
-                      label,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: fg,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        value,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.end,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: fg,
-                          height: 1.3,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Icon(
-                      Icons.chevron_right_rounded,
-                      color: fg,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          if (showDivider)
-            Divider(
-              height: 1,
-              color: Colors.white.withValues(alpha: 0.10),
-            ),
-        ],
-      );
-    }
-
-    return _detailGlassPanel(
-      enableBlur: enableBlur,
-      radius: 18,
-      padding: EdgeInsets.zero,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          selectorRow(
-            icon: Icons.movie_filter_rounded,
-            label: '版本选择',
-            value: versionValue,
-            onTap: playInfo == null
-                ? null
-                : () => _pickMediaSource(context, playInfo),
-          ),
-          selectorRow(
-            icon: Icons.audiotrack_rounded,
-            label: '音频选择',
-            value: audioValue,
-            onTap: audioStreams.isEmpty
-                ? null
-                : () => _pickAudioStream(context, currentMs!),
-          ),
-          selectorRow(
-            icon: Icons.closed_caption_rounded,
-            label: '字幕选择',
-            value: subtitleValue,
-            onTap: subtitleStreams.isEmpty
-                ? null
-                : () => _pickSubtitleStream(context, currentMs!),
-            showDivider: false,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _mobileEpisodePrimaryActions(
-    BuildContext context, {
-    required String playLabel,
-    required bool played,
-    required bool hasResume,
-    required int ticks,
-  }) {
-    return Row(
-      children: [
-        Expanded(
-          flex: 4,
-          child: _playButton(
-            context,
-            label: playLabel,
-            onTap: () => _playCurrentEpisode(
-              startPosition: hasResume ? _ticksToDuration(ticks) : null,
-            ),
-          ),
+    final sections = <Widget>[
+      if (playInfo != null)
+        _episodeMediaInfoSection(
+          context,
+          playInfo,
+          selectedMediaSourceId: _selectedMediaSourceId,
         ),
-        const SizedBox(width: 10),
-        Expanded(
-          flex: 1,
-          child: SizedBox(
-            height: 52,
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(30),
-                onTap: () => _showEpisodeMoreSheet(context, played: played),
-                child: Ink(
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.30),
-                    borderRadius: BorderRadius.circular(30),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.18),
-                    ),
-                  ),
-                  child: const Center(
-                    child: Icon(
-                      Icons.more_horiz_rounded,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
+      if ((_seriesId ?? '').trim().isNotEmpty) _otherEpisodesSection(context),
+      if (_detail?.people.isNotEmpty == true && access != null)
+        _castSection(
+          context,
+          _detail!.people,
+          access: access,
         ),
-      ],
-    );
-  }
-
-  Widget _buildMobileEpisodeDetailPage(
-    BuildContext context, {
-    required MediaItem ep,
-    required ServerAccess? access,
-    required String playLabel,
-    required bool played,
-    required bool hasResume,
-    required int ticks,
-    required Duration? runtime,
-    required String backdropUrl,
-    required String coverUrl,
-    required bool enableBlur,
-  }) {
-    final topInset = MediaQuery.of(context).padding.top;
-    Widget background;
-    if (backdropUrl.isNotEmpty) {
-      background = Image.network(
-        backdropUrl,
-        fit: BoxFit.cover,
-        headers: {'User-Agent': LinHttpClientFactory.userAgent},
-        errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black26),
-      );
-    } else if (coverUrl.isNotEmpty) {
-      background = Image.network(
-        coverUrl,
-        fit: BoxFit.cover,
-        headers: {'User-Agent': LinHttpClientFactory.userAgent},
-        errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black26),
-      );
-    } else {
-      background = DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Theme.of(context).colorScheme.primary.withValues(alpha: 0.18),
-              const Color(0xFF13171C),
-              const Color(0xFF070809),
-            ],
-          ),
+      if (_chapters.isNotEmpty)
+        _detailGlassPanel(
+          enableBlur: enableBlur,
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+          radius: 18,
+          child: _chaptersSection(context, _chapters),
         ),
-      );
-    }
-
-    background = ColorFiltered(
-      colorFilter: ColorFilter.mode(
-        Colors.black.withValues(alpha: 0.18),
-        BlendMode.darken,
+      PluginSlotArea(
+        appState: widget.appState,
+        slotId: 'detail.sections.bottom',
+        params: _buildDetailPluginParams(_detail ?? _episode),
       ),
-      child: background,
-    );
+    ];
 
-    return Scaffold(
-      body: Stack(
-        children: [
-          Positioned.fill(child: background),
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  stops: const [0, 0.26, 0.72, 1],
-                  colors: [
-                    Colors.black.withValues(alpha: 0.18),
-                    Colors.black.withValues(alpha: 0.48),
-                    const Color(0xFF0D1014).withValues(alpha: 0.96),
-                    const Color(0xFF060708),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: RadialGradient(
-                  center: const Alignment(0, -0.90),
-                  radius: 1.08,
-                  colors: [
-                    Theme.of(context)
-                        .colorScheme
-                        .primary
-                        .withValues(alpha: 0.16),
-                    Colors.transparent,
-                  ],
-                ),
-              ),
-            ),
-          ),
-          RefreshIndicator(
-            onRefresh: _load,
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(
-                parent: BouncingScrollPhysics(),
-              ),
-              padding: EdgeInsets.fromLTRB(16, topInset + 68, 16, 28),
-              children: [
-                _mobileEpisodeHeroCard(
-                  context,
-                  ep: ep,
-                  coverUrl: coverUrl,
-                  runtime: runtime,
-                  enableBlur: enableBlur,
-                ),
-                const SizedBox(height: 12),
-                _mobileEpisodeSelectorCard(
-                  context,
-                  enableBlur: enableBlur,
-                ),
-                const SizedBox(height: 12),
-                _mobileEpisodePrimaryActions(
-                  context,
-                  playLabel: playLabel,
-                  played: played,
-                  hasResume: hasResume,
-                  ticks: ticks,
-                ),
-                if (_playInfo != null) ...[
-                  const SizedBox(height: 16),
-                  _episodeMediaInfoSection(
-                    context,
-                    _playInfo!,
-                    selectedMediaSourceId: _selectedMediaSourceId,
-                  ),
-                ],
-                if ((_seriesId ?? '').trim().isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  _otherEpisodesSection(context),
-                ],
-                if (_detail?.people.isNotEmpty == true && access != null) ...[
-                  const SizedBox(height: 16),
-                  _castSection(
-                    context,
-                    _detail!.people,
-                    access: access,
-                  ),
-                ],
-                if (_chapters.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  _detailGlassPanel(
-                    enableBlur: enableBlur,
-                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
-                    radius: 18,
-                    child: _chaptersSection(context, _chapters),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                PluginSlotArea(
-                  appState: widget.appState,
-                  slotId: 'detail.sections.bottom',
-                  params: _buildDetailPluginParams(_detail ?? _episode),
-                ),
-              ],
-            ),
-          ),
-          Positioned.fill(child: _episodeTopNavOverlay()),
-        ],
+    return EpisodeDetailMobileView(
+      title: _episodeDisplayTitle(ep),
+      overview: (_detail?.overview ?? ep.overview).trim(),
+      runtimeText: _episodeRuntimeText(runtime),
+      coverUrl: coverUrl,
+      backdropUrl: backdropUrl,
+      versionValue: versionValue,
+      audioValue: audioValue,
+      subtitleValue: subtitleValue,
+      playLabel: playLabel,
+      onRefresh: _load,
+      onPlay: () => _playCurrentEpisode(
+        startPosition: hasResume ? _ticksToDuration(ticks) : null,
       ),
+      onMore: () => _showEpisodeMoreSheet(context, played: played),
+      onPickVersion:
+          playInfo == null ? null : () => _pickMediaSource(context, playInfo),
+      onPickAudio: audioStreams.isEmpty
+          ? null
+          : () => _pickAudioStream(context, currentMs!),
+      onPickSubtitle: subtitleStreams.isEmpty
+          ? null
+          : () => _pickSubtitleStream(context, currentMs!),
+      sections: sections,
     );
   }
 
@@ -8476,11 +7266,9 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     }
     if (_error != null) {
       return Scaffold(
-        appBar: GlassAppBar(
-          enableBlur: enableBlur,
-          child: AppBar(title: const Text('集详情')),
+        body: SafeArea(
+          child: Center(child: Text(_error!)),
         ),
-        body: Center(child: Text(_error!)),
       );
     }
 
@@ -8544,335 +7332,6 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       coverUrl: thumbUrl,
       enableBlur: enableBlur,
     );
-
-/*    Widget background = backdropUrl.isNotEmpty
-        ? Image.network(
-            backdropUrl,
-            fit: BoxFit.cover,
-            headers: {'User-Agent': LinHttpClientFactory.userAgent},
-            errorBuilder: (_, __, ___) =>
-                const ColoredBox(color: Colors.black26),
-          )
-        : const ColoredBox(color: Colors.black26);
-
-    return Scaffold(
-      body: Stack(
-        children: [
-          Positioned.fill(child: background),
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.40),
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.black.withValues(alpha: 0.38),
-                    Colors.black.withValues(alpha: 0.58),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          RefreshIndicator(
-            onRefresh: _load,
-            child: SingleChildScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: _DetailUiTokens.pagePadding,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _detailGlassPanel(
-                    enableBlur: enableBlur,
-                    padding: _DetailUiTokens.panelPadding,
-                    child: LayoutBuilder(
-                      builder: (context, c) {
-                        final wide = c.maxWidth >= 1000;
-                        final poster = ClipRRect(
-                          borderRadius:
-                              BorderRadius.circular(_DetailUiTokens.cardRadius),
-                          child: AspectRatio(
-                            aspectRatio: 16 / 9,
-                            child: thumbUrl.isEmpty
-                                ? const ColoredBox(color: Colors.black26)
-                                : Image.network(
-                                    thumbUrl,
-                                    fit: BoxFit.cover,
-                                    headers: {
-                                      'User-Agent':
-                                          LinHttpClientFactory.userAgent
-                                    },
-                                    errorBuilder: (_, __, ___) =>
-                                        const ColoredBox(color: Colors.black26),
-                                  ),
-                          ),
-                        );
-
-                        final metaItems = <String>[
-                          if (ep.communityRating != null)
-                            '★ ${ep.communityRating!.toStringAsFixed(1)}',
-                          if (dateText.isNotEmpty) dateText,
-                          if (runtime != null) _fmt(runtime),
-                        ];
-
-                        final info = Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              seriesTitle,
-                              style: (wide
-                                      ? theme.textTheme.headlineMedium
-                                      : theme.textTheme.headlineSmall)
-                                  ?.copyWith(
-                                color: heroTextColor,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              _episodeLine(ep),
-                              style: theme.textTheme.titleLarge?.copyWith(
-                                color: heroTextColor,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: metaItems
-                                  .map(
-                                    (m) => Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 8, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: heroMetaBg,
-                                        border:
-                                            Border.all(color: heroMetaBorder),
-                                        borderRadius:
-                                            BorderRadius.circular(999),
-                                      ),
-                                      child: Text(
-                                        m,
-                                        style: theme.textTheme.labelMedium
-                                            ?.copyWith(color: heroTextColor),
-                                      ),
-                                    ),
-                                  )
-                                  .toList(),
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              '视频：${_currentVideoText()}',
-                              style: theme.textTheme.bodyMedium
-                                  ?.copyWith(color: heroTextColor),
-                            ),
-                            const SizedBox(height: 6),
-                            if (ms != null)
-                              InkWell(
-                                borderRadius: BorderRadius.circular(8),
-                                onTap: () => _pickAudioStream(context, ms),
-                                child: Padding(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 2),
-                                  child: Text(
-                                    '音频：${_currentAudioText()}',
-                                    style: theme.textTheme.bodyMedium
-                                        ?.copyWith(color: heroTextColor),
-                                  ),
-                                ),
-                              )
-                            else
-                              Text(
-                                '音频：${_currentAudioText()}',
-                                style: theme.textTheme.bodyMedium
-                                    ?.copyWith(color: heroTextColor),
-                              ),
-                            const SizedBox(height: 6),
-                            if (ms != null)
-                              InkWell(
-                                borderRadius: BorderRadius.circular(8),
-                                onTap: () => _pickSubtitleStream(context, ms),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: heroMetaBg,
-                                    border: Border.all(color: heroMetaBorder),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        '字幕：${_currentSubtitleText()}',
-                                        style: theme.textTheme.bodyMedium
-                                            ?.copyWith(color: heroTextColor),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      const Icon(Icons.expand_more,
-                                          color: Colors.white, size: 18),
-                                    ],
-                                  ),
-                                ),
-                              )
-                            else
-                              Text(
-                                '字幕：${_currentSubtitleText()}',
-                                style: theme.textTheme.bodyMedium
-                                    ?.copyWith(color: heroTextColor),
-                              ),
-                            const SizedBox(height: 12),
-                            Wrap(
-                              spacing: 10,
-                              runSpacing: 10,
-                              children: [
-                                _episodeActionButton(
-                                  icon: Icons.play_arrow,
-                                  label: playLabel,
-                                  primary: true,
-                                  onTap: () => _playCurrentEpisode(
-                                    startPosition: hasResume
-                                        ? _ticksToDuration(ticks)
-                                        : null,
-                                  ),
-                                ),
-                                _episodeActionButton(
-                                  icon: played
-                                      ? Icons.check_circle
-                                      : Icons.radio_button_unchecked,
-                                  label: played ? '已播放' : '未播放',
-                                  onTap: _markBusy
-                                      ? null
-                                      : _toggleEpisodePlayedMark,
-                                ),
-                                _episodeActionButton(
-                                  icon: _localFavorite
-                                      ? Icons.favorite
-                                      : Icons.favorite_border,
-                                  label: _localFavorite ? '已收藏' : '收藏',
-                                  onTap: _favoriteLoaded
-                                      ? _toggleLocalFavorite
-                                      : null,
-                                ),
-                                _episodeActionButton(
-                                  icon: Icons.more_horiz,
-                                  label: '更多',
-                                  onTap: () => _pickEpisode(context),
-                                ),
-                              ],
-                            ),
-                            if ((_detail?.overview ?? '')
-                                .trim()
-                                .isNotEmpty) ...[
-                              const SizedBox(height: 12),
-                              Text(
-                                _detail!.overview,
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: heroMutedTextColor,
-                                  height: 1.45,
-                                ),
-                              ),
-                            ],
-                          ],
-                        );
-
-                        final logo = Align(
-                          alignment: Alignment.topRight,
-                          child: Text(
-                            seriesTitle,
-                            maxLines: 2,
-                            textAlign: TextAlign.right,
-                            style: theme.textTheme.headlineMedium?.copyWith(
-                              color: heroTextColor,
-                              fontWeight: FontWeight.w700,
-                              shadows: const [
-                                Shadow(color: Colors.black54, blurRadius: 10),
-                              ],
-                            ),
-                          ),
-                        );
-
-                        if (wide) {
-                          return Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              SizedBox(width: 520, child: poster),
-                              const SizedBox(width: 16),
-                              Expanded(child: info),
-                              const SizedBox(width: 12),
-                              SizedBox(width: 220, child: logo),
-                            ],
-                          );
-                        }
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            poster,
-                            const SizedBox(height: 12),
-                            info,
-                            const SizedBox(height: 10),
-                            logo,
-                          ],
-                        );
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  if ((_seriesId ?? '').trim().isNotEmpty) ...[
-                    _otherEpisodesSection(context),
-                    const SizedBox(height: _DetailUiTokens.sectionGap),
-                  ],
-                  if (_playInfo != null) ...[
-                    const SizedBox(height: 16),
-                    _episodePlaybackOptionsCard(context, _playInfo!),
-                  ],
-                  if (_detail?.people.isNotEmpty == true && access != null) ...[
-                    const SizedBox(height: _DetailUiTokens.sectionGap),
-                    _castSection(
-                      context,
-                      _detail!.people,
-                      access: access,
-                    ),
-                  ],
-                  if (_chapters.isNotEmpty) ...[
-                    const SizedBox(height: _DetailUiTokens.sectionGap),
-                    _sectionTitle(context, '章节'),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: _chapters
-                          .map((c) =>
-                              Chip(label: Text('${c.name} ${_fmt(c.start)}')))
-                          .toList(),
-                    ),
-                  ],
-                  if (_playInfo != null) ...[
-                    const SizedBox(height: _DetailUiTokens.sectionGap),
-                    _mediaInfo(
-                      context,
-                      _playInfo!,
-                      selectedMediaSourceId: _selectedMediaSourceId,
-                    ),
-                  ],
-                  const SizedBox(height: _DetailUiTokens.sectionGap),
-                  PluginSlotArea(
-                    appState: widget.appState,
-                    slotId: 'detail.sections.bottom',
-                    params: _buildDetailPluginParams(_detail ?? _episode),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Positioned.fill(child: _episodeTopNavOverlay()),
-        ],
-      ),
-    );
-*/
   }
 
   Future<void> _loadSeriesEpisodes({

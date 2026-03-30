@@ -575,7 +575,7 @@ class _DesktopHomePageState extends State<DesktopHomePage> with RouteAware {
                   controller: urlCtrl,
                   decoration: const InputDecoration(
                     labelText: '地址',
-                    hintText: '例如：https://emby.example.com:8920',
+                    hintText: '例如：https://emby.example.com',
                   ),
                   keyboardType: TextInputType.url,
                 ),

@@ -125,7 +125,8 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
   String _searchQuery = '';
   int _refreshSignal = 0;
   DesktopDetailViewModel? _detailViewModel;
-  final List<_DesktopDetailStackEntry> _detailStack = <_DesktopDetailStackEntry>[];
+  final List<_DesktopDetailStackEntry> _detailStack =
+      <_DesktopDetailStackEntry>[];
   _DesktopLibraryItemsBackTarget? _libraryItemsBackTarget;
   MediaStats? _mediaStats;
   bool _loadingMediaStats = false;
@@ -247,30 +248,27 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     final ok = await widget.appState.enterServer(serverId);
     if (!mounted || ok) return;
 
-    final msg =
-        (server.lastErrorMessage ?? widget.appState.error ?? '').trim();
+    final msg = (server.lastErrorMessage ?? widget.appState.error ?? '').trim();
     if (msg.isNotEmpty) {
       _showInfo(msg);
     }
   }
 
   List<DesktopSidebarServer> _buildSidebarServers() {
-    return widget.appState.servers
-        .map(
-          (server) {
-            final hasError = server.lastErrorCode != null ||
-                (server.lastErrorMessage ?? '').trim().isNotEmpty;
-            return DesktopSidebarServer(
-              id: server.id,
-              name: server.name.trim().isEmpty ? server.baseUrl : server.name,
-              subtitle: _buildServerSubtitleText(server),
-              serverType: server.serverType,
-              iconUrl: server.iconUrl,
-              enabled: !hasError,
-            );
-          },
-        )
-        .toList(growable: false);
+    return widget.appState.servers.map(
+      (server) {
+        final hasError = server.lastErrorCode != null ||
+            (server.lastErrorMessage ?? '').trim().isNotEmpty;
+        return DesktopSidebarServer(
+          id: server.id,
+          name: server.name.trim().isEmpty ? server.baseUrl : server.name,
+          subtitle: _buildServerSubtitleText(server),
+          serverType: server.serverType,
+          iconUrl: server.iconUrl,
+          enabled: !hasError,
+        );
+      },
+    ).toList(growable: false);
   }
 
   String _buildServerSubtitleText(ServerProfile server) {
@@ -627,7 +625,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
                   keyboardType: TextInputType.url,
                   decoration: InputDecoration(
                     labelText: _uiLanguage.pick(zh: '地址', en: 'URL'),
-                    hintText: 'https://emby.example.com:8920',
+                    hintText: 'https://emby.example.com',
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -1203,7 +1201,8 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     if (itemId.isEmpty) return;
 
     final currentVm = _detailViewModel;
-    final alreadyInDetail = _section == _DesktopSection.detail && currentVm != null;
+    final alreadyInDetail =
+        _section == _DesktopSection.detail && currentVm != null;
 
     if (alreadyInDetail && pushHistory) {
       final currentItem = currentVm.detail;
@@ -1522,7 +1521,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
                   controller: urlCtrl,
                   decoration: InputDecoration(
                     labelText: _uiLanguage.pick(zh: '\u5730\u5740', en: 'URL'),
-                    hintText: 'https://emby.example.com:8920',
+                    hintText: 'https://emby.example.com',
                   ),
                   keyboardType: TextInputType.url,
                 ),

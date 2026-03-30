@@ -701,22 +701,6 @@ class EmbyApi {
     return scheme == 'http' ? 'http' : 'https';
   }
 
-  static String? _defaultDirectPortForScheme(String rawScheme) {
-    return switch (_normalizedCandidateScheme(rawScheme)) {
-      'http' => '8096',
-      'https' => '8920',
-      _ => null,
-    };
-  }
-
-  static String? _defaultStandardPortForScheme(String rawScheme) {
-    return switch (_normalizedCandidateScheme(rawScheme)) {
-      'http' => '80',
-      'https' => '443',
-      _ => null,
-    };
-  }
-
   static List<String> _expandCandidateBases(Iterable<String> rawBases) {
     final expanded = rawBases
         .map((c) => _expandAuthBaseVariants(c).toList(growable: false))
@@ -757,32 +741,11 @@ class EmbyApi {
     }
 
     if (fixedPort.isNotEmpty) {
-      return _expandCandidateBases([
-        build(primaryScheme, port: fixedPort),
-        build(secondaryScheme, port: fixedPort),
-      ]);
+      return _expandCandidateBases([build(primaryScheme, port: fixedPort)]);
     }
 
-    return _expandCandidateBases([
-      build(primaryScheme),
-      build(
-        primaryScheme,
-        port: _defaultStandardPortForScheme(primaryScheme),
-      ),
-      build(
-        primaryScheme,
-        port: _defaultDirectPortForScheme(primaryScheme),
-      ),
-      build(secondaryScheme),
-      build(
-        secondaryScheme,
-        port: _defaultStandardPortForScheme(secondaryScheme),
-      ),
-      build(
-        secondaryScheme,
-        port: _defaultDirectPortForScheme(secondaryScheme),
-      ),
-    ]);
+    return _expandCandidateBases(
+        [build(primaryScheme), build(secondaryScheme)]);
   }
 
   static String _describeSocketException(SocketException e) {
@@ -804,6 +767,19 @@ class EmbyApi {
       return '连接超时 ($raw)';
     }
     return '网络异常 ($raw)';
+  }
+
+  static String _summarizeAuthErrors(List<String> errors) {
+    final unique = <String>[];
+    final seen = <String>{};
+    for (final entry in errors) {
+      final value = entry.trim();
+      if (value.isEmpty) continue;
+      if (seen.add(value)) unique.add(value);
+    }
+    if (unique.isEmpty) return '未能连接到服务器';
+    if (unique.length == 1) return unique.first;
+    return unique.take(2).join(' | ');
   }
 
   List<String> _candidates() {
@@ -928,14 +904,14 @@ class EmbyApi {
             continue;
           }
           if (e is SocketException) {
-            errors.add('${url.origin}: DNS/网络不可达 (${e.message})');
+            errors.add('${url.origin}: ${_describeSocketException(e)}');
           } else {
             errors.add('${url.origin}: $e');
           }
         }
       }
     }
-    throw Exception('登录失败：${errors.join(" | ")}');
+    throw Exception('登录失败：${_summarizeAuthErrors(errors)}');
   }
 
   Future<String?> fetchCurrentUserId({
