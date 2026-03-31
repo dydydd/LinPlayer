@@ -725,6 +725,13 @@ class EmbyApi {
     return scheme == 'http' ? 'http' : 'https';
   }
 
+  static String? _defaultAuthPortForScheme(String scheme) {
+    return switch (_normalizedCandidateScheme(scheme)) {
+      'http' => '8096',
+      _ => '8920',
+    };
+  }
+
   static List<String> _expandCandidateBases(Iterable<String> rawBases) {
     final expanded = rawBases
         .map((c) => _expandAuthBaseVariants(c).toList(growable: false))
@@ -768,8 +775,20 @@ class EmbyApi {
       return _expandCandidateBases([build(primaryScheme, port: fixedPort)]);
     }
 
-    return _expandCandidateBases(
-        [build(primaryScheme), build(secondaryScheme)]);
+    final rawBases = <String>[
+      build(primaryScheme),
+      build(
+        primaryScheme,
+        port: _defaultAuthPortForScheme(primaryScheme),
+      ),
+      build(secondaryScheme),
+      build(
+        secondaryScheme,
+        port: _defaultAuthPortForScheme(secondaryScheme),
+      ),
+    ];
+
+    return _expandCandidateBases(rawBases);
   }
 
   static String _describeSocketException(SocketException e) {
