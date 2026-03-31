@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:http/http.dart' as http;
+
 import '../network/lin_http_client.dart';
 
 class HttpStreamProxyServer {
@@ -14,8 +16,15 @@ class HttpStreamProxyServer {
 
   HttpServer? _server;
   Uri? _baseUri;
+  http.Client? _client;
+  http.Client Function()? _httpClientFactory;
   final Map<String, _HttpStreamProxyEntry> _entries =
       <String, _HttpStreamProxyEntry>{};
+
+  void configureHttpClientFactory(http.Client Function()? factory) {
+    _httpClientFactory = factory;
+    _client = null;
+  }
 
   Future<Uri> ensureStarted() async {
     final existing = _baseUri;
@@ -41,22 +50,25 @@ class HttpStreamProxyServer {
     _pruneEntries();
 
     final id = _randomId();
-    _entries[id] = _HttpStreamProxyEntry(
-      remoteUri: remoteUri,
-      httpHeaders: _sanitizeStoredHeaders(httpHeaders),
-    );
-    _pruneEntries();
-
     final safeName = _safeFileName(
       fileName,
       remoteUri.pathSegments.isEmpty ? '' : remoteUri.pathSegments.last,
     );
+    _entries[id] = _HttpStreamProxyEntry(
+      remoteUri: remoteUri,
+      httpHeaders: _sanitizeStoredHeaders(httpHeaders),
+      localPathSegments: _localPathSegmentsFor(
+        remoteUri: remoteUri,
+        fallbackFileName: safeName,
+      ),
+    );
+    _pruneEntries();
     return base.replace(
       pathSegments: <String>[
         ...base.pathSegments.where((s) => s.isNotEmpty),
         'stream',
         id,
-        safeName,
+        ..._entries[id]!.localPathSegments,
       ],
     );
   }
@@ -130,6 +142,7 @@ class HttpStreamProxyServer {
 
       remote = await _openRemote(
         entry,
+        requestUri: request.uri,
         method: method,
         range: request.headers.value(HttpHeaders.rangeHeader),
         ifRange: request.headers.value(HttpHeaders.ifRangeHeader),
@@ -139,7 +152,8 @@ class HttpStreamProxyServer {
       _copyHeaders(remote.response.headers, response.headers);
 
       if (method == 'GET') {
-        await response.addStream(remote.response);
+        await response.addStream(remote.response.stream);
+        remote = null;
       }
     } catch (_) {
       response.statusCode = HttpStatus.badGateway;
@@ -147,7 +161,9 @@ class HttpStreamProxyServer {
           .set(HttpHeaders.contentTypeHeader, 'text/plain; charset=utf-8');
       response.write('HTTP stream proxy error');
     } finally {
-      remote?.close(force: true);
+      if (remote != null) {
+        await remote.close();
+      }
       try {
         await response.close();
       } catch (_) {}
@@ -156,6 +172,7 @@ class HttpStreamProxyServer {
 
   Future<_OpenedRemote> _openRemote(
     _HttpStreamProxyEntry entry, {
+    required Uri requestUri,
     required String method,
     String? range,
     String? ifRange,
@@ -164,6 +181,7 @@ class HttpStreamProxyServer {
       try {
         final opened = await _openRemoteOnce(
           entry,
+          requestUri: requestUri,
           method: 'HEAD',
           range: range,
           ifRange: ifRange,
@@ -171,7 +189,7 @@ class HttpStreamProxyServer {
         if (opened.response.statusCode != HttpStatus.methodNotAllowed) {
           return opened;
         }
-        opened.close(force: true);
+        await opened.close();
       } catch (_) {
         // Some cloud-disk download endpoints simply terminate HEAD.
       }
@@ -181,6 +199,7 @@ class HttpStreamProxyServer {
           : 'bytes=0-0';
       return _openRemoteOnce(
         entry,
+        requestUri: requestUri,
         method: 'GET',
         range: fallbackRange,
         ifRange: ifRange,
@@ -189,6 +208,7 @@ class HttpStreamProxyServer {
 
     return _openRemoteOnce(
       entry,
+      requestUri: requestUri,
       method: method,
       range: range,
       ifRange: ifRange,
@@ -197,40 +217,61 @@ class HttpStreamProxyServer {
 
   Future<_OpenedRemote> _openRemoteOnce(
     _HttpStreamProxyEntry entry, {
+    required Uri requestUri,
     required String method,
     String? range,
     String? ifRange,
   }) async {
-    final client = LinHttpClientFactory.createHttpClient(
-      LinHttpClientFactory.config.copyWith(userAgent: ''),
-    );
-    try {
-      final request = await client.openUrl(method, entry.remoteUri);
-      request.followRedirects = true;
-      request.maxRedirects = 5;
-      request.persistentConnection = false;
-      request.headers.set(HttpHeaders.acceptHeader, '*/*');
+    final request = http.StreamedRequest(
+      method,
+      _resolveRemoteUri(entry, requestUri),
+    )
+      ..followRedirects = true
+      ..maxRedirects = 5
+      ..persistentConnection = false;
+    request.headers[HttpHeaders.acceptHeader] = '*/*';
 
-      for (final e in entry.httpHeaders.entries) {
-        request.headers.set(e.key, e.value);
-      }
-
-      final fixedRange = range?.trim();
-      if (fixedRange != null && fixedRange.isNotEmpty) {
-        request.headers.set(HttpHeaders.rangeHeader, fixedRange);
-      }
-
-      final fixedIfRange = ifRange?.trim();
-      if (fixedIfRange != null && fixedIfRange.isNotEmpty) {
-        request.headers.set(HttpHeaders.ifRangeHeader, fixedIfRange);
-      }
-
-      final response = await request.close();
-      return _OpenedRemote(client: client, response: response);
-    } catch (_) {
-      client.close(force: true);
-      rethrow;
+    for (final e in entry.httpHeaders.entries) {
+      request.headers[e.key] = e.value;
     }
+
+    final fixedRange = range?.trim();
+    if (fixedRange != null && fixedRange.isNotEmpty) {
+      request.headers[HttpHeaders.rangeHeader] = fixedRange;
+    }
+
+    final fixedIfRange = ifRange?.trim();
+    if (fixedIfRange != null && fixedIfRange.isNotEmpty) {
+      request.headers[HttpHeaders.ifRangeHeader] = fixedIfRange;
+    }
+
+    unawaited(request.sink.close());
+    final response = await _httpClient.send(request);
+    return _OpenedRemote(response: response);
+  }
+
+  http.Client get _httpClient {
+    return _client ??=
+        (_httpClientFactory?.call() ??
+            LinHttpClientFactory.createClient(
+              LinHttpClientFactory.config.copyWith(userAgent: ''),
+            ));
+  }
+
+  Uri _resolveRemoteUri(_HttpStreamProxyEntry entry, Uri requestUri) {
+    final requestedSegments =
+        requestUri.pathSegments.length <= 2 ? const <String>[] : requestUri.pathSegments.sublist(2);
+    final isTopLevel = _samePathSegments(
+      requestedSegments,
+      entry.localPathSegments,
+    );
+    if (isTopLevel && !requestUri.hasQuery) {
+      return entry.remoteUri;
+    }
+    return entry.remoteUri.replace(
+      pathSegments: requestedSegments,
+      query: requestUri.hasQuery ? requestUri.query : null,
+    );
   }
 
   static Map<String, String> _sanitizeStoredHeaders(
@@ -267,7 +308,7 @@ class HttpStreamProxyServer {
     return sanitized.isEmpty ? 'stream.bin' : sanitized;
   }
 
-  static void _copyHeaders(HttpHeaders from, HttpHeaders to) {
+  static void _copyHeaders(Map<String, String> from, HttpHeaders to) {
     const allow = <String>{
       HttpHeaders.acceptRangesHeader,
       HttpHeaders.cacheControlHeader,
@@ -279,13 +320,33 @@ class HttpStreamProxyServer {
       'content-disposition',
     };
 
-    from.forEach((name, values) {
-      final lower = name.toLowerCase();
-      if (!allow.contains(lower)) return;
-      for (final value in values) {
-        to.add(lower, value);
-      }
-    });
+    for (final entry in from.entries) {
+      final lower = entry.key.toLowerCase();
+      if (!allow.contains(lower)) continue;
+      to.set(lower, entry.value);
+    }
+  }
+
+  static List<String> _localPathSegmentsFor({
+    required Uri remoteUri,
+    required String fallbackFileName,
+  }) {
+    final out = <String>[
+      for (final segment in remoteUri.pathSegments)
+        if (segment.trim().isNotEmpty) segment,
+    ];
+    if (out.isEmpty) {
+      out.add(fallbackFileName);
+    }
+    return List<String>.unmodifiable(out);
+  }
+
+  static bool _samePathSegments(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 }
 
@@ -293,11 +354,13 @@ class _HttpStreamProxyEntry {
   _HttpStreamProxyEntry({
     required this.remoteUri,
     required this.httpHeaders,
+    required this.localPathSegments,
   })  : lastAccessedAt = DateTime.now(),
         expiresAt = DateTime.now().add(HttpStreamProxyServer._entryTtl);
 
   final Uri remoteUri;
   final Map<String, String> httpHeaders;
+  final List<String> localPathSegments;
   DateTime lastAccessedAt;
   DateTime expiresAt;
 
@@ -310,14 +373,14 @@ class _HttpStreamProxyEntry {
 
 class _OpenedRemote {
   _OpenedRemote({
-    required this.client,
     required this.response,
   });
 
-  final HttpClient client;
-  final HttpClientResponse response;
+  final http.StreamedResponse response;
 
-  void close({required bool force}) {
-    client.close(force: force);
+  Future<void> close() async {
+    try {
+      await response.stream.drain<void>();
+    } catch (_) {}
   }
 }

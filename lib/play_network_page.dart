@@ -23,6 +23,8 @@ import 'services/app_route_observer.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/desktop_window.dart';
 import 'services/playback_proxy/playback_proxy.dart';
+import 'services/stream_resolver/stream_models.dart';
+import 'services/stream_proxy/local_http_stream_proxy.dart';
 import 'services/subtitle_support.dart';
 import 'tv/tv_focusable.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
@@ -438,14 +440,20 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         _playError = 'Unsupported server';
         return;
       }
-      final embyHeaders = _resolvedStreamIsExternal
+      final upstreamHeaders = _resolvedStreamIsExternal
           ? const <String, String>{}
           : access.adapter.buildStreamHeaders(access.auth);
+      final playbackSource = await _buildPlaybackSource(
+        streamUrl: streamUrl,
+        httpHeaders: upstreamHeaders,
+      );
+      final playbackUrl = playbackSource.url;
+      final playbackHeaders = playbackSource.httpHeaders;
       final proxyReady = builtInProxyEnabled &&
           builtInProxy.status.state == BuiltInProxyState.running;
-      final httpProxy = streamUrl.isNotEmpty
+      final httpProxy = playbackUrl.isNotEmpty
           ? (() {
-              final uri = Uri.tryParse(streamUrl);
+              final uri = Uri.tryParse(playbackUrl);
               if (uri == null) return null;
               if (proxyReady) return BuiltInProxyService.proxyUrlForUri(uri);
               return resolvePlaybackHttpProxyForUri(
@@ -455,16 +463,16 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
             })()
           : null;
       _playbackHttpProxyUrl = httpProxy;
-      if (!kIsWeb && streamUrl.isNotEmpty) {
+      if (!kIsWeb && playbackUrl.isNotEmpty) {
         _thumbnailer = MediaKitThumbnailGenerator(
-          media: Media(streamUrl, httpHeaders: embyHeaders),
+          media: Media(playbackUrl, httpHeaders: playbackHeaders),
           httpProxy: httpProxy,
         );
       }
       await _playerService.initialize(
         null,
-        networkUrl: streamUrl,
-        httpHeaders: embyHeaders,
+        networkUrl: playbackUrl,
+        httpHeaders: playbackHeaders,
         isTv: widget.isTv,
         hardwareDecode: _hwdecOn,
         mpvCacheSizeMb: widget.appState.mpvCacheSizeMb,
@@ -2477,6 +2485,19 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       );
       // 回退：无需 playbackInfo 的直链（部分服务器禁用该接口）
     }
+  }
+
+  Future<PlayableSource> _buildPlaybackSource({
+    required String streamUrl,
+    required Map<String, String> httpHeaders,
+  }) async {
+    final candidate = PlayableSource(
+      url: streamUrl,
+      httpHeaders: httpHeaders,
+    );
+    if (widget.isTv) return candidate;
+    final proxied = await LocalHttpStreamProxy.wrapPlaybackSource(candidate);
+    return proxied ?? candidate;
   }
 
   Future<bool> _tryInjectEmbyExternalSubtitlesIntoMpv({

@@ -20,6 +20,8 @@ import 'package:video_player_platform_interface/video_player_platform_interface.
 import 'play_network_page.dart';
 import 'server_adapters/server_access.dart';
 import 'services/app_route_observer.dart';
+import 'services/stream_proxy/local_http_stream_proxy.dart';
+import 'services/stream_resolver/stream_models.dart';
 import 'tv/tv_focusable.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
 import 'widgets/mobile_player_status_bars.dart';
@@ -69,6 +71,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   bool _loading = true;
   String? _playError;
   String? _resolvedStream;
+  Map<String, String> _resolvedStreamHeaders = const <String, String>{};
   bool _resolvedStreamIsExternal = false;
   bool _buffering = false;
   Duration _lastBufferedEnd = Duration.zero;
@@ -1725,6 +1728,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   }
 
   Map<String, String> _embyHeaders() {
+    return _resolvedStreamHeaders;
+  }
+
+  Map<String, String> _upstreamStreamHeaders() {
     final access = _serverAccess;
     if (access == null) return const <String, String>{};
     if (_resolvedStreamIsExternal) return const <String, String>{};
@@ -4050,6 +4057,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _playSessionId = null;
     _mediaSourceId = null;
     _resolvedStream = null;
+    _resolvedStreamHeaders = const <String, String>{};
     _resumeHintTimer?.cancel();
     _resumeHintTimer = null;
     _resumeHintPosition = null;
@@ -4090,9 +4098,11 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         throw Exception('Exo 内核仅支持 Android');
       }
       final streamUrl = await _buildStreamUrl();
-      _resolvedStream = streamUrl;
+      final playbackSource = await _buildPlaybackSource(streamUrl);
+      _resolvedStream = playbackSource.url;
+      _resolvedStreamHeaders = playbackSource.httpHeaders;
       final controller = VideoPlayerController.networkUrl(
-        Uri.parse(streamUrl),
+        Uri.parse(playbackSource.url),
         httpHeaders: _embyHeaders(),
         // Use platform view on Android to avoid color issues with some HDR/Dolby Vision sources.
         // (Texture-based rendering may show green/purple tint on certain P8 files.)
@@ -4433,6 +4443,16 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         '&DeviceId=${widget.appState.deviceId}&api_key=$token',
       );
     }
+  }
+
+  Future<PlayableSource> _buildPlaybackSource(String streamUrl) async {
+    final candidate = PlayableSource(
+      url: streamUrl,
+      httpHeaders: _upstreamStreamHeaders(),
+    );
+    if (widget.isTv) return candidate;
+    final proxied = await LocalHttpStreamProxy.wrapPlaybackSource(candidate);
+    return proxied ?? candidate;
   }
 
   int _toTicks(Duration d) => d.inMicroseconds * 10;

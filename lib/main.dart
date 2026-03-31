@@ -12,6 +12,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:lin_player_core/app_config/app_config.dart';
 import 'package:lin_player_core/state/media_server_type.dart';
 import 'package:lin_player_server_api/services/emby_api.dart';
+import 'package:lin_player_server_api/services/http_stream_proxy.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_state/lin_player_state.dart';
@@ -195,6 +196,9 @@ Future<void> _bootstrapApp() async {
   EmbyApi.setClientFactory(EmbyHttpClientFactory.createClient);
   EmbyApi.setRouteLabelBuilder(EmbyHttpClientFactory.describeRoute);
   CoverCacheManager.configureHttpClientFactory(EmbyHttpClientFactory.createClient);
+  HttpStreamProxyServer.instance.configureHttpClientFactory(
+    EmbyHttpClientFactory.createClient,
+  );
 
   final appState = AppState();
   await appState.loadFromStorage();

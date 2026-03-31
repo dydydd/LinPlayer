@@ -26,6 +26,19 @@ class LocalHttpStreamProxy {
   static Future<PlayableSource?> _wrapCandidate(
       PlayableSource candidate) async {
     if (!_shouldProxy(candidate)) return null;
+    return _wrapHttpSource(candidate);
+  }
+
+  static Future<PlayableSource?> wrapPlaybackSource(
+    PlayableSource candidate,
+  ) async {
+    if (kIsWeb) return null;
+    if (!_isSupportedHttpSource(candidate)) return null;
+    return _wrapHttpSource(candidate);
+  }
+
+  static Future<PlayableSource?> _wrapHttpSource(PlayableSource candidate) async {
+    if (!_isSupportedHttpSource(candidate)) return null;
 
     final uri = Uri.tryParse(candidate.url.trim());
     if (uri == null) return null;
@@ -48,6 +61,7 @@ class LocalHttpStreamProxy {
       );
       return PlayableSource(
         url: proxyUri.toString(),
+        httpHeaders: const <String, String>{},
         mediaTypeHint: candidate.mediaTypeHint,
         fromStrm: candidate.fromStrm,
         redirectChain: candidate.redirectChain,
@@ -67,6 +81,10 @@ class LocalHttpStreamProxy {
       return false;
     }
 
+    return _isSupportedHttpSource(candidate);
+  }
+
+  static bool _isSupportedHttpSource(PlayableSource candidate) {
     final uri = Uri.tryParse(candidate.url.trim());
     if (uri == null) return false;
 
