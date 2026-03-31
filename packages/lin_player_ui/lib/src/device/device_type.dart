@@ -101,6 +101,17 @@ class DeviceType {
     }
   }
 
+  static Future<String?> systemHttpProxyUrl() async {
+    if (kIsWeb) return null;
+    if (defaultTargetPlatform != TargetPlatform.windows) return null;
+    try {
+      final v = await _channel.invokeMethod<String>('systemHttpProxyUrl');
+      return (v ?? '').trim().isEmpty ? null : v!.trim();
+    } catch (_) {
+      return null;
+    }
+  }
+
   static Future<int?> batteryLevel() async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return null;
 

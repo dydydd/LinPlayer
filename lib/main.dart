@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:lin_player_core/app_config/app_config.dart';
 import 'package:lin_player_core/state/media_server_type.dart';
+import 'package:lin_player_server_api/services/emby_api.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_state/lin_player_state.dart';
@@ -25,7 +26,9 @@ import 'services/app_diagnostics_log.dart';
 import 'services/app_update_flow.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/app_route_observer.dart';
+import 'services/emby_http_client_factory.dart';
 import 'services/plugins/plugin_governance_flow.dart';
+import 'services/system_http_proxy_service.dart';
 import 'services/tv_remote/tv_remote_command_dispatcher.dart';
 import 'services/tv_remote/tv_remote_service.dart';
 import 'tv/tv_background.dart';
@@ -189,8 +192,15 @@ Future<void> _bootstrapApp() async {
     // PackageInfo is best-effort; keep default version if unavailable.
   }
 
+  EmbyApi.setClientFactory(EmbyHttpClientFactory.createClient);
+  EmbyApi.setRouteLabelBuilder(EmbyHttpClientFactory.describeRoute);
+  CoverCacheManager.configureHttpClientFactory(EmbyHttpClientFactory.createClient);
+
   final appState = AppState();
   await appState.loadFromStorage();
+  if (DesktopShell.isDesktopTarget) {
+    await SystemHttpProxyService.instance.refresh();
+  }
   AppDiagnosticsLogger.instance.info(
     'app',
     'App state loaded',
@@ -272,6 +282,9 @@ class _LinPlayerAppState extends State<LinPlayerApp>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       unawaited(HighRefreshRate.apply(force: true));
+      if (DesktopShell.isDesktopTarget) {
+        unawaited(SystemHttpProxyService.instance.refresh());
+      }
     }
   }
 

@@ -18,6 +18,7 @@ export 'src/ui/frosted_card.dart';
 export 'src/ui/glass_background.dart';
 export 'src/ui/glass_blur.dart';
 export 'src/ui/high_refresh_rate.dart';
+export 'src/ui/lin_network_image.dart';
 export 'src/ui/rating_badge.dart';
 export 'src/ui/server_icon_picker.dart';
 export 'src/ui/theme_sheet.dart';

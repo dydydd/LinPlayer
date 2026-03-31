@@ -1527,13 +1527,10 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                               child: Icon(Icons.movie_creation_outlined),
                             ),
                           )
-                        : Image.network(
-                            posterUrl,
+                        : LinNetworkImage(
+                            imageUrl: posterUrl,
                             fit: BoxFit.cover,
-                            headers: {
-                              'User-Agent': LinHttpClientFactory.userAgent,
-                            },
-                            errorBuilder: (_, __, ___) =>
+                            errorWidget:
                                 const ColoredBox(color: Colors.black26),
                           ),
                   ),
@@ -1765,15 +1762,10 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                               alpha: 0.08,
                                             ),
                                           )
-                                        : Image.network(
-                                            coverUrl,
+                                        : LinNetworkImage(
+                                            imageUrl: coverUrl,
                                             fit: BoxFit.cover,
-                                            headers: {
-                                              'User-Agent': LinHttpClientFactory
-                                                  .userAgent,
-                                            },
-                                            errorBuilder: (_, __, ___) =>
-                                                const ColoredBox(
+                                            errorWidget: const ColoredBox(
                                               color: Colors.black26,
                                             ),
                                           ),
@@ -1960,15 +1952,10 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                           color: Colors.black26,
                                           child: Icon(Icons.person),
                                         )
-                                      : Image.network(
-                                          imageUrl,
+                                      : LinNetworkImage(
+                                          imageUrl: imageUrl,
                                           fit: BoxFit.cover,
-                                          headers: {
-                                            'User-Agent':
-                                                LinHttpClientFactory.userAgent,
-                                          },
-                                          errorBuilder: (_, __, ___) =>
-                                              const ColoredBox(
+                                          errorWidget: const ColoredBox(
                                             color: Colors.black26,
                                             child: Icon(Icons.person),
                                           ),
@@ -2073,12 +2060,10 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                 aspectRatio: 2 / 3,
                 child: posterUrl.isEmpty
                     ? const ColoredBox(color: Colors.black26)
-                    : Image.network(
-                        posterUrl,
+                    : LinNetworkImage(
+                        imageUrl: posterUrl,
                         fit: BoxFit.cover,
-                        headers: {'User-Agent': LinHttpClientFactory.userAgent},
-                        errorBuilder: (_, __, ___) =>
-                            const ColoredBox(color: Colors.black26),
+                        errorWidget: const ColoredBox(color: Colors.black26),
                       ),
               ),
             ),
@@ -2391,15 +2376,10 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                               ? const ColoredBox(
                                                   color: Colors.black26,
                                                 )
-                                              : Image.network(
-                                                  imageUrl,
+                                              : LinNetworkImage(
+                                                  imageUrl: imageUrl,
                                                   fit: BoxFit.cover,
-                                                  headers: {
-                                                    'User-Agent':
-                                                        LinHttpClientFactory
-                                                            .userAgent,
-                                                  },
-                                                  errorBuilder: (_, __, ___) =>
+                                                  errorWidget:
                                                       const ColoredBox(
                                                     color: Colors.black26,
                                                   ),
@@ -3670,12 +3650,10 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
 
     Widget background = heroUrl.isEmpty
         ? const ColoredBox(color: Colors.black26)
-        : Image.network(
-            heroUrl,
+        : LinNetworkImage(
+            imageUrl: heroUrl,
             fit: BoxFit.cover,
-            headers: {'User-Agent': LinHttpClientFactory.userAgent},
-            errorBuilder: (_, __, ___) =>
-                const ColoredBox(color: Colors.black26),
+            errorWidget: const ColoredBox(color: Colors.black26),
           );
     if (heroFilter != null) {
       background = ColorFiltered(colorFilter: heroFilter, child: background);
@@ -3784,16 +3762,12 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                         color: Colors.black26,
                                         child: Center(child: Icon(Icons.image)),
                                       )
-                                    : Image.network(
-                                        posterUrl,
+                                    : LinNetworkImage(
+                                        imageUrl: posterUrl,
                                         fit: BoxFit.cover,
-                                        headers: {
-                                          'User-Agent':
-                                              LinHttpClientFactory.userAgent
-                                        },
-                                        errorBuilder: (_, __, ___) =>
-                                            const ColoredBox(
-                                                color: Colors.black26),
+                                        errorWidget: const ColoredBox(
+                                          color: Colors.black26,
+                                        ),
                                       ),
                               ),
                             ),
@@ -4040,13 +4014,10 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                   color: Colors.black26,
                                   child: Center(child: Icon(Icons.image)),
                                 )
-                              : Image.network(
-                                  img,
+                              : LinNetworkImage(
+                                  imageUrl: img,
                                   fit: BoxFit.cover,
-                                  headers: {
-                                    'User-Agent': LinHttpClientFactory.userAgent
-                                  },
-                                  errorBuilder: (_, __, ___) =>
+                                  errorWidget:
                                       const ColoredBox(color: Colors.black26),
                                 ),
                         ),
@@ -4150,15 +4121,10 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                             child: Center(
                                                 child: Icon(Icons.image)),
                                           )
-                                        : Image.network(
-                                            img,
+                                        : LinNetworkImage(
+                                            imageUrl: img,
                                             fit: BoxFit.cover,
-                                            headers: {
-                                              'User-Agent':
-                                                  LinHttpClientFactory.userAgent
-                                            },
-                                            errorBuilder: (_, __, ___) =>
-                                                const ColoredBox(
+                                            errorWidget: const ColoredBox(
                                               color: Colors.black26,
                                             ),
                                           ),
@@ -4277,13 +4243,10 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                   color: Colors.black26,
                                   child: Center(child: Icon(Icons.person)),
                                 )
-                              : Image.network(
-                                  img,
+                              : LinNetworkImage(
+                                  imageUrl: img,
                                   fit: BoxFit.cover,
-                                  headers: {
-                                    'User-Agent': LinHttpClientFactory.userAgent
-                                  },
-                                  errorBuilder: (_, __, ___) =>
+                                  errorWidget:
                                       const ColoredBox(color: Colors.black26),
                                 ),
                         ),
@@ -4714,12 +4677,10 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     // ignore: dead_code
     Widget heroImage = hero.isEmpty
         ? const ColoredBox(color: Colors.black26)
-        : Image.network(
-            hero,
+        : LinNetworkImage(
+            imageUrl: hero,
             fit: BoxFit.cover,
-            headers: {'User-Agent': LinHttpClientFactory.userAgent},
-            errorBuilder: (_, __, ___) =>
-                const ColoredBox(color: Colors.black26),
+            errorWidget: const ColoredBox(color: Colors.black26),
           );
     if (heroFilter != null) {
       heroImage = ColorFiltered(colorFilter: heroFilter, child: heroImage);
@@ -4963,21 +4924,15 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                   return _HoverScale(
                                     child: ClipRRect(
                                       borderRadius: BorderRadius.circular(12),
-                                      child: Image.network(
-                                        url,
+                                      child: SizedBox(
                                         width: 220,
                                         height: 140,
-                                        fit: BoxFit.cover,
-                                        headers: {
-                                          'User-Agent':
-                                              LinHttpClientFactory.userAgent,
-                                        },
-                                        errorBuilder: (_, __, ___) =>
-                                            const SizedBox(
-                                          width: 220,
-                                          height: 140,
-                                          child:
-                                              ColoredBox(color: Colors.black26),
+                                        child: LinNetworkImage(
+                                          imageUrl: url,
+                                          fit: BoxFit.cover,
+                                          errorWidget: const ColoredBox(
+                                            color: Colors.black26,
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -5085,16 +5040,10 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                                   child: img == null
                                                       ? const ColoredBox(
                                                           color: Colors.black26)
-                                                      : Image.network(
-                                                          img,
+                                                      : LinNetworkImage(
+                                                          imageUrl: img,
                                                           fit: BoxFit.cover,
-                                                          headers: {
-                                                            'User-Agent':
-                                                                LinHttpClientFactory
-                                                                    .userAgent,
-                                                          },
-                                                          errorBuilder: (_, __,
-                                                                  ___) =>
+                                                          errorWidget:
                                                               const ColoredBox(
                                                             color:
                                                                 Colors.black26,
@@ -5424,17 +5373,12 @@ class _SeasonEpisodesPageState extends State<SeasonEpisodesPage> {
                                           child: ClipRRect(
                                             borderRadius:
                                                 BorderRadius.circular(12),
-                                            child: Image.network(
-                                              img,
+                                            child: LinNetworkImage(
+                                              imageUrl: img,
                                               fit: BoxFit.cover,
-                                              headers: {
-                                                'User-Agent':
-                                                    LinHttpClientFactory
-                                                        .userAgent
-                                              },
-                                              errorBuilder: (_, __, ___) =>
-                                                  const ColoredBox(
-                                                      color: Colors.black26),
+                                              errorWidget: const ColoredBox(
+                                                color: Colors.black26,
+                                              ),
                                             ),
                                           ),
                                         ),
@@ -6902,12 +6846,10 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
 
     Widget background = backdropUrl.isEmpty
         ? const ColoredBox(color: Colors.black26)
-        : Image.network(
-            backdropUrl,
+        : LinNetworkImage(
+            imageUrl: backdropUrl,
             fit: BoxFit.cover,
-            headers: {'User-Agent': LinHttpClientFactory.userAgent},
-            errorBuilder: (_, __, ___) =>
-                const ColoredBox(color: Colors.black26),
+            errorWidget: const ColoredBox(color: Colors.black26),
           );
 
     final scrim = LinearGradient(
@@ -6971,16 +6913,12 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                           child: Icon(Icons.image),
                                         ),
                                       )
-                                    : Image.network(
-                                        posterUrl,
+                                    : LinNetworkImage(
+                                        imageUrl: posterUrl,
                                         fit: BoxFit.cover,
-                                        headers: {
-                                          'User-Agent':
-                                              LinHttpClientFactory.userAgent
-                                        },
-                                        errorBuilder: (_, __, ___) =>
-                                            const ColoredBox(
-                                                color: Colors.black26),
+                                        errorWidget: const ColoredBox(
+                                          color: Colors.black26,
+                                        ),
                                       ),
                               ),
                             ),
@@ -8369,17 +8307,12 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                       child: img.isEmpty
                                           ? const ColoredBox(
                                               color: Colors.black26)
-                                          : Image.network(
-                                              img,
+                                          : LinNetworkImage(
+                                              imageUrl: img,
                                               fit: BoxFit.cover,
-                                              headers: {
-                                                'User-Agent':
-                                                    LinHttpClientFactory
-                                                        .userAgent
-                                              },
-                                              errorBuilder: (_, __, ___) =>
-                                                  const ColoredBox(
-                                                      color: Colors.black26),
+                                              errorWidget: const ColoredBox(
+                                                color: Colors.black26,
+                                              ),
                                             ),
                                     ),
                                     Align(
@@ -8726,8 +8659,7 @@ Widget _peopleSection(
                   children: [
                     CircleAvatar(
                       radius: 42,
-                      backgroundImage:
-                          img.isNotEmpty ? NetworkImage(img) : null,
+                      backgroundImage: linNetworkImageProvider(img),
                       backgroundColor: avatarBg,
                       child: img.isEmpty
                           ? Text(p.name.isNotEmpty ? p.name[0] : '?')
@@ -8793,8 +8725,7 @@ Widget _castSection(
                     children: [
                       CircleAvatar(
                         radius: 42,
-                        backgroundImage:
-                            img.isNotEmpty ? NetworkImage(img) : null,
+                        backgroundImage: linNetworkImageProvider(img),
                         backgroundColor: avatarBg,
                         child: img.isEmpty
                             ? Text(p.name.isNotEmpty ? p.name[0] : '?')

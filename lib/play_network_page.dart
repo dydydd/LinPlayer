@@ -1815,25 +1815,23 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                                     fit: StackFit.expand,
                                                     children: [
                                                       if (img != null)
-                                                        Image.network(
-                                                          img,
+                                                        LinNetworkImage(
+                                                          imageUrl: img,
                                                           fit: BoxFit.cover,
-                                                          errorBuilder:
-                                                              (_, __, ___) {
-                                                            return const ColoredBox(
-                                                              color: Color(
-                                                                0x22000000,
+                                                          errorWidget:
+                                                              const ColoredBox(
+                                                            color: Color(
+                                                              0x22000000,
+                                                            ),
+                                                            child: Center(
+                                                              child: Icon(
+                                                                Icons
+                                                                    .image_not_supported_outlined,
+                                                                color: Colors
+                                                                    .white54,
                                                               ),
-                                                              child: Center(
-                                                                child: Icon(
-                                                                  Icons
-                                                                      .image_not_supported_outlined,
-                                                                  color: Colors
-                                                                      .white54,
-                                                                ),
-                                                              ),
-                                                            );
-                                                          },
+                                                            ),
+                                                          ),
                                                         )
                                                       else
                                                         const ColoredBox(
@@ -9289,18 +9287,16 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                               color: Colors.white54,
                             ),
                           )
-                        : Image.network(
-                            img,
+                        : LinNetworkImage(
+                            imageUrl: img,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) {
-                              return const ColoredBox(
-                                color: Color(0x22000000),
-                                child: Icon(
-                                  Icons.image_not_supported_outlined,
-                                  color: Colors.white54,
-                                ),
-                              );
-                            },
+                            errorWidget: const ColoredBox(
+                              color: Color(0x22000000),
+                              child: Icon(
+                                Icons.image_not_supported_outlined,
+                                color: Colors.white54,
+                              ),
+                            ),
                           ),
                   ),
                 ),

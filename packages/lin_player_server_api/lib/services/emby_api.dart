@@ -397,10 +397,15 @@ class PlaybackInfoResult {
   });
 }
 
+typedef EmbyApiClientFactory = http.Client Function();
+typedef EmbyApiRouteLabelBuilder = String? Function(Uri uri);
+
 class EmbyApi {
   static String appVersion = '1.0.0';
   static String userAgentProduct = 'LinPlayer';
   static String defaultClientName = 'LinPlayer';
+  static EmbyApiClientFactory? _clientFactory;
+  static EmbyApiRouteLabelBuilder? _routeLabelBuilder;
 
   static String get userAgent => LinHttpClientFactory.userAgent;
 
@@ -427,6 +432,25 @@ class EmbyApi {
       appVersion = v;
       _syncUserAgent();
     }
+  }
+
+  static void setClientFactory(EmbyApiClientFactory? factory) {
+    _clientFactory = factory;
+  }
+
+  static void setRouteLabelBuilder(EmbyApiRouteLabelBuilder? builder) {
+    _routeLabelBuilder = builder;
+  }
+
+  static http.Client _defaultClient() {
+    final factory = _clientFactory;
+    return factory == null ? LinHttpClientFactory.createClient() : factory();
+  }
+
+  static String? describeRequestRoute(Uri uri) {
+    final builder = _routeLabelBuilder;
+    if (builder != null) return builder(uri);
+    return LinHttpClientFactory.describeProxyRoute(uri);
   }
 
   static String _authorizationValue({
@@ -516,7 +540,7 @@ class EmbyApi {
         deviceName = (deviceName == null || deviceName.trim().isEmpty)
             ? 'Flutter'
             : deviceName.trim(),
-        _client = client ?? LinHttpClientFactory.createClient();
+        _client = client ?? _defaultClient();
 
   final String _hostOrUrl;
   final String _preferredScheme;
@@ -769,6 +793,28 @@ class EmbyApi {
     return '网络异常 ($raw)';
   }
 
+  static String _socketTargetHint(SocketException e) {
+    final host = (e.address?.host ?? '').trim();
+    final ip = (e.address?.address ?? '').trim();
+    final port = e.port ?? 0;
+
+    final parts = <String>[];
+    if (host.isNotEmpty) parts.add(host);
+    if (ip.isNotEmpty && ip != host) parts.add(ip);
+
+    final endpoint = parts.join('/');
+    if (endpoint.isEmpty && port <= 0) return '';
+    final portText = port > 0 ? ':$port' : '';
+    return ' [socket=${endpoint.isEmpty ? '?' : endpoint}$portText]';
+  }
+
+  static String _describeSocketExceptionDetailed(SocketException e) {
+    final target = _socketTargetHint(e);
+    final message = _describeSocketException(e);
+    if (target.isEmpty) return message;
+    return '$message$target';
+  }
+
   static String _summarizeAuthErrors(List<String> errors) {
     final unique = <String>[];
     final seen = <String>{};
@@ -834,6 +880,9 @@ class EmbyApi {
         final url = Uri.parse(
           _apiUrlWithPrefix(base, prefix, 'Users/AuthenticateByName'),
         );
+        final routeHint = describeRequestRoute(url);
+        final routeLabel =
+            routeHint == null ? '[route=default]' : '[route=$routeHint]';
         final body = jsonEncode({
           'Username': username,
           'Pw': password,
@@ -851,12 +900,16 @@ class EmbyApi {
               .timeout(const Duration(seconds: 6))
               .catchError((Object error) {
             if (error is SocketException) {
-              throw _AuthSocketFailure(_describeSocketException(error));
+              throw _AuthSocketFailure(
+                _describeSocketExceptionDetailed(error),
+              );
             }
             throw error;
           });
           if (resp.statusCode != 200) {
-            errors.add('${url.toString()}: HTTP ${resp.statusCode}');
+            errors.add(
+              '${url.toString()} $routeLabel: HTTP ${resp.statusCode}',
+            );
             continue;
           }
           final map = jsonDecode(resp.body) as Map<String, dynamic>;
@@ -900,13 +953,15 @@ class EmbyApi {
           );
         } catch (e) {
           if (e is _AuthSocketFailure) {
-            errors.add('${url.origin}: $e');
+            errors.add('${url.origin} $routeLabel: $e');
             continue;
           }
           if (e is SocketException) {
-            errors.add('${url.origin}: ${_describeSocketException(e)}');
+            errors.add(
+              '${url.origin} $routeLabel: ${_describeSocketExceptionDetailed(e)}',
+            );
           } else {
-            errors.add('${url.origin}: $e');
+            errors.add('${url.origin} $routeLabel: $e');
           }
         }
       }

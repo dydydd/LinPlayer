@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:lin_player_state/lin_player_state.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
 
 import '../../server_adapters/server_access.dart';
 import '../models/desktop_ui_language.dart';
@@ -697,14 +698,11 @@ class _DesktopSearchPageState extends State<DesktopSearchPage> {
       ),
       child: rawIconUrl.isEmpty
           ? fallback()
-          : Image.network(
-              rawIconUrl,
+          : LinNetworkImage(
+              imageUrl: rawIconUrl,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => fallback(),
-              loadingBuilder: (context, child, loadingProgress) {
-                if (loadingProgress == null) return child;
-                return fallback();
-              },
+              placeholder: fallback(),
+              errorWidget: fallback(),
             ),
     );
   }

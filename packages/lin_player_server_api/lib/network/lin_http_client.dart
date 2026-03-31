@@ -101,11 +101,10 @@ class LinHttpClientFactory {
       client.maxConnectionsPerHost = c.maxConnectionsPerHost!;
     }
 
-    client.findProxy = (Uri uri) {
-      final resolver = _runtimeProxyResolver ?? c.proxyResolver;
-      if (resolver != null) return resolver(uri);
-      return HttpClient.findProxyFromEnvironment(uri);
-    };
+    final resolver = _runtimeProxyResolver ?? c.proxyResolver;
+    if (resolver != null) {
+      client.findProxy = resolver;
+    }
 
     final badCert = c.badCertificateCallback;
     if (badCert != null) {
@@ -115,6 +114,14 @@ class LinHttpClientFactory {
     }
 
     return client;
+  }
+
+  static String? describeProxyRoute(Uri uri, [LinHttpClientConfig? override]) {
+    final c = override ?? _config;
+    final resolver = _runtimeProxyResolver ?? c.proxyResolver;
+    if (resolver == null) return null;
+    final route = resolver(uri).trim();
+    return route.isEmpty ? 'DIRECT' : route;
   }
 
   static http.Client createClient([LinHttpClientConfig? override]) {

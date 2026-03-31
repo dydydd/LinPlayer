@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import 'package:http/http.dart' as http;
 
 class CoverCacheManager extends CacheManager {
   static const _key = 'lin_player_cover_cache_v1';
@@ -24,8 +25,12 @@ class CoverCacheManager extends CacheManager {
   static const _unlimitedMaxObjects = 0x7fffffff;
 
   static bool _unlimited = false;
+  static http.Client Function()? _httpClientFactory;
   static bool get unlimited => _unlimited;
   static void setUnlimited(bool value) => _unlimited = value;
+  static void configureHttpClientFactory(http.Client Function()? factory) {
+    _httpClientFactory = factory;
+  }
 
   static final CoverCacheManager instance = CoverCacheManager._();
 
@@ -45,6 +50,7 @@ class _CoverCacheConfig implements Config {
   })  : repo = JsonCacheInfoRepository(databaseName: cacheKey),
         fileSystem = IOFileSystem(cacheKey),
         fileService = _DynamicDurationHttpFileService(
+          httpClientFactory: () => CoverCacheManager._httpClientFactory?.call(),
           validDuration: () => unlimited()
               ? CoverCacheManager._unlimitedStalePeriod
               : CoverCacheManager._limitedStalePeriod,
@@ -75,17 +81,24 @@ class _CoverCacheConfig implements Config {
   final FileService fileService;
 }
 
-class _DynamicDurationHttpFileService extends HttpFileService {
-  _DynamicDurationHttpFileService({required this.validDuration});
+class _DynamicDurationHttpFileService extends FileService {
+  _DynamicDurationHttpFileService({
+    required this.validDuration,
+    required this.httpClientFactory,
+  });
 
   final Duration Function() validDuration;
+  final http.Client? Function() httpClientFactory;
+  late final HttpFileService _delegate = HttpFileService(
+        httpClient: httpClientFactory(),
+      );
 
   @override
   Future<FileServiceResponse> get(
     String url, {
     Map<String, String>? headers,
   }) async {
-    final response = await super.get(url, headers: headers);
+    final response = await _delegate.get(url, headers: headers);
     return _FixedDurationFileServiceResponse(
       delegate: response,
       validDuration: validDuration(),

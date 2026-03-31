@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:lin_player_server_api/network/lin_http_client.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
 
 class ShowDetailMobileView extends StatelessWidget {
   const ShowDetailMobileView({
@@ -84,11 +84,10 @@ class ShowDetailMobileView extends StatelessWidget {
               ),
             ),
           )
-        : Image.network(
-            heroImageUrl,
+        : LinNetworkImage(
+            imageUrl: heroImageUrl,
             fit: BoxFit.cover,
-            headers: {'User-Agent': LinHttpClientFactory.userAgent},
-            errorBuilder: (_, __, ___) => DecoratedBox(
+            errorWidget: DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,

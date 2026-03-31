@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:lin_player_server_api/network/lin_http_client.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
 
 import 'mobile_text_widgets.dart';
 
@@ -103,11 +103,10 @@ class MovieDetailMobileView extends StatelessWidget {
               Colors.black.withValues(alpha: 0.28),
               BlendMode.darken,
             ),
-            child: Image.network(
-              imageUrl,
+            child: LinNetworkImage(
+              imageUrl: imageUrl,
               fit: BoxFit.cover,
-              headers: {'User-Agent': LinHttpClientFactory.userAgent},
-              errorBuilder: (_, __, ___) => const ColoredBox(
+              errorWidget: const ColoredBox(
                 color: Color(0xFF0C1015),
               ),
             ),
@@ -246,11 +245,10 @@ class MovieDetailMobileView extends StatelessWidget {
       );
     }
 
-    return Image.network(
-      coverUrl,
+    return LinNetworkImage(
+      imageUrl: coverUrl,
       fit: BoxFit.cover,
-      headers: {'User-Agent': LinHttpClientFactory.userAgent},
-      errorBuilder: (_, __, ___) => const ColoredBox(color: Color(0x33000000)),
+      errorWidget: const ColoredBox(color: Color(0x33000000)),
     );
   }
 

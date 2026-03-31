@@ -108,11 +108,10 @@ class _PersonPageState extends State<PersonPage> {
     if (imageUrl.isEmpty) {
       return const ColoredBox(color: Colors.black26);
     }
-    return Image.network(
-      imageUrl,
+    return LinNetworkImage(
+      imageUrl: imageUrl,
       fit: BoxFit.cover,
-      headers: {'User-Agent': LinHttpClientFactory.userAgent},
-      errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black26),
+      errorWidget: const ColoredBox(color: Colors.black26),
     );
   }
 
@@ -208,13 +207,10 @@ class _PersonPageState extends State<PersonPage> {
                             color: Colors.black26,
                             child: Center(child: Icon(Icons.image)),
                           )
-                        : Image.network(
-                            img,
+                        : LinNetworkImage(
+                            imageUrl: img,
                             fit: BoxFit.cover,
-                            headers: {
-                              'User-Agent': LinHttpClientFactory.userAgent
-                            },
-                            errorBuilder: (_, __, ___) => const ColoredBox(
+                            errorWidget: const ColoredBox(
                               color: Colors.black26,
                               child: Center(child: Icon(Icons.broken_image)),
                             ),
@@ -271,13 +267,10 @@ class _PersonPageState extends State<PersonPage> {
                                 color: Colors.black26,
                                 child: Center(child: Icon(Icons.person)),
                               )
-                            : Image.network(
-                                personImage,
+                            : LinNetworkImage(
+                                imageUrl: personImage,
                                 fit: BoxFit.cover,
-                                headers: {
-                                  'User-Agent': LinHttpClientFactory.userAgent
-                                },
-                                errorBuilder: (_, __, ___) => const ColoredBox(
+                                errorWidget: const ColoredBox(
                                   color: Colors.black26,
                                   child: Center(child: Icon(Icons.person)),
                                 ),

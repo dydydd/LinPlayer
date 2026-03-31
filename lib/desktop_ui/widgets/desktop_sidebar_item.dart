@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:lin_player_core/state/media_server_type.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
 
 import '../theme/desktop_theme_extension.dart';
 import 'hover_effect_wrapper.dart';
@@ -123,14 +124,11 @@ class DesktopSidebarItem extends StatelessWidget {
                 ),
                 child: rawIconUrl.isEmpty
                     ? fallbackAvatar()
-                    : Image.network(
-                        rawIconUrl,
+                    : LinNetworkImage(
+                        imageUrl: rawIconUrl,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => fallbackAvatar(),
-                        loadingBuilder: (context, child, loadingProgress) {
-                          if (loadingProgress == null) return child;
-                          return fallbackAvatar();
-                        },
+                        placeholder: fallbackAvatar(),
+                        errorWidget: fallbackAvatar(),
                       ),
               ),
               if (!collapsed) ...[
