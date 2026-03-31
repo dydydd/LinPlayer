@@ -19,6 +19,7 @@
 .android/
 .gradle-dist/
 .gradle-home/
+.gradle-user-home/
 .tmp/
 
 # API clients
