@@ -185,8 +185,8 @@ class MobilePlayerSidePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
     final panelWidth = math.min(
-      480.0,
-      size.width * (size.width > size.height ? 0.50 : 0.56),
+      336.0,
+      size.width * (size.width > size.height ? 0.38 : 0.50),
     );
 
     return Positioned.fill(
@@ -212,18 +212,18 @@ class MobilePlayerSidePanel extends StatelessWidget {
             curve: Curves.easeOutCubic,
             top: 0,
             bottom: 0,
-            right: visible ? 0 : -panelWidth - 20,
+            right: visible ? 0 : -panelWidth - 12,
             width: panelWidth,
             child: IgnorePointer(
               ignoring: !visible,
               child: SafeArea(
                 left: false,
-                minimum: const EdgeInsets.fromLTRB(0, 10, 10, 10),
+                minimum: const EdgeInsets.fromLTRB(0, 8, 0, 8),
                 child: Padding(
-                  padding: const EdgeInsets.only(left: 12),
+                  padding: const EdgeInsets.only(left: 10),
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(28),
+                      borderRadius: BorderRadius.circular(24),
                       color: Colors.black.withValues(alpha: 0.10),
                       border: Border.all(
                         color: Colors.white.withValues(alpha: 0.16),
@@ -238,9 +238,9 @@ class MobilePlayerSidePanel extends StatelessWidget {
                       ),
                     ),
                     child: ClipRRect(
-                      borderRadius: BorderRadius.circular(28),
+                      borderRadius: BorderRadius.circular(24),
                       child: Padding(
-                        padding: const EdgeInsets.fromLTRB(18, 14, 14, 14),
+                        padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
                         child: Column(
                           children: [
                             Row(

@@ -87,6 +87,8 @@ class _LibraryPageState extends State<LibraryPage> {
   @override
   Widget build(BuildContext context) {
     final uiScale = context.uiScale;
+    final compactMobile =
+        !_isTv(context) && MediaQuery.sizeOf(context).shortestSide < 600;
     return AnimatedBuilder(
       animation: widget.appState,
       builder: (context, _) {
@@ -131,13 +133,19 @@ class _LibraryPageState extends State<LibraryPage> {
                       padding: const EdgeInsets.all(12),
                       child: _layout == _LibraryPageLayout.grid
                           ? GridView.builder(
-                              gridDelegate:
-                                  SliverGridDelegateWithMaxCrossAxisExtent(
-                                maxCrossAxisExtent: 150 * uiScale,
-                                mainAxisSpacing: 6,
-                                crossAxisSpacing: 6,
-                                childAspectRatio: 1.33,
-                              ),
+                              gridDelegate: compactMobile
+                                  ? const SliverGridDelegateWithFixedCrossAxisCount(
+                                      crossAxisCount: 2,
+                                      mainAxisSpacing: 12,
+                                      crossAxisSpacing: 12,
+                                      childAspectRatio: 1.18,
+                                    )
+                                  : SliverGridDelegateWithMaxCrossAxisExtent(
+                                      maxCrossAxisExtent: 150 * uiScale,
+                                      mainAxisSpacing: 6,
+                                      crossAxisSpacing: 6,
+                                      childAspectRatio: 1.33,
+                                    ),
                               itemCount: libs.length,
                               itemBuilder: (context, index) {
                                 final LibraryInfo lib = libs[index];

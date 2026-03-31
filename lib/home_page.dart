@@ -11,6 +11,7 @@ import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
 
 import 'aggregate_service_page.dart';
+import 'continue_watching_page.dart';
 import 'library_page.dart';
 import 'library_items_page.dart';
 import 'player_screen.dart';
@@ -833,13 +834,21 @@ class _MobileHomeAppBar extends StatelessWidget implements PreferredSizeWidget {
                 padding: EdgeInsets.fromLTRB(16, topInset + 8, 12, 8),
                 child: Row(
                   children: [
-                    Expanded(
-                      child: _ServerGlassButton(
-                        enableBlur: enableBlur,
-                        useGlass: useGlass,
-                        serverName: serverName,
-                        iconUrl: iconUrl,
-                        onTap: onTapServer,
+                    Flexible(
+                      fit: FlexFit.loose,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 280),
+                          child: _ServerGlassButton(
+                            enableBlur: enableBlur,
+                            useGlass: useGlass,
+                            infoStyle: true,
+                            serverName: serverName,
+                            iconUrl: iconUrl,
+                            onTap: onTapServer,
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -1280,6 +1289,7 @@ class _ServerGlassButton extends StatefulWidget {
     required this.onTap,
     required this.enableBlur,
     required this.useGlass,
+    this.infoStyle = false,
   });
 
   final String serverName;
@@ -1287,6 +1297,7 @@ class _ServerGlassButton extends StatefulWidget {
   final VoidCallback? onTap;
   final bool enableBlur;
   final bool useGlass;
+  final bool infoStyle;
 
   @override
   State<_ServerGlassButton> createState() => _ServerGlassButtonState();
@@ -1318,12 +1329,14 @@ class _ServerGlassButtonState extends State<_ServerGlassButton> {
     final fg =
         enabled ? scheme.onSurface : scheme.onSurface.withValues(alpha: 0.38);
     final shadowColor = scheme.shadow.withValues(alpha: isDark ? 0.30 : 0.16);
-    final radius = BorderRadius.circular(999);
+    final radius = BorderRadius.circular(widget.infoStyle ? 18 : 999);
 
     final highlighted = _focused || _hovered;
     final borderColor = highlighted
         ? scheme.primary.withValues(alpha: _focused ? 0.9 : 0.55)
-        : Colors.transparent;
+        : (widget.infoStyle
+              ? Colors.white.withValues(alpha: isDark ? 0.10 : 0.16)
+              : Colors.transparent);
 
     Widget child = FocusableActionDetector(
       enabled: enabled,
@@ -1349,42 +1362,81 @@ class _ServerGlassButtonState extends State<_ServerGlassButton> {
         duration: const Duration(milliseconds: 120),
         curve: Curves.easeOut,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: borderColor, width: 2),
+          borderRadius: radius,
+          border: Border.all(
+            color: borderColor,
+            width: widget.infoStyle ? 1.2 : 2,
+          ),
         ),
         child: Material(
           color: bg,
-          shape: const StadiumBorder(),
-          elevation: enabled ? 10 : 0,
+          shape: RoundedRectangleBorder(borderRadius: radius),
+          elevation: enabled ? (widget.infoStyle ? 6 : 10) : 0,
           shadowColor: shadowColor,
           clipBehavior: Clip.antiAlias,
           child: InkWell(
-            customBorder: const StadiumBorder(),
+            customBorder: RoundedRectangleBorder(borderRadius: radius),
             onTap: widget.onTap,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              padding: widget.infoStyle
+                  ? const EdgeInsets.fromLTRB(10, 6, 10, 6)
+                  : const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   _ServerIconAvatar(
                     iconUrl: widget.iconUrl,
                     name: widget.serverName,
-                    radius: 12,
+                    radius: widget.infoStyle ? 11 : 12,
                   ),
                   const SizedBox(width: 8),
                   Flexible(
-                    child: Text(
-                      widget.serverName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: fg,
-                      ),
-                    ),
+                    child: widget.infoStyle
+                        ? Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '服务器',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: fg.withValues(alpha: 0.72),
+                                  fontWeight: FontWeight.w600,
+                                  height: 1.0,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                widget.serverName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: fg,
+                                  height: 1.1,
+                                ),
+                              ),
+                            ],
+                          )
+                        : Text(
+                            widget.serverName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: fg,
+                            ),
+                          ),
                   ),
-                  const SizedBox(width: 4),
-                  Icon(Icons.swap_horiz, size: 18, color: fg),
+                  SizedBox(width: widget.infoStyle ? 2 : 4),
+                  Icon(
+                    widget.infoStyle
+                        ? Icons.keyboard_arrow_down_rounded
+                        : Icons.swap_horiz,
+                    size: widget.infoStyle ? 20 : 18,
+                    color: fg.withValues(alpha: widget.infoStyle ? 0.82 : 1),
+                  ),
                 ],
               ),
             ),
@@ -1419,7 +1471,10 @@ class _ServerGlassButtonState extends State<_ServerGlassButton> {
       child: Tooltip(
         message: '服务器',
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 220),
+          constraints: BoxConstraints(
+            maxWidth: widget.infoStyle ? 280 : 320,
+            minHeight: widget.infoStyle ? 44 : 40,
+          ),
           child: child,
         ),
       ),
@@ -2225,6 +2280,36 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection>
 
         return LayoutBuilder(
           builder: (context, constraints) {
+            final useMobileGrid = MediaQuery.sizeOf(context).width < 0;
+            if (useMobileGrid) {
+              return Column(
+                children: [
+                  _HomeSectionHeader(
+                    template: widget.appState.uiTemplate,
+                    title: '继续观看',
+                    count: items.length,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              ContinueWatchingPage(appState: widget.appState),
+                        ),
+                      );
+                    },
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+                    child: ContinueWatchingGrid(
+                      appState: widget.appState,
+                      items: items,
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                    ),
+                  ),
+                ],
+              );
+            }
+
             const padding = 14.0;
             const spacing = 10.0;
             final access = resolveServerAccess(appState: widget.appState);
@@ -2235,9 +2320,7 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection>
             final baseWidth =
                 widget.isTv ? (280 * uiScale) : (compactMobile ? 182.0 : 280.0);
             final visible = (constraints.maxWidth / baseWidth).clamp(1.4, 7.0);
-            final maxCount = widget.isTv
-                ? items.length
-                : (items.length < 12 ? items.length : 12);
+            final maxCount = items.length;
 
             final itemWidth =
                 (constraints.maxWidth - padding * 2 - spacing * (visible - 1)) /

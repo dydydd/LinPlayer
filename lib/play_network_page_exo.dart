@@ -222,6 +222,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   String? _episodePickerError;
   List<MediaItem> _episodeSeasons = const [];
   String? _episodeSelectedSeasonId;
+  Timer? _mobileSpeedAdjustTimer;
+  Future<List<RouteEntry>>? _mobileRouteEntriesFuture;
+  Future<List<Map<String, dynamic>>>? _mobileVersionSourcesFuture;
   final Map<String, List<MediaItem>> _episodeEpisodesCache = {};
   final Map<String, Future<List<MediaItem>>> _episodeEpisodesFutureCache = {};
 
@@ -336,6 +339,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _gestureOverlayTimer = null;
     _tvOkLongPressTimer?.cancel();
     _tvOkLongPressTimer = null;
+    _mobileSpeedAdjustTimer?.cancel();
+    _mobileSpeedAdjustTimer = null;
     // ignore: unawaited_futures
     _reportPlaybackStoppedBestEffort();
     // ignore: unawaited_futures
@@ -462,7 +467,39 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   bool get _mobileSidePanelVisible =>
       _mobilePanel != null || _episodePickerVisible;
 
+  Future<List<RouteEntry>> _ensureMobileRouteEntriesLoaded({
+    bool forceRefresh = false,
+  }) {
+    if (!forceRefresh && _mobileRouteEntriesFuture != null) {
+      return _mobileRouteEntriesFuture!;
+    }
+    final future = _resolvePlaybackRouteEntries(forceRefresh: forceRefresh);
+    _mobileRouteEntriesFuture = future;
+    return future;
+  }
+
+  Future<List<Map<String, dynamic>>> _ensureMobileVersionSourcesLoaded({
+    bool forceRefresh = false,
+  }) {
+    if (!forceRefresh && _availableMediaSources.isNotEmpty) {
+      return SynchronousFuture<List<Map<String, dynamic>>>(
+        List<Map<String, dynamic>>.from(_availableMediaSources),
+      );
+    }
+    if (!forceRefresh && _mobileVersionSourcesFuture != null) {
+      return _mobileVersionSourcesFuture!;
+    }
+    final future = _loadMobileVersionSources(forceRefresh: forceRefresh);
+    _mobileVersionSourcesFuture = future;
+    return future;
+  }
+
   void _openMobilePanel(_MobilePlayerPanel panel) {
+    if (panel == _MobilePlayerPanel.route) {
+      _ensureMobileRouteEntriesLoaded();
+    } else if (panel == _MobilePlayerPanel.version) {
+      _ensureMobileVersionSourcesLoaded();
+    }
     _showControls(scheduleHide: false);
     setState(() {
       _mobilePanel = panel;
@@ -471,12 +508,41 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   }
 
   void _closeMobilePanels({bool scheduleHide = true}) {
+    _mobileSpeedAdjustTimer?.cancel();
+    _mobileSpeedAdjustTimer = null;
     if (!_mobileSidePanelVisible) return;
     setState(() {
       _mobilePanel = null;
       _episodePickerVisible = false;
     });
     _showControls(scheduleHide: scheduleHide);
+  }
+
+  Future<void> _setMobilePlaybackRate(double rate) async {
+    final normalized =
+        ((rate.clamp(0.1, 10.0).toDouble() * 10).round() / 10).toDouble();
+    await _controller?.setPlaybackSpeed(normalized);
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  void _stepMobilePlaybackRate(double delta) {
+    final current = _controller?.value.playbackSpeed ?? 1.0;
+    unawaited(_setMobilePlaybackRate(current + delta));
+  }
+
+  void _startMobilePlaybackRateAdjust(double delta) {
+    _mobileSpeedAdjustTimer?.cancel();
+    _stepMobilePlaybackRate(delta);
+    _mobileSpeedAdjustTimer = Timer.periodic(
+      const Duration(milliseconds: 120),
+      (_) => _stepMobilePlaybackRate(delta),
+    );
+  }
+
+  void _stopMobilePlaybackRateAdjust() {
+    _mobileSpeedAdjustTimer?.cancel();
+    _mobileSpeedAdjustTimer = null;
   }
 
   Future<void> _ensureEpisodePickerLoaded() async {
@@ -646,8 +712,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   Widget _buildEpisodePickerOverlay({required bool enableBlur}) {
     final size = MediaQuery.sizeOf(context);
     final drawerWidth = math.min(
-      420.0,
-      size.width * (size.width > size.height ? 0.50 : 0.78),
+      344.0,
+      size.width * (size.width > size.height ? 0.40 : 0.54),
     );
 
     final theme = Theme.of(context);
@@ -690,12 +756,13 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
             curve: Curves.easeOutCubic,
             top: 0,
             bottom: 0,
-            right: _episodePickerVisible ? 0 : -drawerWidth,
+            right: _episodePickerVisible ? 0 : -drawerWidth - 12,
             width: drawerWidth,
             child: IgnorePointer(
               ignoring: !_episodePickerVisible,
               child: SafeArea(
                 left: false,
+                minimum: const EdgeInsets.fromLTRB(0, 8, 0, 8),
                 child: GlassCard(
                   enableBlur: enableBlur,
                   margin: EdgeInsets.zero,
@@ -909,6 +976,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                   itemBuilder: (ctx, index) {
                                     final e = eps[index];
                                     final epNo = e.episodeNumber ?? (index + 1);
+                                    final episodeTitle = e.name.trim().isEmpty
+                                        ? '第$epNo集'
+                                        : e.name.trim();
                                     final isCurrent = e.id == widget.itemId;
                                     final borderColor = isCurrent
                                         ? accent.withValues(alpha: 0.85)
@@ -1098,6 +1168,23 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                                           ),
                                                         ),
                                                         const SizedBox(
+                                                            height: 4),
+                                                        Text(
+                                                          episodeTitle,
+                                                          maxLines: 2,
+                                                          overflow:
+                                                              TextOverflow
+                                                                  .ellipsis,
+                                                          style:
+                                                              const TextStyle(
+                                                            color: Colors.white,
+                                                            fontSize: 13,
+                                                            fontWeight:
+                                                                FontWeight.w700,
+                                                            height: 1.25,
+                                                          ),
+                                                        ),
+                                                        const SizedBox(
                                                             height: 8),
                                                         Wrap(
                                                           spacing: 6,
@@ -1131,26 +1218,22 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                 );
                               }
 
-                              final columns = drawerWidth >= 360 ? 4 : 3;
-
-                              return GridView.builder(
+                              return ListView.separated(
                                 padding: const EdgeInsets.fromLTRB(
                                   12,
                                   0,
                                   12,
                                   12,
                                 ),
-                                gridDelegate:
-                                    SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: columns,
-                                  crossAxisSpacing: 10,
-                                  mainAxisSpacing: 10,
-                                  childAspectRatio: 2.2,
-                                ),
                                 itemCount: eps.length,
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(height: 8),
                                 itemBuilder: (ctx, index) {
                                   final e = eps[index];
                                   final epNo = e.episodeNumber ?? (index + 1);
+                                  final episodeTitle = e.name.trim().isEmpty
+                                      ? '第$epNo集'
+                                      : e.name.trim();
                                   final isCurrent = e.id == widget.itemId;
                                   final borderColor = isCurrent
                                       ? accent.withValues(alpha: 0.85)
@@ -1165,30 +1248,61 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                     clipBehavior: Clip.antiAlias,
                                     child: InkWell(
                                       onTap: () => _playEpisodeFromPicker(e),
-                                      child: Stack(
-                                        fit: StackFit.expand,
-                                        children: [
-                                          Center(
-                                            child: Text(
-                                              'E$epNo',
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.w700,
-                                                letterSpacing: 0.2,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 14,
+                                          vertical: 12,
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 10,
+                                                vertical: 6,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: Colors.white.withValues(
+                                                  alpha: 0.10,
+                                                ),
+                                                borderRadius:
+                                                    BorderRadius.circular(999),
+                                              ),
+                                              child: Text(
+                                                'E${epNo.toString().padLeft(2, '0')}',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w800,
+                                                  letterSpacing: 0.2,
+                                                ),
                                               ),
                                             ),
-                                          ),
-                                          if (isCurrent)
-                                            const Positioned(
-                                              right: 6,
-                                              top: 6,
-                                              child: Icon(
-                                                Icons.play_circle,
-                                                color: Colors.white,
+                                            const SizedBox(width: 10),
+                                            Expanded(
+                                              child: Text(
+                                                episodeTitle,
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w700,
+                                                  height: 1.25,
+                                                ),
                                               ),
                                             ),
-                                        ],
+                                            if (isCurrent)
+                                              const Padding(
+                                                padding:
+                                                    EdgeInsets.only(left: 10),
+                                                child: Icon(
+                                                  Icons.play_circle,
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   );
@@ -2208,21 +2322,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     };
   }
 
-  List<double> _mobilePlaybackRateOptions() {
-    final values = <double>[];
-    var current = 0.1;
-    while (current <= 10.0001) {
-      values.add(double.parse(current.toStringAsFixed(2)));
-      current += 0.15;
-    }
-    if ((10.0 - values.last).abs() > 0.001) {
-      values.add(10.0);
-    }
-    return values;
-  }
-
-  Future<List<Map<String, dynamic>>> _loadMobileVersionSources() async {
-    if (_availableMediaSources.isNotEmpty) {
+  Future<List<Map<String, dynamic>>> _loadMobileVersionSources({
+    bool forceRefresh = false,
+  }) async {
+    if (!forceRefresh && _availableMediaSources.isNotEmpty) {
       return List<Map<String, dynamic>>.from(_availableMediaSources);
     }
     final access = _serverAccess;
@@ -2273,71 +2376,114 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         const <vp_android.ExoPlayerSubtitleTrackData>[];
   }
 
-  Widget _buildMobileSpeedPanel({required bool controlsEnabled}) {
-    final controller = _controller;
-    final currentRate = controller?.value.playbackSpeed ?? 1.0;
-    final options = _mobilePlaybackRateOptions();
+  Widget _buildMobileSpeedOverlay({required bool controlsEnabled}) {
+    final size = MediaQuery.sizeOf(context);
+    final panelWidth = math.min(108.0, size.width * 0.32);
+    final currentRate =
+        (_controller?.value.playbackSpeed ?? 1.0).clamp(0.1, 10.0).toDouble();
+    final visible = _mobilePanel == _MobilePlayerPanel.speed;
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
+    return Positioned.fill(
+      child: Stack(
         children: [
-          for (final rate in options)
-            _buildMobileRateChip(
-              rate: rate,
-              currentRate: currentRate,
-              enabled: controlsEnabled && controller != null,
-              onTap: () async {
-                await controller?.setPlaybackSpeed(rate);
-                if (!mounted) return;
-                setState(() {});
-              },
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMobileRateChip({
-    required double rate,
-    required double currentRate,
-    required bool enabled,
-    required Future<void> Function() onTap,
-  }) {
-    final selected = (currentRate - rate).abs() < 0.01;
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: !enabled
-            ? null
-            : () {
-                _showControls(scheduleHide: false);
-                unawaited(onTap());
-              },
-        borderRadius: BorderRadius.circular(999),
-        child: Ink(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(999),
-            color: Colors.white.withValues(alpha: selected ? 0.18 : 0.08),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: selected ? 0.34 : 0.12),
-            ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Text(
-              '${rate.toStringAsFixed(rate == rate.roundToDouble() ? 0 : 2)}x',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+          IgnorePointer(
+            ignoring: !visible,
+            child: AnimatedOpacity(
+              opacity: visible ? 1 : 0,
+              duration: const Duration(milliseconds: 180),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _closeMobilePanels,
+                child: ColoredBox(
+                  color: Colors.black.withValues(alpha: 0.18),
+                  child: const SizedBox.expand(),
+                ),
               ),
             ),
           ),
-        ),
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            top: 96,
+            bottom: 96,
+            right: visible ? 6 : -panelWidth - 20,
+            width: panelWidth,
+            child: IgnorePointer(
+              ignoring: !visible,
+              child: SafeArea(
+                left: false,
+                minimum: const EdgeInsets.fromLTRB(0, 8, 6, 8),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(24),
+                    color: Colors.black.withValues(alpha: 0.20),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.14),
+                    ),
+                    gradient: LinearGradient(
+                      begin: Alignment.topRight,
+                      end: Alignment.bottomLeft,
+                      colors: [
+                        Colors.white.withValues(alpha: 0.10),
+                        Colors.white.withValues(alpha: 0.03),
+                      ],
+                    ),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(24),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _MobileSpeedAdjustButton(
+                          icon: Icons.add_rounded,
+                          enabled: controlsEnabled,
+                          onTap: () => _stepMobilePlaybackRate(0.1),
+                          onLongPressStart: () =>
+                              _startMobilePlaybackRateAdjust(0.1),
+                          onLongPressEnd: _stopMobilePlaybackRateAdjust,
+                        ),
+                        const SizedBox(height: 18),
+                        const Icon(
+                          Icons.speed_rounded,
+                          color: Colors.white70,
+                          size: 18,
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          '${currentRate.toStringAsFixed(currentRate == currentRate.roundToDouble() ? 0 : 1)}x',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '倍速',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.72),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        _MobileSpeedAdjustButton(
+                          icon: Icons.remove_rounded,
+                          enabled: controlsEnabled,
+                          onTap: () => _stepMobilePlaybackRate(-0.1),
+                          onLongPressStart: () =>
+                              _startMobilePlaybackRateAdjust(-0.1),
+                          onLongPressEnd: _stopMobilePlaybackRateAdjust,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -2377,10 +2523,39 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
   Widget _buildMobileRoutePanel({required bool controlsEnabled}) {
     return FutureBuilder<List<RouteEntry>>(
-      future: _resolvePlaybackRouteEntries(),
+      future: _ensureMobileRouteEntriesLoaded(),
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  snapshot.error.toString(),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70),
+                ),
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: controlsEnabled
+                      ? () {
+                          setState(() {
+                            _mobileRouteEntriesFuture =
+                                _ensureMobileRouteEntriesLoaded(
+                              forceRefresh: true,
+                            );
+                          });
+                        }
+                      : null,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('重试'),
+                ),
+              ],
+            ),
+          );
         }
         final entries = snapshot.data ?? const <RouteEntry>[];
         if (entries.isEmpty) {
@@ -2395,9 +2570,12 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
             final domain = entry.domain;
             final selected = (_baseUrl ?? '').trim() == domain.url;
             final remark = (_playbackDomainRemark(domain.url) ?? '').trim();
+            final name = domain.name.trim();
+            final displayName = name.isNotEmpty
+                ? name
+                : (remark.isNotEmpty ? remark : '线路 ${index + 1}');
             return MobilePlayerOptionTile(
-              title: domain.name.trim().isEmpty ? domain.url : domain.name.trim(),
-              subtitle: remark.isEmpty ? domain.url : '$remark\n${domain.url}',
+              title: displayName,
               selected: selected,
               trailing: selected
                   ? const Icon(Icons.check_circle_rounded, color: Colors.white)
@@ -2417,7 +2595,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
   Widget _buildMobileVersionPanel({required bool controlsEnabled}) {
     return FutureBuilder<List<Map<String, dynamic>>>(
-      future: _loadMobileVersionSources(),
+      future: _ensureMobileVersionSourcesLoaded(),
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
@@ -2694,43 +2872,68 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     required bool controlsEnabled,
   }) {
     final panel = _mobilePanel;
-    if (panel == null) {
-      return const SizedBox.shrink();
+    final visibleSidePanel =
+        panel != null && panel != _MobilePlayerPanel.speed;
+    final effectivePanel =
+        visibleSidePanel ? panel : _MobilePlayerPanel.route;
+
+    Widget? headerTrailing;
+    Widget child = const SizedBox.shrink();
+    if (visibleSidePanel) {
+      switch (effectivePanel) {
+        case _MobilePlayerPanel.route:
+          child = _buildMobileRoutePanel(controlsEnabled: controlsEnabled);
+          headerTrailing = IconButton(
+            tooltip: '刷新线路',
+            onPressed: controlsEnabled
+                ? () {
+                    setState(() {
+                      _mobileRouteEntriesFuture =
+                          _ensureMobileRouteEntriesLoaded(
+                        forceRefresh: true,
+                      );
+                    });
+                  }
+                : null,
+            icon: const Icon(Icons.refresh_rounded),
+            color: Colors.white,
+            splashRadius: 20,
+          );
+          break;
+        case _MobilePlayerPanel.version:
+          child = _buildMobileVersionPanel(controlsEnabled: controlsEnabled);
+          break;
+        case _MobilePlayerPanel.audio:
+          child = _buildMobileAudioPanel(controlsEnabled: controlsEnabled);
+          break;
+        case _MobilePlayerPanel.core:
+          child = _buildMobileCorePanel(controlsEnabled: controlsEnabled);
+          break;
+        case _MobilePlayerPanel.superResolution:
+          child = _buildMobileSuperResolutionPanel();
+          break;
+        case _MobilePlayerPanel.danmaku:
+          child = _buildMobileDanmakuPanel(controlsEnabled: controlsEnabled);
+          break;
+        case _MobilePlayerPanel.subtitle:
+          child = _buildMobileSubtitlePanel(controlsEnabled: controlsEnabled);
+          break;
+        case _MobilePlayerPanel.speed:
+          break;
+      }
     }
 
-    Widget child;
-    switch (panel) {
-      case _MobilePlayerPanel.route:
-        child = _buildMobileRoutePanel(controlsEnabled: controlsEnabled);
-        break;
-      case _MobilePlayerPanel.version:
-        child = _buildMobileVersionPanel(controlsEnabled: controlsEnabled);
-        break;
-      case _MobilePlayerPanel.audio:
-        child = _buildMobileAudioPanel(controlsEnabled: controlsEnabled);
-        break;
-      case _MobilePlayerPanel.core:
-        child = _buildMobileCorePanel(controlsEnabled: controlsEnabled);
-        break;
-      case _MobilePlayerPanel.superResolution:
-        child = _buildMobileSuperResolutionPanel();
-        break;
-      case _MobilePlayerPanel.danmaku:
-        child = _buildMobileDanmakuPanel(controlsEnabled: controlsEnabled);
-        break;
-      case _MobilePlayerPanel.subtitle:
-        child = _buildMobileSubtitlePanel(controlsEnabled: controlsEnabled);
-        break;
-      case _MobilePlayerPanel.speed:
-        child = _buildMobileSpeedPanel(controlsEnabled: controlsEnabled);
-        break;
-    }
-
-    return MobilePlayerSidePanel(
-      title: _mobilePanelTitle(panel),
-      visible: true,
-      onDismiss: _closeMobilePanels,
-      child: child,
+    return Stack(
+      children: [
+        _buildMobileSpeedOverlay(controlsEnabled: controlsEnabled),
+        MobilePlayerSidePanel(
+          title: _mobilePanelTitle(effectivePanel),
+          visible: visibleSidePanel,
+          onDismiss: _closeMobilePanels,
+          headerTrailing: headerTrailing,
+          child: child,
+        ),
+      ],
     );
   }
 
@@ -4078,6 +4281,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _subtitlePollInFlight = false;
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
+    _mobileRouteEntriesFuture = null;
+    _mobileVersionSourcesFuture = null;
+    _mobileSpeedAdjustTimer?.cancel();
+    _mobileSpeedAdjustTimer = null;
 
     final prev = _controller;
     _controller = null;
@@ -6170,5 +6377,46 @@ enum _MobilePlayerPanel {
 }
 
 enum _OrientationMode { auto, landscape, portrait }
+
+class _MobileSpeedAdjustButton extends StatelessWidget {
+  const _MobileSpeedAdjustButton({
+    required this.icon,
+    required this.enabled,
+    required this.onTap,
+    required this.onLongPressStart,
+    required this.onLongPressEnd,
+  });
+
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback onTap;
+  final VoidCallback onLongPressStart;
+  final VoidCallback onLongPressEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      onLongPressStart: enabled ? (_) => onLongPressStart() : null,
+      onLongPressEnd: enabled ? (_) => onLongPressEnd() : null,
+      child: Container(
+        width: 52,
+        height: 52,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: enabled ? 0.10 : 0.05),
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: Colors.white.withValues(alpha: enabled ? 0.18 : 0.08),
+          ),
+        ),
+        child: Icon(
+          icon,
+          color: enabled ? Colors.white : Colors.white38,
+          size: 24,
+        ),
+      ),
+    );
+  }
+}
 
 enum _GestureMode { none, brightness, volume, seek, speed }
