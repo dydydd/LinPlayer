@@ -33,11 +33,13 @@ class LocalHttpStreamProxy {
     PlayableSource candidate,
   ) async {
     if (kIsWeb) return null;
+    if (!_supportsCacheProxyMode(candidate)) return null;
     if (!_isSupportedHttpSource(candidate)) return null;
     return _wrapHttpSource(candidate);
   }
 
-  static Future<PlayableSource?> _wrapHttpSource(PlayableSource candidate) async {
+  static Future<PlayableSource?> _wrapHttpSource(
+      PlayableSource candidate) async {
     if (!_isSupportedHttpSource(candidate)) return null;
 
     final uri = Uri.tryParse(candidate.url.trim());
@@ -51,12 +53,13 @@ class LocalHttpStreamProxy {
       );
       AppDiagnosticsLogger.instance.info(
         'loopback_proxy',
-        'Wrapped STRM HTTP candidate with loopback proxy',
+        'Wrapped HTTP playback source with loopback cache proxy',
         data: <String, Object?>{
           'remote': AppDiagnosticsLogger.summarizeUrl(candidate.url),
           'proxy': AppDiagnosticsLogger.summarizeUrl(proxyUri.toString()),
           'headers':
               AppDiagnosticsLogger.summarizeHeaderKeys(candidate.httpHeaders),
+          'mediaType': candidate.mediaTypeHint.name,
         },
       );
       return PlayableSource(
@@ -98,6 +101,11 @@ class LocalHttpStreamProxy {
     }
 
     return true;
+  }
+
+  static bool _supportsCacheProxyMode(PlayableSource candidate) {
+    return candidate.mediaTypeHint == StreamMediaType.file ||
+        candidate.mediaTypeHint == StreamMediaType.unknown;
   }
 
   static String _suggestFileName(Uri uri) {

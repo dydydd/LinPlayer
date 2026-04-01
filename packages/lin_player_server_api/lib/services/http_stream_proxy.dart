@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
@@ -20,6 +19,8 @@ class HttpStreamProxyServer {
   static const int _maxCachedBytesPerEntry = 24 * 1024 * 1024;
   static const Duration _warmupWaitTimeout = Duration(milliseconds: 1200);
   static const Duration _warmupStateTtl = Duration(seconds: 15);
+  static const int _maxRecentDiagnostics = 96;
+  static const String _cacheRootName = 'linplayer_http_stream_proxy_v2';
 
   HttpServer? _server;
   Uri? _baseUri;
@@ -30,6 +31,8 @@ class HttpStreamProxyServer {
   final Map<String, String> _entryIdByFingerprint = <String, String>{};
   final Map<String, _HttpStreamProxyWarmupState> _warmupStates =
       <String, _HttpStreamProxyWarmupState>{};
+  final List<_HttpStreamProxyDiagnosticEntry> _recentDiagnostics =
+      <_HttpStreamProxyDiagnosticEntry>[];
 
   void configureHttpClientFactory(http.Client Function()? factory) {
     _httpClientFactory = factory;
@@ -39,6 +42,9 @@ class HttpStreamProxyServer {
   Future<Uri> ensureStarted() async {
     final existing = _baseUri;
     if (existing != null && _server != null) return existing;
+
+    await _ensureCacheRootDirectory();
+    await _pruneDiskCacheDirectories();
 
     final server = await HttpServer.bind(
       InternetAddress.loopbackIPv4,
@@ -79,17 +85,17 @@ class HttpStreamProxyServer {
       httpHeaders: httpHeaders,
       fileName: fileName,
     );
-    registered.entry.storeCachedRange(
-      _HttpStreamProxyCachedRange(
+    if (bytes.isNotEmpty) {
+      await registered.entry.storeBytesRange(
         startByte: startByte < 0 ? 0 : startByte,
-        bytes: Uint8List.fromList(bytes),
+        bytes: bytes,
         contentTypeMime: contentTypeMime,
         totalBytes: totalBytes,
         acceptRanges: acceptRanges,
-      ),
-      maxRanges: _maxCachedRangesPerEntry,
-      maxBytes: _maxCachedBytesPerEntry,
-    );
+        maxRanges: _maxCachedRangesPerEntry,
+        maxBytes: _maxCachedBytesPerEntry,
+      );
+    }
     _notifyWarmupProgress(registered.entry.fingerprint);
     return _proxyUriFor(registered.baseUri, registered.entry);
   }
@@ -126,10 +132,45 @@ class HttpStreamProxyServer {
     }
   }
 
+  String buildDiagnosticsText({int maxEntries = 40}) {
+    _pruneEntries();
+    _pruneWarmupStates();
+    final buffer = StringBuffer()
+      ..writeln('cacheRoot: ${_cacheRootDirectory.path}')
+      ..writeln('entries: ${_entries.length}')
+      ..writeln('warmups: ${_warmupStates.length}')
+      ..writeln('recent:');
+    if (_recentDiagnostics.isEmpty) {
+      buffer.writeln('(empty)');
+      return buffer.toString().trim();
+    }
+
+    final count = maxEntries < 1 ? 1 : maxEntries;
+    final startIndex = _recentDiagnostics.length > count
+        ? _recentDiagnostics.length - count
+        : 0;
+    for (final entry in _recentDiagnostics.skip(startIndex)) {
+      buffer.writeln(
+        '${entry.timestamp.toIso8601String()} '
+        'method=${entry.method} '
+        'status=${entry.statusCode} '
+        'cache=${entry.cacheStatus} '
+        'reason=${entry.reason} '
+        'warmupWait=${entry.waitedWarmup} '
+        'range=${entry.rangeHeader.isEmpty ? "-" : entry.rangeHeader} '
+        'cached=${entry.cachedBytes} '
+        'remote=${entry.remoteBytes} '
+        'url=${_summarizeUrl(entry.remoteUrl)}',
+      );
+    }
+    return buffer.toString().trim();
+  }
+
   Future<void> debugResetForTest() async {
     _entries.clear();
     _entryIdByFingerprint.clear();
     _warmupStates.clear();
+    _recentDiagnostics.clear();
     final server = _server;
     _server = null;
     _baseUri = null;
@@ -138,6 +179,87 @@ class HttpStreamProxyServer {
     if (server != null) {
       await server.close(force: true);
     }
+    final root = _cacheRootDirectory;
+    if (await root.exists()) {
+      try {
+        await root.delete(recursive: true);
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _ensureCacheRootDirectory() async {
+    final root = _cacheRootDirectory;
+    if (await root.exists()) return;
+    await root.create(recursive: true);
+  }
+
+  Future<void> _pruneDiskCacheDirectories() async {
+    final root = _cacheRootDirectory;
+    if (!await root.exists()) return;
+
+    final directories = <({Directory directory, DateTime touchedAt})>[];
+    await for (final entity in root.list(followLinks: false)) {
+      if (entity is! Directory) continue;
+      final touchedAt = await _readCacheDirectoryTouchedAt(entity);
+      if (touchedAt == null) {
+        await _deleteDirectoryIfExists(entity);
+        continue;
+      }
+      directories.add((directory: entity, touchedAt: touchedAt));
+    }
+
+    final now = DateTime.now();
+    final staleCutoff = now.subtract(_entryTtl);
+    final stale = directories
+        .where((entry) => entry.touchedAt.isBefore(staleCutoff))
+        .toList(growable: false);
+    for (final entry in stale) {
+      await _deleteDirectoryIfExists(entry.directory);
+    }
+
+    final active = directories
+        .where((entry) => !entry.touchedAt.isBefore(staleCutoff))
+        .toList(growable: false)
+      ..sort((a, b) => b.touchedAt.compareTo(a.touchedAt));
+    if (active.length <= _maxEntries) return;
+
+    for (final entry in active.skip(_maxEntries)) {
+      await _deleteDirectoryIfExists(entry.directory);
+    }
+  }
+
+  Future<DateTime?> _readCacheDirectoryTouchedAt(Directory directory) async {
+    final metadataFile = File(
+      _joinPath(directory.path, _HttpStreamProxyEntry.metadataFileName),
+    );
+    if (await metadataFile.exists()) {
+      try {
+        final decoded = jsonDecode(await metadataFile.readAsString());
+        if (decoded is Map) {
+          final raw = decoded['lastUpdatedAt']?.toString().trim() ?? '';
+          final parsed = DateTime.tryParse(raw);
+          if (parsed != null) return parsed;
+        }
+      } catch (_) {}
+
+      try {
+        return await metadataFile.lastModified();
+      } catch (_) {}
+    }
+
+    try {
+      return (await directory.stat()).modified;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _deleteDirectoryIfExists(Directory directory) async {
+    try {
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
+    } catch (_) {}
   }
 
   static String _randomId() {
@@ -172,7 +294,7 @@ class HttpStreamProxyServer {
       fileName,
       remoteUri.pathSegments.isEmpty ? '' : remoteUri.pathSegments.last,
     );
-    final entry = _HttpStreamProxyEntry(
+    final entry = await _HttpStreamProxyEntry.create(
       id: id,
       fingerprint: fingerprint,
       remoteUri: remoteUri,
@@ -181,6 +303,8 @@ class HttpStreamProxyServer {
         remoteUri: remoteUri,
         fallbackFileName: safeName,
       ),
+      cacheDirectory:
+          Directory(_joinPath(_cacheRootDirectory.path, fingerprint)),
     );
     _entries[id] = entry;
     _entryIdByFingerprint[fingerprint] = id;
@@ -256,15 +380,29 @@ class HttpStreamProxyServer {
     }
   }
 
-  Future<void> _awaitWarmupProgress(_HttpStreamProxyEntry entry) async {
+  void _recordDiagnostic(_HttpStreamProxyDiagnosticEntry entry) {
+    _recentDiagnostics.add(entry);
+    if (_recentDiagnostics.length > _maxRecentDiagnostics) {
+      _recentDiagnostics.removeRange(
+        0,
+        _recentDiagnostics.length - _maxRecentDiagnostics,
+      );
+    }
+  }
+
+  Future<bool> _awaitWarmupProgress(_HttpStreamProxyEntry entry) async {
     _pruneWarmupStates();
     final state = _warmupStates[entry.fingerprint];
     final signal = state?.waitForProgress();
-    if (signal == null) return;
+    if (signal == null) return false;
     try {
       await signal.timeout(_warmupWaitTimeout);
-    } catch (_) {}
-    _pruneWarmupStates();
+      _pruneWarmupStates();
+      return true;
+    } catch (_) {
+      _pruneWarmupStates();
+      return true;
+    }
   }
 
   Future<void> _serve(HttpServer server) async {
@@ -277,12 +415,20 @@ class HttpStreamProxyServer {
   Future<void> _handle(HttpRequest request) async {
     final response = request.response;
     _OpenedRemote? remote;
+    final diag = _ProxyRequestTrace(
+      method: request.method.toUpperCase(),
+      rangeHeader:
+          (request.headers.value(HttpHeaders.rangeHeader) ?? '').trim(),
+    );
     try {
       _pruneEntries();
 
       final segments = request.uri.pathSegments;
       if (segments.length < 2 || segments[0] != 'stream') {
         response.statusCode = HttpStatus.notFound;
+        diag.statusCode = response.statusCode;
+        diag.cacheStatus = 'reject';
+        diag.reason = 'unknown-path';
         await response.close();
         return;
       }
@@ -290,39 +436,80 @@ class HttpStreamProxyServer {
       final entry = _entries[segments[1]];
       if (entry == null) {
         response.statusCode = HttpStatus.notFound;
+        diag.statusCode = response.statusCode;
+        diag.cacheStatus = 'reject';
+        diag.reason = 'unknown-entry';
         await response.close();
         return;
       }
       entry.touch();
+      diag.remoteUrl = entry.remoteUri.toString();
 
       final method = request.method.toUpperCase();
       if (method != 'GET' && method != 'HEAD') {
         response.statusCode = HttpStatus.methodNotAllowed;
         response.headers.set(HttpHeaders.allowHeader, 'GET, HEAD');
+        diag.statusCode = response.statusCode;
+        diag.cacheStatus = 'reject';
+        diag.reason = 'method-not-allowed';
         await response.close();
         return;
       }
 
-      final cacheRange = method == 'GET'
-          ? _parseCacheableRange(
-              request.headers.value(HttpHeaders.rangeHeader),
-            )
-          : null;
-      if (cacheRange != null) {
-        var cached = entry.cachedRangeStartingAt(cacheRange.startByte);
-        if (cached == null || cached.bytes.isEmpty) {
-          await _awaitWarmupProgress(entry);
-          cached = entry.cachedRangeStartingAt(cacheRange.startByte);
+      final cacheRange = _parseCacheableRange(
+        request.headers.value(HttpHeaders.rangeHeader),
+      );
+      if (method == 'HEAD') {
+        final headRange = cacheRange ??
+            const _CacheableRangeRequest(
+              startByte: 0,
+              endByte: null,
+              hasRange: false,
+            );
+        final cachedHead = entry.headMetadataFor(headRange);
+        if (cachedHead != null) {
+          response.statusCode = cachedHead.statusCode;
+          _applyCachedResponseHeaders(
+            response.headers,
+            remoteHeaders: const <String, String>{},
+            contentTypeMime: cachedHead.contentTypeMime,
+            acceptRanges: cachedHead.acceptRanges,
+            totalBytes: cachedHead.totalBytes,
+            startByte: headRange.startByte,
+            endByte: headRange.endByte,
+            hasRange: headRange.hasRange,
+          );
+          diag.statusCode = response.statusCode;
+          diag.cacheStatus = 'hit';
+          diag.reason = 'head-metadata';
+          await response.close();
+          return;
         }
-        if (cached != null && cached.bytes.isNotEmpty) {
+      }
+
+      if (method == 'GET' && cacheRange != null) {
+        var coverage = entry.cachedCoverageStartingAt(cacheRange.startByte);
+        if (coverage == null || coverage.lengthBytes <= 0) {
+          final waited = await _awaitWarmupProgress(entry);
+          diag.waitedWarmup = waited;
+          coverage = entry.cachedCoverageStartingAt(cacheRange.startByte);
+        }
+        if (coverage != null && coverage.lengthBytes > 0) {
           final served = await _tryServeCachedRange(
             request: request,
             response: response,
             entry: entry,
-            cached: cached,
+            coverage: coverage,
             range: cacheRange,
           );
-          if (served) return;
+          if (served.served) {
+            diag.statusCode = served.statusCode;
+            diag.cacheStatus = served.remoteBytes > 0 ? 'partial' : 'hit';
+            diag.reason = served.reason;
+            diag.cachedBytes = served.cachedBytes;
+            diag.remoteBytes = served.remoteBytes;
+            return;
+          }
         }
       }
 
@@ -335,18 +522,34 @@ class HttpStreamProxyServer {
       );
 
       response.statusCode = remote.response.statusCode;
+      diag.statusCode = response.statusCode;
       _copyHeaders(remote.response.headers, response.headers);
 
       if (method == 'GET') {
-        await response.addStream(remote.response.stream);
+        final relay = await _relayRemoteDirect(
+          entry: entry,
+          response: response,
+          requestRange: cacheRange,
+          remote: remote.response,
+        );
+        diag.cacheStatus = relay.cached ? 'miss' : 'remote';
+        diag.reason = relay.reason;
+        diag.remoteBytes = relay.bytesRelayed;
         remote = null;
+      } else {
+        diag.cacheStatus = 'miss';
+        diag.reason = 'head-remote';
       }
     } catch (_) {
       response.statusCode = HttpStatus.badGateway;
+      diag.statusCode = response.statusCode;
+      diag.cacheStatus = 'error';
+      diag.reason = 'proxy-error';
       response.headers
           .set(HttpHeaders.contentTypeHeader, 'text/plain; charset=utf-8');
       response.write('HTTP stream proxy error');
     } finally {
+      _recordDiagnostic(diag.build());
       if (remote != null) {
         await remote.close();
       }
@@ -436,45 +639,41 @@ class HttpStreamProxyServer {
     return _OpenedRemote(response: response);
   }
 
-  Future<bool> _tryServeCachedRange({
+  Future<_CachedServeResult> _tryServeCachedRange({
     required HttpRequest request,
     required HttpResponse response,
     required _HttpStreamProxyEntry entry,
-    required _HttpStreamProxyCachedRange cached,
+    required _HttpStreamProxyCachedCoverage coverage,
     required _CacheableRangeRequest range,
   }) async {
-    final totalFromCache = cached.totalBytes;
+    final totalFromCache = coverage.totalBytes;
     final requestedEnd = range.endByte;
-    final requestedLength = requestedEnd == null
-        ? null
-        : requestedEnd - range.startByte + 1;
+    final requestedLength =
+        requestedEnd == null ? null : requestedEnd - range.startByte + 1;
     if (requestedLength != null && requestedLength <= 0) {
-      return false;
+      return const _CachedServeResult.notServed();
     }
 
-    var cachedBytes = cached.bytes;
-    if (requestedLength != null && cachedBytes.length > requestedLength) {
-      cachedBytes = Uint8List.fromList(
-        cachedBytes.sublist(0, requestedLength),
-      );
+    var cachedBytesToServe = coverage.lengthBytes;
+    if (requestedLength != null && cachedBytesToServe > requestedLength) {
+      cachedBytesToServe = requestedLength;
     }
     if (range.hasRange &&
         totalFromCache == null &&
         requestedLength != null &&
-        cachedBytes.length >= requestedLength) {
-      return false;
+        cachedBytesToServe >= requestedLength) {
+      return const _CachedServeResult.notServed();
     }
 
-    final nextStart = range.startByte + cachedBytes.length;
+    final nextStart = range.startByte + cachedBytesToServe;
     _OpenedRemote? remote;
     try {
       var totalBytes = totalFromCache;
-      var contentTypeMime = cached.contentTypeMime;
-      var acceptRanges = cached.acceptRanges;
-      Stream<List<int>> tailStream = const Stream<List<int>>.empty();
-      Map<String, String> remoteHeaders = const <String, String>{};
+      var contentTypeMime = coverage.contentTypeMime;
+      var acceptRanges = coverage.acceptRanges;
+      var remoteBytes = 0;
       final needsRemoteTail = requestedLength != null
-          ? cachedBytes.length < requestedLength
+          ? cachedBytesToServe < requestedLength
           : (totalBytes == null || nextStart < totalBytes);
 
       if (needsRemoteTail) {
@@ -487,32 +686,32 @@ class HttpStreamProxyServer {
               : 'bytes=$nextStart-$requestedEnd',
           ifRange: request.headers.value(HttpHeaders.ifRangeHeader),
         );
-        remoteHeaders = remote.response.headers;
         final remoteStatus = remote.response.statusCode;
         if (range.hasRange && remoteStatus != HttpStatus.partialContent) {
           await remote.close();
-          return false;
+          return const _CachedServeResult.notServed();
         }
 
-        contentTypeMime ??= _contentTypeMimeFromHeaders(remoteHeaders);
-        acceptRanges = acceptRanges || _acceptsByteRanges(remoteHeaders);
-        totalBytes ??=
-            _inferTotalBytesFromHeaders(remoteStatus, remoteHeaders, nextStart);
+        contentTypeMime ??=
+            _contentTypeMimeFromHeaders(remote.response.headers);
+        acceptRanges =
+            acceptRanges || _acceptsByteRanges(remote.response.headers);
+        totalBytes ??= _inferTotalBytesFromHeaders(
+          remoteStatus,
+          remote.response.headers,
+          nextStart,
+        );
         if (range.hasRange && totalBytes == null) {
           await remote.close();
-          return false;
+          return const _CachedServeResult.notServed();
         }
-
-        final bytesToSkip =
-            (!range.hasRange && remoteStatus == HttpStatus.ok) ? nextStart : 0;
-        tailStream = _skipBytes(remote.response.stream, bytesToSkip);
       }
 
       response.statusCode =
           range.hasRange ? HttpStatus.partialContent : HttpStatus.ok;
       _applyCachedResponseHeaders(
         response.headers,
-        remoteHeaders: remoteHeaders,
+        remoteHeaders: remote?.response.headers ?? const <String, String>{},
         contentTypeMime: contentTypeMime,
         acceptRanges: acceptRanges,
         totalBytes: totalBytes,
@@ -520,29 +719,200 @@ class HttpStreamProxyServer {
         endByte: requestedEnd,
         hasRange: range.hasRange,
       );
-      response.add(cachedBytes);
-      await response.addStream(tailStream);
-      remote = null;
-      return true;
+
+      var remainingCached = cachedBytesToServe;
+      for (final segment in coverage.segments) {
+        if (remainingCached <= 0) break;
+        final length = remainingCached < segment.availableBytes
+            ? remainingCached
+            : segment.availableBytes;
+        await response.addStream(
+          segment.range.openReadSlice(
+            startOffset: segment.readOffset,
+            maxBytes: length,
+          ),
+        );
+        remainingCached -= length;
+      }
+
+      if (remote != null) {
+        final bytesToSkip =
+            (!range.hasRange && remote.response.statusCode == HttpStatus.ok)
+                ? nextStart
+                : 0;
+        final relay = await _relayRemoteToResponse(
+          entry: entry,
+          response: response,
+          remote: remote.response,
+          cacheStartByte: nextStart,
+          skipBytes: bytesToSkip,
+          contentTypeMime: contentTypeMime ??
+              _contentTypeMimeFromHeaders(remote.response.headers),
+          totalBytes: totalBytes,
+          acceptRanges: acceptRanges,
+        );
+        remoteBytes = relay.bytesRelayed;
+        remote = null;
+      }
+
+      return _CachedServeResult.served(
+        statusCode: response.statusCode,
+        cachedBytes: cachedBytesToServe,
+        remoteBytes: remoteBytes,
+        reason: needsRemoteTail ? 'cached-prefix+tail' : 'cached-coverage',
+      );
     } catch (_) {
       if (remote != null) {
         await remote.close();
       }
-      return false;
+      return const _CachedServeResult.notServed();
     }
   }
 
+  Future<_RemoteRelayResult> _relayRemoteDirect({
+    required _HttpStreamProxyEntry entry,
+    required HttpResponse response,
+    required _CacheableRangeRequest? requestRange,
+    required http.StreamedResponse remote,
+  }) async {
+    final status = remote.statusCode;
+    if (requestRange == null) {
+      final bytes = await _drainRemoteToResponse(response, remote.stream);
+      return _RemoteRelayResult(
+        bytesRelayed: bytes,
+        cached: false,
+        reason: 'invalid-range',
+      );
+    }
+
+    if (status == HttpStatus.ok && requestRange.hasRange) {
+      final bytes = await _drainRemoteToResponse(response, remote.stream);
+      return _RemoteRelayResult(
+        bytesRelayed: bytes,
+        cached: false,
+        reason: 'range-ignored-upstream',
+      );
+    }
+
+    final cacheStartByte = _cacheStartByteForResponse(
+      requestRange: requestRange,
+      remote: remote,
+    );
+    if (cacheStartByte == null) {
+      final bytes = await _drainRemoteToResponse(response, remote.stream);
+      return _RemoteRelayResult(
+        bytesRelayed: bytes,
+        cached: false,
+        reason: 'uncacheable-response',
+      );
+    }
+
+    final relay = await _relayRemoteToResponse(
+      entry: entry,
+      response: response,
+      remote: remote,
+      cacheStartByte: cacheStartByte,
+      skipBytes: requestRange.hasRange ? 0 : requestRange.startByte,
+      contentTypeMime: _contentTypeMimeFromHeaders(remote.headers),
+      totalBytes:
+          _inferTotalBytesFromHeaders(status, remote.headers, cacheStartByte),
+      acceptRanges: _acceptsByteRanges(remote.headers) ||
+          status == HttpStatus.partialContent,
+    );
+    return _RemoteRelayResult(
+      bytesRelayed: relay.bytesRelayed,
+      cached: relay.cached,
+      reason: relay.cached ? 'remote-cached' : 'remote-empty',
+    );
+  }
+
+  Future<_RemoteCacheResult> _relayRemoteToResponse({
+    required _HttpStreamProxyEntry entry,
+    required HttpResponse response,
+    required http.StreamedResponse remote,
+    required int cacheStartByte,
+    required int skipBytes,
+    required String? contentTypeMime,
+    required int? totalBytes,
+    required bool acceptRanges,
+  }) async {
+    final pendingFile = await entry.createPendingRangeFile(cacheStartByte);
+    final sink = pendingFile.openWrite();
+    var bytesRelayed = 0;
+    var remainingSkip = skipBytes < 0 ? 0 : skipBytes;
+    try {
+      await for (final chunk in remote.stream) {
+        var data = chunk;
+        if (remainingSkip > 0) {
+          if (remainingSkip >= data.length) {
+            remainingSkip -= data.length;
+            continue;
+          }
+          data = data.sublist(remainingSkip);
+          remainingSkip = 0;
+        }
+        if (data.isEmpty) continue;
+        sink.add(data);
+        response.add(data);
+        bytesRelayed += data.length;
+      }
+      await sink.flush();
+      await sink.close();
+      if (bytesRelayed > 0) {
+        await entry.storePendingRangeFile(
+          pendingFile: pendingFile,
+          startByte: cacheStartByte,
+          lengthBytes: bytesRelayed,
+          contentTypeMime: contentTypeMime,
+          totalBytes: totalBytes,
+          acceptRanges: acceptRanges,
+          maxRanges: _maxCachedRangesPerEntry,
+          maxBytes: _maxCachedBytesPerEntry,
+        );
+        return _RemoteCacheResult(bytesRelayed: bytesRelayed, cached: true);
+      }
+      try {
+        await pendingFile.delete();
+      } catch (_) {}
+      return const _RemoteCacheResult(bytesRelayed: 0, cached: false);
+    } catch (_) {
+      try {
+        await sink.flush();
+      } catch (_) {}
+      try {
+        await sink.close();
+      } catch (_) {}
+      try {
+        await pendingFile.delete();
+      } catch (_) {}
+      rethrow;
+    }
+  }
+
+  Future<int> _drainRemoteToResponse(
+    HttpResponse response,
+    Stream<List<int>> stream,
+  ) async {
+    var total = 0;
+    await for (final chunk in stream) {
+      if (chunk.isEmpty) continue;
+      response.add(chunk);
+      total += chunk.length;
+    }
+    return total;
+  }
+
   http.Client get _httpClient {
-    return _client ??=
-        (_httpClientFactory?.call() ??
-            LinHttpClientFactory.createClient(
-              LinHttpClientFactory.config.copyWith(userAgent: ''),
-            ));
+    return _client ??= (_httpClientFactory?.call() ??
+        LinHttpClientFactory.createClient(
+          LinHttpClientFactory.config.copyWith(userAgent: ''),
+        ));
   }
 
   Uri _resolveRemoteUri(_HttpStreamProxyEntry entry, Uri requestUri) {
-    final requestedSegments =
-        requestUri.pathSegments.length <= 2 ? const <String>[] : requestUri.pathSegments.sublist(2);
+    final requestedSegments = requestUri.pathSegments.length <= 2
+        ? const <String>[]
+        : requestUri.pathSegments.sublist(2);
     final isTopLevel = _samePathSegments(
       requestedSegments,
       entry.localPathSegments,
@@ -633,23 +1003,28 @@ class HttpStreamProxyServer {
     );
   }
 
-  static Stream<List<int>> _skipBytes(
-    Stream<List<int>> source,
-    int bytesToSkip,
-  ) async* {
-    var remaining = bytesToSkip < 0 ? 0 : bytesToSkip;
-    await for (final chunk in source) {
-      if (remaining <= 0) {
-        yield chunk;
-        continue;
-      }
-      if (remaining >= chunk.length) {
-        remaining -= chunk.length;
-        continue;
-      }
-      yield chunk.sublist(remaining);
-      remaining = 0;
+  static int? _cacheStartByteForResponse({
+    required _CacheableRangeRequest requestRange,
+    required http.StreamedResponse remote,
+  }) {
+    if (remote.statusCode == HttpStatus.partialContent) {
+      return _startByteFromContentRange(
+            _headerValue(remote.headers, HttpHeaders.contentRangeHeader),
+          ) ??
+          requestRange.startByte;
     }
+    if (remote.statusCode == HttpStatus.ok && !requestRange.hasRange) {
+      return requestRange.startByte;
+    }
+    return null;
+  }
+
+  static int? _startByteFromContentRange(String? raw) {
+    final value = raw?.trim() ?? '';
+    if (value.isEmpty) return null;
+    final match = RegExp(r'^bytes\s+(\d+)-\d+/(\d+|\*)$').firstMatch(value);
+    if (match == null) return null;
+    return int.tryParse(match.group(1) ?? '');
   }
 
   static String _fingerprintFor(Uri remoteUri, Map<String, String> headers) {
@@ -756,8 +1131,9 @@ class HttpStreamProxyServer {
     _copyHeaderIfPresent(remoteHeaders, target, HttpHeaders.lastModifiedHeader);
     _copyHeaderIfPresent(remoteHeaders, target, 'content-disposition');
 
-    if (totalBytes == null) return;
-    final resolvedEnd = hasRange ? (endByte ?? totalBytes - 1) : totalBytes - 1;
+    if (totalBytes == null || totalBytes <= 0) return;
+    final maxEnd = totalBytes - 1;
+    final resolvedEnd = hasRange ? min(endByte ?? maxEnd, maxEnd) : maxEnd;
     final length = resolvedEnd - startByte + 1;
     if (length < 0) return;
 
@@ -791,23 +1167,99 @@ class HttpStreamProxyServer {
     }
     return true;
   }
+
+  static Directory get _cacheRootDirectory => Directory(
+        _joinPath(Directory.systemTemp.path, _cacheRootName),
+      );
+
+  static String _joinPath(String left, String right) {
+    if (left.isEmpty) return right;
+    if (right.isEmpty) return left;
+    if (left.endsWith(Platform.pathSeparator)) {
+      return '$left$right';
+    }
+    return '$left${Platform.pathSeparator}$right';
+  }
+
+  static String _summarizeUrl(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty) return '';
+    final uri = Uri.tryParse(value);
+    if (uri == null || uri.host.trim().isEmpty || uri.scheme.isEmpty) {
+      return _summarizeInline(value);
+    }
+    final buffer = StringBuffer()
+      ..write(uri.scheme)
+      ..write('://')
+      ..write(uri.host);
+    if (uri.hasPort &&
+        !((uri.scheme == 'http' && uri.port == 80) ||
+            (uri.scheme == 'https' && uri.port == 443))) {
+      buffer
+        ..write(':')
+        ..write(uri.port);
+    }
+    buffer.write(uri.path.trim().isEmpty ? '/' : uri.path.trim());
+    if (uri.hasQuery) buffer.write('?...');
+    return _summarizeInline(buffer.toString());
+  }
+
+  static String _summarizeInline(String raw, {int limit = 180}) {
+    final text = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (text.length <= limit) return text;
+    return '${text.substring(0, limit - 3)}...';
+  }
 }
 
 class _HttpStreamProxyEntry {
-  _HttpStreamProxyEntry({
+  _HttpStreamProxyEntry._({
     required this.id,
     required this.fingerprint,
     required this.remoteUri,
     required this.httpHeaders,
     required this.localPathSegments,
-  })  : lastAccessedAt = DateTime.now(),
-        expiresAt = DateTime.now().add(HttpStreamProxyServer._entryTtl);
+    required this.cacheDirectory,
+    required DateTime now,
+  })  : lastAccessedAt = now,
+        expiresAt = now.add(HttpStreamProxyServer._entryTtl),
+        metadataFile = File(
+          HttpStreamProxyServer._joinPath(
+            cacheDirectory.path,
+            metadataFileName,
+          ),
+        );
+
+  static const String metadataFileName = 'meta.json';
+
+  static Future<_HttpStreamProxyEntry> create({
+    required String id,
+    required String fingerprint,
+    required Uri remoteUri,
+    required Map<String, String> httpHeaders,
+    required List<String> localPathSegments,
+    required Directory cacheDirectory,
+  }) async {
+    final now = DateTime.now();
+    final entry = _HttpStreamProxyEntry._(
+      id: id,
+      fingerprint: fingerprint,
+      remoteUri: remoteUri,
+      httpHeaders: httpHeaders,
+      localPathSegments: localPathSegments,
+      cacheDirectory: cacheDirectory,
+      now: now,
+    );
+    await entry._loadFromDisk();
+    return entry;
+  }
 
   final String id;
   final String fingerprint;
   final Uri remoteUri;
   final Map<String, String> httpHeaders;
   final List<String> localPathSegments;
+  final Directory cacheDirectory;
+  final File metadataFile;
   final Map<int, _HttpStreamProxyCachedRange> _cachedRanges =
       <int, _HttpStreamProxyCachedRange>{};
   DateTime lastAccessedAt;
@@ -817,41 +1269,210 @@ class _HttpStreamProxyEntry {
     final now = DateTime.now();
     lastAccessedAt = now;
     expiresAt = now.add(HttpStreamProxyServer._entryTtl);
+    unawaited(_writeMetadata());
   }
 
-  void storeCachedRange(
+  Future<void> storeBytesRange({
+    required int startByte,
+    required List<int> bytes,
+    required String? contentTypeMime,
+    required int? totalBytes,
+    required bool acceptRanges,
+    required int maxRanges,
+    required int maxBytes,
+  }) async {
+    await _ensureDirectory();
+    final pending = await createPendingRangeFile(startByte);
+    await pending.writeAsBytes(bytes, flush: true);
+    await storePendingRangeFile(
+      pendingFile: pending,
+      startByte: startByte,
+      lengthBytes: bytes.length,
+      contentTypeMime: contentTypeMime,
+      totalBytes: totalBytes,
+      acceptRanges: acceptRanges,
+      maxRanges: maxRanges,
+      maxBytes: maxBytes,
+    );
+  }
+
+  Future<File> createPendingRangeFile(int startByte) async {
+    await _ensureDirectory();
+    final fileName =
+        'pending_${startByte}_${DateTime.now().microsecondsSinceEpoch}.bin';
+    return File(HttpStreamProxyServer._joinPath(cacheDirectory.path, fileName));
+  }
+
+  Future<void> storePendingRangeFile({
+    required File pendingFile,
+    required int startByte,
+    required int lengthBytes,
+    required String? contentTypeMime,
+    required int? totalBytes,
+    required bool acceptRanges,
+    required int maxRanges,
+    required int maxBytes,
+  }) async {
+    touch();
+    if (lengthBytes <= 0) {
+      try {
+        await pendingFile.delete();
+      } catch (_) {}
+      return;
+    }
+
+    await _ensureDirectory();
+    final finalName = 'range_${startByte}_$lengthBytes.bin';
+    final finalPath =
+        HttpStreamProxyServer._joinPath(cacheDirectory.path, finalName);
+    final finalFile = File(finalPath);
+    try {
+      if (await finalFile.exists()) {
+        await finalFile.delete();
+      }
+    } catch (_) {}
+
+    File storedFile = pendingFile;
+    try {
+      storedFile = await pendingFile.rename(finalPath);
+    } catch (_) {
+      await finalFile.writeAsBytes(await pendingFile.readAsBytes(),
+          flush: true);
+      storedFile = finalFile;
+      try {
+        await pendingFile.delete();
+      } catch (_) {}
+    }
+
+    final range = _HttpStreamProxyCachedRange(
+      startByte: startByte,
+      lengthBytes: lengthBytes,
+      file: storedFile,
+      contentTypeMime: contentTypeMime,
+      totalBytes: totalBytes,
+      acceptRanges: acceptRanges,
+      storedAt: DateTime.now(),
+    );
+    await _storeCachedRange(
+      range,
+      maxRanges: maxRanges,
+      maxBytes: maxBytes,
+    );
+  }
+
+  _HttpStreamProxyCachedCoverage? cachedCoverageStartingAt(int startByte) {
+    touch();
+    if (_cachedRanges.isEmpty) return null;
+    final sorted = _cachedRanges.values.toList(growable: false)
+      ..sort((a, b) => a.startByte.compareTo(b.startByte));
+
+    final segments = <_HttpStreamProxyCachedCoverageSegment>[];
+    var cursor = startByte;
+    while (true) {
+      _HttpStreamProxyCachedRange? best;
+      for (final range in sorted) {
+        if (!range.coversByte(cursor) && range.startByte != cursor) continue;
+        if (best == null || range.endExclusive > best.endExclusive) {
+          best = range;
+        }
+      }
+      if (best == null) break;
+      final readOffset = cursor > best.startByte ? cursor - best.startByte : 0;
+      final available = best.lengthBytes - readOffset;
+      if (available <= 0) break;
+      segments.add(
+        _HttpStreamProxyCachedCoverageSegment(
+          range: best,
+          readOffset: readOffset,
+        ),
+      );
+      final nextCursor = best.endExclusive;
+      if (nextCursor <= cursor) break;
+      cursor = nextCursor;
+    }
+
+    if (segments.isEmpty) return null;
+    String? contentTypeMime;
+    int? totalBytes;
+    var acceptRanges = false;
+    var lengthBytes = 0;
+    for (final segment in segments) {
+      contentTypeMime ??= segment.range.contentTypeMime;
+      totalBytes ??= segment.range.totalBytes;
+      acceptRanges = acceptRanges || segment.range.acceptRanges;
+      lengthBytes += segment.availableBytes;
+    }
+    return _HttpStreamProxyCachedCoverage(
+      startByte: startByte,
+      segments: segments,
+      lengthBytes: lengthBytes,
+      contentTypeMime: contentTypeMime,
+      totalBytes: totalBytes,
+      acceptRanges: acceptRanges,
+    );
+  }
+
+  _HttpStreamProxyHeadMetadata? headMetadataFor(_CacheableRangeRequest range) {
+    touch();
+    if (_cachedRanges.isEmpty) return null;
+    final ranges = _cachedRanges.values.toList(growable: false)
+      ..sort((a, b) => a.startByte.compareTo(b.startByte));
+    _HttpStreamProxyCachedRange? metadataRange;
+    for (final rangeEntry in ranges) {
+      if (rangeEntry.totalBytes != null) {
+        metadataRange = rangeEntry;
+        break;
+      }
+    }
+    metadataRange ??= ranges.first;
+    if (metadataRange.totalBytes == null || metadataRange.totalBytes! <= 0) {
+      return null;
+    }
+    if (range.hasRange && range.startByte >= metadataRange.totalBytes!) {
+      return null;
+    }
+    return _HttpStreamProxyHeadMetadata(
+      statusCode: range.hasRange ? HttpStatus.partialContent : HttpStatus.ok,
+      contentTypeMime: metadataRange.contentTypeMime,
+      totalBytes: metadataRange.totalBytes!,
+      acceptRanges: metadataRange.acceptRanges,
+    );
+  }
+
+  Future<void> _storeCachedRange(
     _HttpStreamProxyCachedRange range, {
     required int maxRanges,
     required int maxBytes,
-  }) {
-    touch();
+  }) async {
     final existing = _cachedRanges[range.startByte];
-    if (existing == null || range.bytes.length >= existing.bytes.length) {
+    if (existing == null || range.lengthBytes >= existing.lengthBytes) {
       _cachedRanges[range.startByte] = range;
+      if (existing != null && existing.file.path != range.file.path) {
+        await existing.deleteIfExists();
+      }
     } else if (existing.totalBytes == null && range.totalBytes != null) {
       _cachedRanges[range.startByte] = existing.copyWith(
         totalBytes: range.totalBytes,
         contentTypeMime: existing.contentTypeMime ?? range.contentTypeMime,
         acceptRanges: existing.acceptRanges || range.acceptRanges,
       );
+      await range.deleteIfExists();
+    } else {
+      await range.deleteIfExists();
     }
-    _pruneCachedRanges(maxRanges: maxRanges, maxBytes: maxBytes);
+    await _pruneCachedRanges(maxRanges: maxRanges, maxBytes: maxBytes);
+    await _writeMetadata();
   }
 
-  _HttpStreamProxyCachedRange? cachedRangeStartingAt(int startByte) {
-    touch();
-    return _cachedRanges[startByte];
-  }
-
-  void _pruneCachedRanges({
+  Future<void> _pruneCachedRanges({
     required int maxRanges,
     required int maxBytes,
-  }) {
+  }) async {
     if (_cachedRanges.isEmpty) return;
 
     final sorted = _cachedRanges.values.toList(growable: false)
       ..sort((a, b) => a.storedAt.compareTo(b.storedAt));
-    var total = sorted.fold<int>(0, (sum, item) => sum + item.bytes.length);
+    var total = sorted.fold<int>(0, (sum, item) => sum + item.lengthBytes);
     final removeKeys = <int>{};
 
     for (final item in sorted) {
@@ -859,30 +1480,119 @@ class _HttpStreamProxyEntry {
       final overBytes = total > maxBytes;
       if (!overCount && !overBytes) break;
       removeKeys.add(item.startByte);
-      total -= item.bytes.length;
+      total -= item.lengthBytes;
     }
 
     for (final key in removeKeys) {
-      _cachedRanges.remove(key);
+      final removed = _cachedRanges.remove(key);
+      if (removed != null) {
+        await removed.deleteIfExists();
+      }
     }
+  }
+
+  Future<void> _ensureDirectory() async {
+    if (await cacheDirectory.exists()) return;
+    await cacheDirectory.create(recursive: true);
+  }
+
+  Future<void> _loadFromDisk() async {
+    await _ensureDirectory();
+    if (!await metadataFile.exists()) {
+      await _writeMetadata();
+      return;
+    }
+
+    try {
+      final decoded = jsonDecode(await metadataFile.readAsString());
+      if (decoded is! Map) {
+        await _writeMetadata();
+        return;
+      }
+
+      final ranges = decoded['ranges'];
+      if (ranges is List) {
+        for (final raw in ranges) {
+          final range = _HttpStreamProxyCachedRange.fromJson(
+            raw,
+            cacheDirectory: cacheDirectory,
+          );
+          if (range == null) continue;
+          if (!await range.file.exists()) continue;
+          _cachedRanges[range.startByte] = range;
+        }
+      }
+      await _writeMetadata();
+    } catch (_) {
+      _cachedRanges.clear();
+      await _writeMetadata();
+    }
+  }
+
+  Future<void> _writeMetadata() async {
+    try {
+      await _ensureDirectory();
+      final ordered = _cachedRanges.values.toList(growable: false)
+        ..sort((a, b) => a.startByte.compareTo(b.startByte));
+      final payload = <String, Object?>{
+        'version': 1,
+        'remoteUri': remoteUri.toString(),
+        'httpHeaders': httpHeaders,
+        'lastUpdatedAt': DateTime.now().toIso8601String(),
+        'ranges':
+            ordered.map((entry) => entry.toJson()).toList(growable: false),
+      };
+      await metadataFile.writeAsString(jsonEncode(payload), flush: true);
+    } catch (_) {}
   }
 }
 
 class _HttpStreamProxyCachedRange {
-  _HttpStreamProxyCachedRange({
+  const _HttpStreamProxyCachedRange({
     required this.startByte,
-    required this.bytes,
+    required this.lengthBytes,
+    required this.file,
     required this.contentTypeMime,
     required this.totalBytes,
     required this.acceptRanges,
-  }) : storedAt = DateTime.now();
+    required this.storedAt,
+  });
 
   final int startByte;
-  final Uint8List bytes;
+  final int lengthBytes;
+  final File file;
   final String? contentTypeMime;
   final int? totalBytes;
   final bool acceptRanges;
   final DateTime storedAt;
+
+  int get endExclusive => startByte + lengthBytes;
+
+  bool coversByte(int byteOffset) {
+    return byteOffset >= startByte && byteOffset < endExclusive;
+  }
+
+  int availableBytesFromOffset(int readOffset) {
+    final remaining = lengthBytes - readOffset;
+    return remaining < 0 ? 0 : remaining;
+  }
+
+  Stream<List<int>> openReadSlice({
+    required int startOffset,
+    required int maxBytes,
+  }) {
+    final safeStart = startOffset < 0 ? 0 : startOffset;
+    final safeLength = maxBytes < 0 ? 0 : maxBytes;
+    return file.openRead(safeStart, safeStart + safeLength);
+  }
+
+  Future<void> deleteIfExists() async {
+    try {
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (_) {}
+  }
 
   _HttpStreamProxyCachedRange copyWith({
     String? contentTypeMime,
@@ -891,10 +1601,51 @@ class _HttpStreamProxyCachedRange {
   }) {
     return _HttpStreamProxyCachedRange(
       startByte: startByte,
-      bytes: bytes,
+      lengthBytes: lengthBytes,
+      file: file,
       contentTypeMime: contentTypeMime ?? this.contentTypeMime,
       totalBytes: totalBytes ?? this.totalBytes,
       acceptRanges: acceptRanges ?? this.acceptRanges,
+      storedAt: storedAt,
+    );
+  }
+
+  Map<String, Object?> toJson() {
+    return <String, Object?>{
+      'startByte': startByte,
+      'lengthBytes': lengthBytes,
+      'fileName': file.uri.pathSegments.isEmpty
+          ? file.path
+          : file.uri.pathSegments.last,
+      'contentTypeMime': contentTypeMime,
+      'totalBytes': totalBytes,
+      'acceptRanges': acceptRanges,
+      'storedAt': storedAt.toIso8601String(),
+    };
+  }
+
+  static _HttpStreamProxyCachedRange? fromJson(
+    Object? raw, {
+    required Directory cacheDirectory,
+  }) {
+    if (raw is! Map) return null;
+    final startByte = int.tryParse(raw['startByte']?.toString() ?? '');
+    final lengthBytes = int.tryParse(raw['lengthBytes']?.toString() ?? '');
+    final fileName = raw['fileName']?.toString().trim() ?? '';
+    if (startByte == null || startByte < 0) return null;
+    if (lengthBytes == null || lengthBytes <= 0) return null;
+    if (fileName.isEmpty) return null;
+    return _HttpStreamProxyCachedRange(
+      startByte: startByte,
+      lengthBytes: lengthBytes,
+      file: File(
+        HttpStreamProxyServer._joinPath(cacheDirectory.path, fileName),
+      ),
+      contentTypeMime: raw['contentTypeMime']?.toString(),
+      totalBytes: int.tryParse(raw['totalBytes']?.toString() ?? ''),
+      acceptRanges: raw['acceptRanges'] == true,
+      storedAt: DateTime.tryParse(raw['storedAt']?.toString() ?? '') ??
+          DateTime.now(),
     );
   }
 }
@@ -926,7 +1677,8 @@ class _HttpStreamProxyWarmupState {
   DateTime _updatedAt = DateTime.now();
   Completer<void>? _progress = Completer<void>();
 
-  bool get canRemove => _activeCount <= 0 && (_progress == null || _progress!.isCompleted);
+  bool get canRemove =>
+      _activeCount <= 0 && (_progress == null || _progress!.isCompleted);
 
   bool isStale(Duration ttl) => DateTime.now().difference(_updatedAt) > ttl;
 
@@ -979,4 +1731,150 @@ class _OpenedRemote {
       await response.stream.drain<void>();
     } catch (_) {}
   }
+}
+
+class _HttpStreamProxyCachedCoverage {
+  const _HttpStreamProxyCachedCoverage({
+    required this.startByte,
+    required this.segments,
+    required this.lengthBytes,
+    required this.contentTypeMime,
+    required this.totalBytes,
+    required this.acceptRanges,
+  });
+
+  final int startByte;
+  final List<_HttpStreamProxyCachedCoverageSegment> segments;
+  final int lengthBytes;
+  final String? contentTypeMime;
+  final int? totalBytes;
+  final bool acceptRanges;
+}
+
+class _HttpStreamProxyCachedCoverageSegment {
+  const _HttpStreamProxyCachedCoverageSegment({
+    required this.range,
+    required this.readOffset,
+  });
+
+  final _HttpStreamProxyCachedRange range;
+  final int readOffset;
+
+  int get availableBytes => range.availableBytesFromOffset(readOffset);
+}
+
+class _HttpStreamProxyHeadMetadata {
+  const _HttpStreamProxyHeadMetadata({
+    required this.statusCode,
+    required this.contentTypeMime,
+    required this.totalBytes,
+    required this.acceptRanges,
+  });
+
+  final int statusCode;
+  final String? contentTypeMime;
+  final int totalBytes;
+  final bool acceptRanges;
+}
+
+class _CachedServeResult {
+  const _CachedServeResult.notServed()
+      : served = false,
+        statusCode = 0,
+        cachedBytes = 0,
+        remoteBytes = 0,
+        reason = '';
+
+  const _CachedServeResult.served({
+    required this.statusCode,
+    required this.cachedBytes,
+    required this.remoteBytes,
+    required this.reason,
+  }) : served = true;
+
+  final bool served;
+  final int statusCode;
+  final int cachedBytes;
+  final int remoteBytes;
+  final String reason;
+}
+
+class _RemoteRelayResult {
+  const _RemoteRelayResult({
+    required this.bytesRelayed,
+    required this.cached,
+    required this.reason,
+  });
+
+  final int bytesRelayed;
+  final bool cached;
+  final String reason;
+}
+
+class _RemoteCacheResult {
+  const _RemoteCacheResult({
+    required this.bytesRelayed,
+    required this.cached,
+  });
+
+  final int bytesRelayed;
+  final bool cached;
+}
+
+class _ProxyRequestTrace {
+  _ProxyRequestTrace({
+    required this.method,
+    required this.rangeHeader,
+  });
+
+  final String method;
+  final String rangeHeader;
+  String remoteUrl = '';
+  bool waitedWarmup = false;
+  String cacheStatus = '';
+  String reason = '';
+  int cachedBytes = 0;
+  int remoteBytes = 0;
+  int statusCode = 0;
+
+  _HttpStreamProxyDiagnosticEntry build() {
+    return _HttpStreamProxyDiagnosticEntry(
+      timestamp: DateTime.now(),
+      method: method,
+      rangeHeader: rangeHeader,
+      remoteUrl: remoteUrl,
+      waitedWarmup: waitedWarmup,
+      cacheStatus: cacheStatus.isEmpty ? 'unknown' : cacheStatus,
+      reason: reason.isEmpty ? '-' : reason,
+      cachedBytes: cachedBytes,
+      remoteBytes: remoteBytes,
+      statusCode: statusCode,
+    );
+  }
+}
+
+class _HttpStreamProxyDiagnosticEntry {
+  const _HttpStreamProxyDiagnosticEntry({
+    required this.timestamp,
+    required this.method,
+    required this.rangeHeader,
+    required this.remoteUrl,
+    required this.waitedWarmup,
+    required this.cacheStatus,
+    required this.reason,
+    required this.cachedBytes,
+    required this.remoteBytes,
+    required this.statusCode,
+  });
+
+  final DateTime timestamp;
+  final String method;
+  final String rangeHeader;
+  final String remoteUrl;
+  final bool waitedWarmup;
+  final String cacheStatus;
+  final String reason;
+  final int cachedBytes;
+  final int remoteBytes;
+  final int statusCode;
 }

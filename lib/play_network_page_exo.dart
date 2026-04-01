@@ -19,6 +19,7 @@ import 'package:video_player_platform_interface/video_player_platform_interface.
 
 import 'play_network_page.dart';
 import 'server_adapters/server_access.dart';
+import 'services/app_diagnostics_log.dart';
 import 'services/app_route_observer.dart';
 import 'services/playback/video_display_hint.dart';
 import 'services/preload/playback_preload_coordinator.dart';
@@ -178,7 +179,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   // Subtitle options (EXO).
   final double _subtitleDelaySeconds = 0.0;
   final double _subtitleFontSize = 18.0;
-  final int _subtitlePositionStep = 5; // 0..20, maps to padding-bottom in 5px steps.
+  final int _subtitlePositionStep =
+      5; // 0..20, maps to padding-bottom in 5px steps.
   final bool _subtitleBold = false;
   String _subtitleText = '';
   bool _subtitlePollInFlight = false;
@@ -1109,11 +1111,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                                         e.sizeBytes;
                                                     final ticks =
                                                         e.runTimeTicks ?? 0;
-                                                    final seconds =
-                                                        ticks > 0
-                                                            ? ticks /
-                                                                10000000.0
-                                                            : 0.0;
+                                                    final seconds = ticks > 0
+                                                        ? ticks / 10000000.0
+                                                        : 0.0;
                                                     final bitrate =
                                                         sizeBytes != null &&
                                                                 sizeBytes > 0 &&
@@ -1177,9 +1177,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                                         Text(
                                                           episodeTitle,
                                                           maxLines: 2,
-                                                          overflow:
-                                                              TextOverflow
-                                                                  .ellipsis,
+                                                          overflow: TextOverflow
+                                                              .ellipsis,
                                                           style:
                                                               const TextStyle(
                                                             color: Colors.white,
@@ -2484,7 +2483,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         }
         final entries = snapshot.data ?? const <RouteEntry>[];
         if (entries.isEmpty) {
-          return const Center(child: Text('暂无可用线路', style: TextStyle(color: Colors.white70)));
+          return const Center(
+              child: Text('暂无可用线路', style: TextStyle(color: Colors.white70)));
         }
         return ListView.separated(
           padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
@@ -2529,7 +2529,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           snapshot.data ?? const <Map<String, dynamic>>[],
         )..sort(_compareMediaSourcesByQuality);
         if (sources.isEmpty) {
-          return const Center(child: Text('无法获取版本列表', style: TextStyle(color: Colors.white70)));
+          return const Center(
+              child: Text('无法获取版本列表', style: TextStyle(color: Colors.white70)));
         }
         final current = (_mediaSourceId ?? _selectedMediaSourceId ?? '').trim();
         return ListView.separated(
@@ -2600,7 +2601,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         }
         final tracks = snapshot.data ?? const <vp_platform.VideoAudioTrack>[];
         if (tracks.isEmpty) {
-          return const Center(child: Text('暂无音频可选', style: TextStyle(color: Colors.white70)));
+          return const Center(
+              child: Text('暂无音频可选', style: TextStyle(color: Colors.white70)));
         }
         final controller = _controller;
         return ListView.separated(
@@ -2620,7 +2622,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                   ? null
                   : () {
                       unawaited(() async {
-                        final platform = vp_platform.VideoPlayerPlatform.instance;
+                        final platform =
+                            vp_platform.VideoPlayerPlatform.instance;
                         // ignore: invalid_use_of_visible_for_testing_member
                         await platform.selectAudioTrack(
                           _videoPlayerId(controller),
@@ -2678,7 +2681,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                 subtitle: _subtitleTrackSubtitle(track),
                 selected: track.isSelected,
                 trailing: track.isSelected
-                    ? const Icon(Icons.check_circle_rounded, color: Colors.white)
+                    ? const Icon(Icons.check_circle_rounded,
+                        color: Colors.white)
                     : null,
                 onTap: !controlsEnabled || controller == null
                     ? null
@@ -2756,7 +2760,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         const SizedBox(height: 8),
         MobilePlayerOptionTile(
           title: '加载在线弹幕',
-          leading: const Icon(Icons.cloud_download_outlined, color: Colors.white),
+          leading:
+              const Icon(Icons.cloud_download_outlined, color: Colors.white),
           onTap: controlsEnabled
               ? () {
                   unawaited(_loadOnlineDanmakuForNetwork(showToast: true));
@@ -2769,7 +2774,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           leading: const Icon(Icons.search, color: Colors.white),
           onTap: controlsEnabled
               ? () {
-                  unawaited(_manualMatchOnlineDanmakuForCurrent(showToast: true));
+                  unawaited(
+                      _manualMatchOnlineDanmakuForCurrent(showToast: true));
                 }
               : null,
         ),
@@ -2797,10 +2803,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     required bool controlsEnabled,
   }) {
     final panel = _mobilePanel;
-    final visibleSidePanel =
-        panel != null && panel != _MobilePlayerPanel.speed;
-    final effectivePanel =
-        visibleSidePanel ? panel : _MobilePlayerPanel.route;
+    final visibleSidePanel = panel != null && panel != _MobilePlayerPanel.speed;
+    final effectivePanel = visibleSidePanel ? panel : _MobilePlayerPanel.route;
 
     Widget? headerTrailing;
     Widget child = const SizedBox.shrink();
@@ -4261,9 +4265,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       final preloadStart = start ?? Duration.zero;
       final preloadWarmup = _startCurrentItemPreloadWarmup(
         startPosition: preloadStart,
-        triggerSource: preloadStart > Duration.zero
-            ? 'playback_resume'
-            : 'playback_start',
+        triggerSource:
+            preloadStart > Duration.zero ? 'playback_resume' : 'playback_start',
       );
       if (preloadWarmup != null) {
         unawaited(preloadWarmup);
@@ -4271,6 +4274,23 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       final playbackSource = await _buildPlaybackSource(resolvedSource);
       _resolvedStream = playbackSource.url;
       _resolvedStreamHeaders = playbackSource.httpHeaders;
+      AppDiagnosticsLogger.instance.info(
+        'player_network_exo',
+        'Prepared network playback source',
+        data: <String, Object?>{
+          'itemId': widget.itemId,
+          'resolved': AppDiagnosticsLogger.summarizeUrl(resolvedSource.url),
+          'playback': AppDiagnosticsLogger.summarizeUrl(playbackSource.url),
+          'resolvedHeaders': AppDiagnosticsLogger.summarizeHeaderKeys(
+              resolvedSource.httpHeaders),
+          'playbackHeaders': AppDiagnosticsLogger.summarizeHeaderKeys(
+              playbackSource.httpHeaders),
+          'mediaType': resolvedSource.mediaTypeHint.name,
+          'preloadProxy': _preloadHttpProxyUrl ?? '',
+          'usesLoopbackProxy':
+              (Uri.tryParse(playbackSource.url)?.host ?? '') == '127.0.0.1',
+        },
+      );
       final controller = VideoPlayerController.networkUrl(
         Uri.parse(playbackSource.url),
         httpHeaders: _embyHeaders(),
@@ -4489,7 +4509,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       supportsByteRange: resolvedSource.supportsByteRange,
       httpStatusHint: resolvedSource.httpStatusHint,
     );
-    if (widget.isTv) return candidate;
     final proxied = await LocalHttpStreamProxy.wrapPlaybackSource(candidate);
     return proxied ?? candidate;
   }

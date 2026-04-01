@@ -169,7 +169,8 @@ void main() {
     expect(wrapped.last.httpHeaders['User-Agent'], 'BrowserUA');
   });
 
-  test('HttpStreamProxyServer reuses the same proxy URL for the same source', () async {
+  test('HttpStreamProxyServer reuses the same proxy URL for the same source',
+      () async {
     final remote = Uri.parse('http://example.com/media/video.mp4');
 
     final first = await HttpStreamProxyServer.instance.registerStream(
@@ -186,7 +187,9 @@ void main() {
     expect(second, first);
   });
 
-  test('HttpStreamProxyServer serves seeded cache before fetching upstream tail', () async {
+  test(
+      'HttpStreamProxyServer serves seeded cache before fetching upstream tail',
+      () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() async {
       await server.close(force: true);
@@ -238,7 +241,9 @@ void main() {
     expect(upstreamUa, 'BrowserUA');
   });
 
-  test('HttpStreamProxyServer waits for in-flight warmup before falling back upstream', () async {
+  test(
+      'HttpStreamProxyServer waits for in-flight warmup before falling back upstream',
+      () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() async {
       await server.close(force: true);
@@ -300,5 +305,126 @@ void main() {
     expect(response.statusCode, 200);
     expect(body, <int>[0, 1, 2, 3, 4, 5, 6, 7]);
     expect(upstreamHits, 0);
+  });
+
+  test(
+      'HttpStreamProxyServer serves covered sub-range directly from seeded cache',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await server.close(force: true);
+    });
+
+    var upstreamHits = 0;
+    server.listen((HttpRequest req) async {
+      upstreamHits++;
+      req.response.statusCode = 200;
+      req.response.headers.contentType = ContentType('video', 'mp4');
+      req.response.contentLength = 8;
+      req.response.add(const <int>[9, 9, 9, 9, 9, 9, 9, 9]);
+      await req.response.close();
+    });
+
+    final proxyUri = await HttpStreamProxyServer.instance.seedStreamCache(
+      remoteUri: Uri.parse('http://127.0.0.1:${server.port}/media'),
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      fileName: 'video.mp4',
+      startByte: 0,
+      bytes: const <int>[0, 1, 2, 3, 4, 5, 6, 7],
+      contentTypeMime: 'video/mp4',
+      totalBytes: 8,
+      acceptRanges: true,
+    );
+
+    final client = HttpClient();
+    addTearDown(() {
+      client.close(force: true);
+    });
+
+    final request = await client.getUrl(proxyUri);
+    request.headers.set(HttpHeaders.rangeHeader, 'bytes=2-5');
+    final response = await request.close();
+    final body = await response.fold<List<int>>(
+      <int>[],
+      (acc, chunk) => <int>[...acc, ...chunk],
+    );
+
+    expect(response.statusCode, 206);
+    expect(
+        response.headers.value(HttpHeaders.contentRangeHeader), 'bytes 2-5/8');
+    expect(body, <int>[2, 3, 4, 5]);
+    expect(upstreamHits, 0);
+  });
+
+  test('HttpStreamProxyServer caches remote GET response for later reuse',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await server.close(force: true);
+    });
+
+    var upstreamHits = 0;
+    server.listen((HttpRequest req) async {
+      upstreamHits++;
+      req.response.statusCode = 200;
+      req.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+      req.response.headers.contentType = ContentType('video', 'mp4');
+      req.response.contentLength = 8;
+      req.response.add(const <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+      await req.response.close();
+    });
+
+    final proxyUri = await HttpStreamProxyServer.instance.registerStream(
+      remoteUri: Uri.parse('http://127.0.0.1:${server.port}/media'),
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      fileName: 'video.mp4',
+    );
+
+    final client = HttpClient();
+    addTearDown(() {
+      client.close(force: true);
+    });
+
+    Future<List<int>> fetchOnce() async {
+      final response = await (await client.getUrl(proxyUri)).close();
+      expect(response.statusCode, 200);
+      return response.fold<List<int>>(
+        <int>[],
+        (acc, chunk) => <int>[...acc, ...chunk],
+      );
+    }
+
+    final first = await fetchOnce();
+    final second = await fetchOnce();
+
+    expect(first, <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(second, <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(upstreamHits, 1);
+    expect(
+      HttpStreamProxyServer.instance.buildDiagnosticsText(),
+      contains('cache=hit'),
+    );
+  });
+
+  test('LocalHttpStreamProxy only wraps direct-file playback sources',
+      () async {
+    final fileSource = PlayableSource(
+      url: 'https://example.com/video.mp4',
+      mediaTypeHint: StreamMediaType.file,
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+    );
+    final hlsSource = PlayableSource(
+      url: 'https://example.com/master.m3u8',
+      mediaTypeHint: StreamMediaType.hls,
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+    );
+
+    final proxiedFile =
+        await LocalHttpStreamProxy.wrapPlaybackSource(fileSource);
+    final proxiedHls = await LocalHttpStreamProxy.wrapPlaybackSource(hlsSource);
+
+    expect(proxiedFile, isNotNull);
+    expect(Uri.parse(proxiedFile!.url).host, '127.0.0.1');
+    expect(proxiedHls, isNull);
   });
 }

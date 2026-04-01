@@ -19,6 +19,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'play_network_page_exo.dart';
 import 'server_adapters/server_access.dart';
+import 'services/app_diagnostics_log.dart';
 import 'services/app_route_observer.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/desktop_window.dart';
@@ -481,9 +482,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       final preloadStart = start ?? Duration.zero;
       final preloadWarmup = _startCurrentItemPreloadWarmup(
         startPosition: preloadStart,
-        triggerSource: preloadStart > Duration.zero
-            ? 'playback_resume'
-            : 'playback_start',
+        triggerSource:
+            preloadStart > Duration.zero ? 'playback_resume' : 'playback_start',
       );
       if (preloadWarmup != null) {
         unawaited(preloadWarmup);
@@ -492,6 +492,23 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       final playbackSource = await _buildPlaybackSource(resolvedSource);
       final playbackUrl = playbackSource.url;
       final playbackHeaders = playbackSource.httpHeaders;
+      AppDiagnosticsLogger.instance.info(
+        'player_network_mpv',
+        'Prepared network playback source',
+        data: <String, Object?>{
+          'itemId': widget.itemId,
+          'resolved': AppDiagnosticsLogger.summarizeUrl(resolvedSource.url),
+          'playback': AppDiagnosticsLogger.summarizeUrl(playbackUrl),
+          'resolvedHeaders': AppDiagnosticsLogger.summarizeHeaderKeys(
+              resolvedSource.httpHeaders),
+          'playbackHeaders':
+              AppDiagnosticsLogger.summarizeHeaderKeys(playbackHeaders),
+          'mediaType': resolvedSource.mediaTypeHint.name,
+          'preloadProxy': _preloadHttpProxyUrl ?? '',
+          'usesLoopbackProxy':
+              (Uri.tryParse(playbackUrl)?.host ?? '') == '127.0.0.1',
+        },
+      );
       final httpProxy = playbackUrl.isNotEmpty
           ? (() {
               final uri = Uri.tryParse(playbackUrl);
@@ -2073,8 +2090,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                                             MobilePlayerInfoTag(
                                                               label:
                                                                   _formatBitrateMbps(
-                                                                spec
-                                                                    ?.bitrateBitsPerSecond,
+                                                                spec?.bitrateBitsPerSecond,
                                                               ),
                                                             ),
                                                           ],
@@ -2545,7 +2561,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       supportsByteRange: resolvedSource.supportsByteRange,
       httpStatusHint: resolvedSource.httpStatusHint,
     );
-    if (widget.isTv) return candidate;
     final proxied = await LocalHttpStreamProxy.wrapPlaybackSource(candidate);
     return proxied ?? candidate;
   }
@@ -7103,9 +7118,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                   final name = domain.name.trim();
                   final displayName = name.isNotEmpty
                       ? name
-                      : (remark.isNotEmpty
-                          ? remark
-                          : '线路 ${entry.key + 1}');
+                      : (remark.isNotEmpty ? remark : '线路 ${entry.key + 1}');
 
                   return MobilePlayerOptionTile(
                     title: displayName,
@@ -7207,7 +7220,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
             ],
             MobilePlayerOptionTile(
               title: '更多版本选项',
-              leading: const Icon(Icons.view_list_outlined, color: Colors.white),
+              leading:
+                  const Icon(Icons.view_list_outlined, color: Colors.white),
               onTap: controlsEnabled
                   ? () {
                       _closeMobilePanels(scheduleHide: false);
@@ -7398,7 +7412,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
           leading: const Icon(Icons.search, color: Colors.white),
           onTap: controlsEnabled
               ? () {
-                  unawaited(_manualMatchOnlineDanmakuForCurrent(showToast: true));
+                  unawaited(
+                      _manualMatchOnlineDanmakuForCurrent(showToast: true));
                 }
               : null,
         ),
@@ -7516,56 +7531,54 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     required bool controlsEnabled,
   }) {
     final panel = _mobilePanel;
-    final visibleSidePanel =
-        panel != null && panel != _MobilePlayerPanel.speed;
-    final effectivePanel =
-        visibleSidePanel ? panel : _MobilePlayerPanel.route;
+    final visibleSidePanel = panel != null && panel != _MobilePlayerPanel.speed;
+    final effectivePanel = visibleSidePanel ? panel : _MobilePlayerPanel.route;
 
     Widget? headerTrailing;
     Widget child = const SizedBox.shrink();
     if (visibleSidePanel) {
       switch (effectivePanel) {
-      case _MobilePlayerPanel.route:
-        child = _buildMobileRoutePanel(controlsEnabled: controlsEnabled);
-        headerTrailing = IconButton(
-          tooltip: '鍒锋柊',
-          onPressed: controlsEnabled
-              ? () {
-                  setState(() {
-                    _desktopRouteEntriesFuture =
-                        _ensureMobileRouteEntriesLoaded(
-                      forceRefresh: true,
-                    );
-                  });
-                }
-              : null,
-          icon: const Icon(Icons.refresh_rounded),
-          color: Colors.white,
-          splashRadius: 20,
-        );
-        break;
-      case _MobilePlayerPanel.version:
-        child = _buildMobileVersionPanel(controlsEnabled: controlsEnabled);
-        break;
-      case _MobilePlayerPanel.audio:
-        child = _buildMobileAudioPanel(controlsEnabled: controlsEnabled);
-        break;
-      case _MobilePlayerPanel.core:
-        child = _buildMobileCorePanel(controlsEnabled: controlsEnabled);
-        break;
-      case _MobilePlayerPanel.superResolution:
-        child = _buildMobileSuperResolutionPanel(
-          controlsEnabled: controlsEnabled,
-        );
-        break;
-      case _MobilePlayerPanel.danmaku:
-        child = _buildMobileDanmakuPanel(controlsEnabled: controlsEnabled);
-        break;
-      case _MobilePlayerPanel.subtitle:
-        child = _buildMobileSubtitlePanel(controlsEnabled: controlsEnabled);
-        break;
-      case _MobilePlayerPanel.speed:
-        break;
+        case _MobilePlayerPanel.route:
+          child = _buildMobileRoutePanel(controlsEnabled: controlsEnabled);
+          headerTrailing = IconButton(
+            tooltip: '鍒锋柊',
+            onPressed: controlsEnabled
+                ? () {
+                    setState(() {
+                      _desktopRouteEntriesFuture =
+                          _ensureMobileRouteEntriesLoaded(
+                        forceRefresh: true,
+                      );
+                    });
+                  }
+                : null,
+            icon: const Icon(Icons.refresh_rounded),
+            color: Colors.white,
+            splashRadius: 20,
+          );
+          break;
+        case _MobilePlayerPanel.version:
+          child = _buildMobileVersionPanel(controlsEnabled: controlsEnabled);
+          break;
+        case _MobilePlayerPanel.audio:
+          child = _buildMobileAudioPanel(controlsEnabled: controlsEnabled);
+          break;
+        case _MobilePlayerPanel.core:
+          child = _buildMobileCorePanel(controlsEnabled: controlsEnabled);
+          break;
+        case _MobilePlayerPanel.superResolution:
+          child = _buildMobileSuperResolutionPanel(
+            controlsEnabled: controlsEnabled,
+          );
+          break;
+        case _MobilePlayerPanel.danmaku:
+          child = _buildMobileDanmakuPanel(controlsEnabled: controlsEnabled);
+          break;
+        case _MobilePlayerPanel.subtitle:
+          child = _buildMobileSubtitlePanel(controlsEnabled: controlsEnabled);
+          break;
+        case _MobilePlayerPanel.speed:
+          break;
       }
     }
 

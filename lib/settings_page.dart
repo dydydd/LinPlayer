@@ -9,6 +9,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:lin_player_player/lin_player_player.dart';
 import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_state/lin_player_state.dart';
+import 'package:lin_player_server_api/services/http_stream_proxy.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -1607,6 +1608,10 @@ class _SettingsPageState extends State<SettingsPage> {
           extraSections['Preload Diagnostics'] =
               StreamPreloadService.instance.buildDiagnosticsText(
             maxEntries: 24,
+          );
+          extraSections['HTTP Stream Proxy Diagnostics'] =
+              HttpStreamProxyServer.instance.buildDiagnosticsText(
+            maxEntries: 40,
           );
           if (DeviceType.isTv) {
             try {
