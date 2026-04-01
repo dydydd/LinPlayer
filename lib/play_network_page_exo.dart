@@ -4310,18 +4310,20 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         throw Exception('Exo 内核仅支持 Android');
       }
       final resolvedPlayback = await _buildResolvedPlaybackSource();
-      _resolvedPlaybackSource = resolvedPlayback.resolvedSource;
+      final resolvedSource = resolvedPlayback.resolvedSource;
       _playSessionId = resolvedPlayback.playbackInfo.playSessionId;
-      _mediaSourceId = resolvedPlayback.resolvedSource.mediaSourceId;
+      _mediaSourceId = resolvedSource.mediaSourceId;
       _availableMediaSources = resolvedPlayback.mediaSources;
       _selectedMediaSourceId = resolvedPlayback.selectedMediaSourceId;
       _preloadHttpProxyUrl = PlaybackPreloadCoordinator.resolveHttpProxyUrl(
         appState: widget.appState,
-        sourceUrl: resolvedPlayback.resolvedSource.url,
+        sourceUrl: resolvedSource.url,
         preferBuiltInProxy: false,
       );
-      final playbackSource =
-          await _buildPlaybackSource(resolvedPlayback.resolvedSource);
+      _resolvedPlaybackSource = resolvedSource.copyWith(
+        proxyUrl: _preloadHttpProxyUrl,
+      );
+      final playbackSource = await _buildPlaybackSource(resolvedSource);
       _resolvedStream = playbackSource.url;
       _resolvedStreamHeaders = playbackSource.httpHeaders;
       final controller = VideoPlayerController.networkUrl(

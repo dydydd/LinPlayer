@@ -128,7 +128,8 @@ class StrmTextReader {
       }
       final resp = await client.send(req);
       if (resp.statusCode != 200) return null;
-      return _readBytesFromStream(resp.stream, limit: limit);
+      final bytes = await _readBytesFromStream(resp.stream, limit: limit);
+      return bytes;
     } finally {
       client.close();
     }

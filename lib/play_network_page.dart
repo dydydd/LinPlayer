@@ -448,24 +448,23 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         return;
       }
       final resolvedPlayback = await _buildResolvedPlaybackSource();
-      _resolvedPlaybackSource = resolvedPlayback.resolvedSource;
+      final resolvedSource = resolvedPlayback.resolvedSource;
       _playSessionId = resolvedPlayback.playbackInfo.playSessionId;
-      _mediaSourceId = resolvedPlayback.resolvedSource.mediaSourceId;
+      _mediaSourceId = resolvedSource.mediaSourceId;
       _availableMediaSources = resolvedPlayback.mediaSources;
       _selectedMediaSourceId = resolvedPlayback.selectedMediaSourceId;
-      _resolvedStreamSizeBytes = resolvedPlayback.resolvedSource.sizeBytes;
+      _resolvedStreamSizeBytes = resolvedSource.sizeBytes;
 
       final proxyReady = builtInProxyEnabled &&
           builtInProxy.status.state == BuiltInProxyState.running;
       final preloadProxy = _resolvePreloadHttpProxyUrl(
-        resolvedPlayback.resolvedSource.url,
+        resolvedSource.url,
         preferBuiltInProxy: proxyReady,
       );
       _preloadHttpProxyUrl = preloadProxy;
+      _resolvedPlaybackSource = resolvedSource.copyWith(proxyUrl: preloadProxy);
 
-      final playbackSource = await _buildPlaybackSource(
-        resolvedPlayback.resolvedSource,
-      );
+      final playbackSource = await _buildPlaybackSource(resolvedSource);
       final playbackUrl = playbackSource.url;
       final playbackHeaders = playbackSource.httpHeaders;
       final httpProxy = playbackUrl.isNotEmpty

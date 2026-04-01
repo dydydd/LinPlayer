@@ -1,10 +1,14 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lin_player/services/preload/playback_preload_coordinator.dart';
+import 'package:lin_player/services/stream_resolver/stream_resolver.dart';
 import 'package:lin_player_core/state/media_server_type.dart';
 import 'package:lin_player_player/lin_player_player.dart';
 import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
+import 'package:lin_player_state/lin_player_state.dart';
 
 void main() {
   const auth = ServerAuthSession(
@@ -17,6 +21,36 @@ void main() {
 
   setUp(() {
     StreamPreloadService.instance.debugResetForTest();
+  });
+
+  test('PlaybackPreloadCoordinator keeps proxy metadata on prepared requests', () {
+    const proxyUrl = 'http://127.0.0.1:8900';
+    final prepared = PlaybackPreloadCoordinator.prepareResolved(
+      appState: AppState(),
+      targetKind: PlaybackPreloadTargetKind.currentItem,
+      triggerSource: 'detail_current',
+      resolvedSource: const ResolvedPlaybackSource(
+        itemId: 'item-proxy',
+        playSessionId: 'ps-proxy',
+        mediaSourceId: 'ms-proxy',
+        url: 'https://media.example.com/videos/item-proxy/stream.mp4',
+        httpHeaders: <String, String>{},
+        isExternal: false,
+        mediaTypeHint: ResolvedPlaybackMediaType.file,
+        fromStrm: false,
+        redirectChain: <String>[
+          'https://media.example.com/videos/item-proxy/stream.mp4',
+        ],
+      ),
+      httpProxyUrl: proxyUrl,
+    );
+
+    expect(prepared.httpProxyUrl, proxyUrl);
+    expect(prepared.resolvedSource.proxyUrl, proxyUrl);
+
+    final request = prepared.toPreloadRequest();
+    expect(request.httpProxyUrl, proxyUrl);
+    expect(request.resolvedSource.proxyUrl, proxyUrl);
   });
 
   group('PlaybackSourceBuilder', () {
@@ -97,11 +131,11 @@ void main() {
         ),
       );
 
-        final result = await PlaybackSourceBuilder.build(
-          PlaybackSourceBuildRequest(
-            adapter: adapter,
-            auth: auth,
-            itemId: 'item-2',
+      final result = await PlaybackSourceBuilder.build(
+        PlaybackSourceBuildRequest(
+          adapter: adapter,
+          auth: auth,
+          itemId: 'item-2',
           playerCore: PlaybackSourcePlayerCoreKind.mpv,
           resolveExternalSource: false,
         ),
@@ -198,6 +232,99 @@ void main() {
       );
       expect(mediaRequests, greaterThanOrEqualTo(1));
     });
+
+    test(
+      'shared builder and stream resolver agree on STRM redirect/body-link target',
+      () async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() async {
+          await server.close(force: true);
+        });
+
+        server.listen((HttpRequest request) async {
+          switch (request.uri.path) {
+            case '/start.strm':
+              request.response.statusCode = 302;
+              request.response.headers.set(HttpHeaders.locationHeader, '/api');
+              await request.response.close();
+              return;
+            case '/api':
+              request.response.statusCode = 200;
+              request.response.headers.contentType = ContentType.text;
+              if (request.method != 'HEAD') {
+                request.response.write(
+                  'http://127.0.0.1:${server.port}/final.mp4'
+                  '|Referer=${Uri.encodeQueryComponent('https://ref.example/path')}'
+                  '&Cookie=${Uri.encodeQueryComponent('session=abc')}',
+                );
+              }
+              await request.response.close();
+              return;
+            case '/final.mp4':
+              request.response.statusCode = 200;
+              request.response.headers.contentType = ContentType('video', 'mp4');
+              request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+              await request.response.close();
+              return;
+          }
+
+          request.response.statusCode = 404;
+          await request.response.close();
+        });
+
+        final strmUrl = 'http://127.0.0.1:${server.port}/start.strm';
+        final adapter = _FakeAdapter(
+          playbackInfo: PlaybackInfoResult(
+            playSessionId: 'play-shared',
+            mediaSourceId: 'ms-shared',
+            mediaSources: <Map<String, dynamic>>[
+              <String, dynamic>{
+                'Id': 'ms-shared',
+                'Path': strmUrl,
+              },
+            ],
+          ),
+        );
+
+        final buildResult = await PlaybackSourceBuilder.build(
+          PlaybackSourceBuildRequest(
+            adapter: adapter,
+            auth: auth,
+            itemId: 'item-shared',
+            playerCore: PlaybackSourcePlayerCoreKind.mpv,
+          ),
+        );
+
+        final resolved = await StreamResolver.resolve(
+          StreamResolveRequest(
+            sourcePathOrUrl: '',
+            fileName: 'shared.strm',
+            bytes: utf8.encode('$strmUrl\n'),
+          ),
+          options: const StreamResolveOptions(
+            preferBrowserUserAgentForStrm: false,
+            cacheRedirectResolution: false,
+          ),
+        );
+
+        expect(resolved.isSuccess, isTrue);
+        final candidate = resolved.candidates.first;
+        expect(buildResult.resolvedSource.url, candidate.url);
+        expect(
+          _headerValue(buildResult.resolvedSource.httpHeaders, 'Referer'),
+          _headerValue(candidate.httpHeaders, 'Referer'),
+        );
+        expect(
+          _headerValue(buildResult.resolvedSource.httpHeaders, 'Cookie'),
+          _headerValue(candidate.httpHeaders, 'Cookie'),
+        );
+        expect(
+          buildResult.resolvedSource.mediaTypeHint,
+          ResolvedPlaybackMediaType.file,
+        );
+        expect(candidate.mediaTypeHint, StreamMediaType.file);
+      },
+    );
   });
 
   test('StreamPreloadService preserves upstream UA and dedupes repeated requests', () async {
@@ -262,6 +389,106 @@ void main() {
     expect(diagnostics, contains('status=skippedAlreadyDone'));
   });
 
+  test('StreamPreloadService preloads direct links near the resume offset', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await server.close(force: true);
+    });
+
+    final ranges = <String?>[];
+    server.listen((HttpRequest request) async {
+      ranges.add(request.headers.value(HttpHeaders.rangeHeader));
+      request.response.statusCode = 206;
+      request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+      request.response.headers.set(
+        HttpHeaders.contentRangeHeader,
+        'bytes 0-7/80000000',
+      );
+      request.response.headers.contentType = ContentType('video', 'mp4');
+      request.response.contentLength = 8;
+      request.response.add(const <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+      await request.response.close();
+    });
+
+    final url = 'http://127.0.0.1:${server.port}/resume.mp4';
+    final result = await StreamPreloadService.instance.preloadResolvedSource(
+      PreloadRequest(
+        resolvedSource: ResolvedPlaybackSource(
+          itemId: 'episode-resume',
+          playSessionId: 'ps-resume',
+          mediaSourceId: 'ms-resume',
+          url: url,
+          httpHeaders: const <String, String>{'User-Agent': 'SourceUA/1.0'},
+          isExternal: false,
+          mediaTypeHint: ResolvedPlaybackMediaType.file,
+          fromStrm: false,
+          redirectChain: <String>[url],
+          bitrate: 8000000,
+          sizeBytes: 80000000,
+        ),
+        triggerSource: 'playback_resume',
+        startPosition: const Duration(seconds: 10),
+      ),
+    );
+
+    expect(result.status, StreamPreloadStatus.success);
+    expect(ranges, hasLength(2));
+    expect(ranges.first, 'bytes=0-524287');
+    expect(ranges.last, startsWith('bytes=10000000-'));
+  });
+
+  test(
+    'StreamPreloadService honors per-request preload duration when estimating range',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() async {
+        await server.close(force: true);
+      });
+
+      final ranges = <String?>[];
+      server.listen((HttpRequest request) async {
+        ranges.add(request.headers.value(HttpHeaders.rangeHeader));
+        request.response.statusCode = 206;
+        request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+        request.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes 0-7/80000000',
+        );
+        request.response.headers.contentType = ContentType('video', 'mp4');
+        request.response.contentLength = 8;
+        request.response.add(const <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+        await request.response.close();
+      });
+
+      final url = 'http://127.0.0.1:${server.port}/resume-5s.mp4';
+      final result = await StreamPreloadService.instance.preloadResolvedSource(
+        PreloadRequest(
+          resolvedSource: ResolvedPlaybackSource(
+            itemId: 'episode-resume-5s',
+            playSessionId: 'ps-resume-5s',
+            mediaSourceId: 'ms-resume-5s',
+            url: url,
+            httpHeaders: const <String, String>{'User-Agent': 'SourceUA/1.0'},
+            isExternal: false,
+            mediaTypeHint: ResolvedPlaybackMediaType.file,
+            fromStrm: false,
+            redirectChain: <String>[url],
+            bitrate: 8000000,
+            sizeBytes: 80000000,
+          ),
+          triggerSource: 'playback_resume',
+          startPosition: const Duration(seconds: 10),
+          preloadDuration: const Duration(seconds: 5),
+        ),
+      );
+
+      expect(result.status, StreamPreloadStatus.success);
+      expect(ranges, hasLength(2));
+      expect(ranges.first, 'bytes=0-524287');
+      expect(ranges.last, 'bytes=10000000-14999999');
+    },
+  );
+
   test('StreamPreloadService dedupe key distinguishes different media sources', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() async {
@@ -317,6 +544,58 @@ void main() {
     expect(first.status, StreamPreloadStatus.success);
     expect(second.status, StreamPreloadStatus.success);
     expect(requestCount, 2);
+  });
+
+  test('StreamPreloadService merges concurrent in-flight requests', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await server.close(force: true);
+    });
+
+    var requestCount = 0;
+    server.listen((HttpRequest request) async {
+      requestCount++;
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      request.response.statusCode = 206;
+      request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+      request.response.headers.set(
+        HttpHeaders.contentRangeHeader,
+        'bytes 0-7/8',
+      );
+      request.response.headers.contentType = ContentType('video', 'mp4');
+      request.response.contentLength = 8;
+      request.response.add(const <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+      await request.response.close();
+    });
+
+    final url = 'http://127.0.0.1:${server.port}/shared.mp4';
+    final request = PreloadRequest(
+      resolvedSource: ResolvedPlaybackSource(
+        itemId: 'episode-concurrent',
+        playSessionId: 'ps-concurrent',
+        mediaSourceId: 'ms-concurrent',
+        url: url,
+        httpHeaders: const <String, String>{'User-Agent': 'SourceUA/1.0'},
+        isExternal: false,
+        mediaTypeHint: ResolvedPlaybackMediaType.file,
+        fromStrm: false,
+        redirectChain: <String>[url],
+        bitrate: 8000000,
+        sizeBytes: 8000000,
+      ),
+      triggerSource: 'detail_current',
+    );
+
+    final results = await Future.wait<StreamPreloadResult>([
+      StreamPreloadService.instance.preloadResolvedSource(request),
+      StreamPreloadService.instance.preloadResolvedSource(request),
+    ]);
+
+    expect(results.map((entry) => entry.status).toList(), <StreamPreloadStatus>[
+      StreamPreloadStatus.success,
+      StreamPreloadStatus.success,
+    ]);
+    expect(requestCount, 1);
   });
 
   test('StreamPreloadService preloads HLS master playlist with init and first segments', () async {
@@ -499,4 +778,12 @@ class _FakeAdapter extends Fake implements MediaServerAdapter {
   }) async {
     return playbackInfo;
   }
+}
+
+String? _headerValue(Map<String, String> headers, String name) {
+  final lower = name.trim().toLowerCase();
+  for (final entry in headers.entries) {
+    if (entry.key.trim().toLowerCase() == lower) return entry.value;
+  }
+  return null;
 }

@@ -124,7 +124,7 @@ class PlaybackPreloadCoordinator {
     return PreparedPlaybackPreload(
       targetKind: targetKind,
       triggerSource: normalizedTrigger,
-      resolvedSource: resolvedSource,
+      resolvedSource: resolvedSource.copyWith(proxyUrl: normalizedProxy),
       startPosition: normalizedStart,
       httpProxyUrl: normalizedProxy,
     );

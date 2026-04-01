@@ -167,7 +167,7 @@
 
 - [x] 设计一个共享的“已解析播放源”模型
 - [x] 抽一个统一 builder / resolver 服务，负责生成“播放器最终候选 source”
-- [ ] 模型中至少包含以下字段
+- [x] 模型中至少包含以下字段
   - 原始 `itemId`
   - `playSessionId`
   - `mediaSourceId`
@@ -181,7 +181,7 @@
 - [x] 统一“同源判定 + query 参数附加”逻辑
 - [x] 统一“系列级媒体源偏好 + 手动选源 + 全局偏好”的决策逻辑
 - [x] 让 MPV 与 Exo 共同依赖这个共享 builder，而不是各自维护 `_buildStreamUrl`
-- [ ] 尽量保留兼容层，避免一次性改动过大
+- [x] 尽量保留兼容层，避免一次性改动过大
 
 ### 7.4 推荐落点
 
@@ -335,11 +335,11 @@
 
 ### 11.2 STRM / 外链专项任务
 
-- [ ] 确认共享 source builder 已正确复用 `stream_resolver`
-- [ ] 复用 redirect resolved 结果
-- [ ] 复用 body-link resolved 结果
-- [ ] 对 cross-origin header 做统一裁剪策略
-- [ ] 确认依赖 cookie / referer 的链接在预加载时不丢失必要 header
+- [x] 确认共享 source builder 已正确复用 `stream_resolver`
+- [x] 复用 redirect resolved 结果
+- [x] 复用 body-link resolved 结果
+- [x] 对 cross-origin header 做统一裁剪策略
+- [x] 确认依赖 cookie / referer 的链接在预加载时不丢失必要 header
 
 ### 11.3 本地回环代理专项任务
 
@@ -401,18 +401,18 @@
 如果后面某些逻辑经常改、又容易回归，再补下面这些自动化测试；这部分不是当前推进的阻塞条件。
 
 - [x] 直链预加载成功
-- [ ] 直链续看 offset 预加载成功
+- [x] 直链续看 offset 预加载成功
 - [ ] HLS media playlist 预加载成功
 - [x] HLS master playlist 解析与 variant 选择
 - [x] 初始化段存在时能正确请求 init segment
-- [ ] in-flight 合并正确
+- [x] in-flight 合并正确
 - [x] 去重 key 区分不同 mediaSource
 - [x] 熔断策略按新规则工作
 - [ ] 代理配置能正确传入
 - [x] 外链 / 同源 header 策略正确
-- [ ] STRM -> redirect -> final media 测试链
+- [x] STRM -> redirect -> final media 测试链
 - [x] body-link 返回直链测试链
-- [ ] 播放页与预加载共享 source builder 的一致性测试
+- [x] 播放页与预加载共享 source builder 的一致性测试
 
 ### 12.5 建议涉及文件
 

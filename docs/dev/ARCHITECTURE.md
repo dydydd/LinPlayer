@@ -157,6 +157,9 @@ Legacy TV Activity(XML/View)
 - `PlaybackPreloadCoordinator`：收口详情页 / 播放页的 current / next / resume 预加载入口
 - `StreamPreloadService`（`packages/lin_player_player/lib/src/preload/stream_preload_service.dart`）：执行实际预热请求与去重 / 熔断
 
+补充说明：
+- 共享 source builder 内部已复用 STRM / redirect / body-link 解析逻辑，并把 `proxyUrl` 等元数据保留在 `ResolvedPlaybackSource` 中，供播放页与预加载共同消费。
+
 行为：
 - 集详情页（`EpisodeDetailPage`）加载完成后，使用 UA `preload-linplayer` 预取：
   - 当前集前 3 秒

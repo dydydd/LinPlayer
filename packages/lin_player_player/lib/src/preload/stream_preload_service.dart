@@ -64,7 +64,7 @@ class StreamPreloadService {
   static final StreamPreloadService instance = StreamPreloadService._();
 
   static const String preloadUserAgent = 'preload-linplayer';
-  static const Duration preloadDuration = Duration(seconds: 3);
+  static const Duration preloadDuration = PreloadRequest.defaultPreloadDuration;
   static const int maxAttempts = 3;
 
   static const int _minBytes = 256 * 1024;
@@ -107,7 +107,7 @@ class StreamPreloadService {
         ? request.dedupeFingerprint!.trim()
         : sha1.convert(utf8.encode(source.url.trim())).toString();
     final headersFingerprint = _headersFingerprint(source.httpHeaders);
-    final proxyFingerprint = _fingerprintText(request.httpProxyUrl);
+    final proxyFingerprint = _fingerprintText(_effectiveProxyUrlFor(request));
     return [
       source.itemId.trim(),
       source.mediaSourceId.trim(),
@@ -141,11 +141,19 @@ class StreamPreloadService {
     return sha1.convert(utf8.encode(value)).toString();
   }
 
+  String? _effectiveProxyUrlFor(PreloadRequest request) {
+    final requestProxy = (request.httpProxyUrl ?? '').trim();
+    if (requestProxy.isNotEmpty) return requestProxy;
+    final sourceProxy = (request.resolvedSource.proxyUrl ?? '').trim();
+    if (sourceProxy.isNotEmpty) return sourceProxy;
+    return null;
+  }
+
   String _scopeKeyFor(PreloadRequest request) {
     final source = request.resolvedSource;
     final uri = Uri.tryParse(source.url);
     final scope = _originScopeForUri(uri, raw: source.url);
-    final proxyFingerprint = _fingerprintText(request.httpProxyUrl);
+    final proxyFingerprint = _fingerprintText(_effectiveProxyUrlFor(request));
     final kind = source.isExternal ? 'external' : 'server';
     return '$kind|$scope|proxy=$proxyFingerprint';
   }
@@ -255,7 +263,7 @@ class StreamPreloadService {
         startPosition: request.startPosition,
         mediaType: request.resolvedSource.mediaTypeHint,
         isExternal: request.resolvedSource.isExternal,
-        usesProxy: (request.httpProxyUrl ?? '').trim().isNotEmpty,
+        usesProxy: (_effectiveProxyUrlFor(request) ?? '').isNotEmpty,
         url: request.resolvedSource.url,
         status: result.status,
         error: result.error,
@@ -373,12 +381,18 @@ class StreamPreloadService {
     final safeStartPosition = request.startPosition < Duration.zero
         ? Duration.zero
         : request.startPosition;
+    final effectiveProxyUrl = _effectiveProxyUrlFor(request);
     final normalizedRequest = PreloadRequest(
-      resolvedSource: request.resolvedSource,
+      resolvedSource: request.resolvedSource.copyWith(
+        proxyUrl: effectiveProxyUrl,
+      ),
       triggerSource: request.triggerSource,
       startPosition: safeStartPosition,
+      preloadDuration: request.preloadDuration <= Duration.zero
+          ? PreloadRequest.defaultPreloadDuration
+          : request.preloadDuration,
       dedupeFingerprint: request.dedupeFingerprint,
-      httpProxyUrl: request.httpProxyUrl,
+      httpProxyUrl: effectiveProxyUrl,
     );
     final scopeKey = _scopeKeyFor(normalizedRequest);
     final now = _clock();
@@ -416,12 +430,16 @@ class StreamPreloadService {
       for (var attempt = 0; attempt < maxAttempts; attempt++) {
         final source = normalizedRequest.resolvedSource;
         final headers = _buildRequestHeaders(source.httpHeaders);
-        final bytesToFetch = _estimateBytesToFetch(source.bitrate);
+        final bytesToFetch = _estimateBytesToFetch(
+          source.bitrate,
+          preloadDuration: normalizedRequest.preloadDuration,
+        );
         final outcome = await _prefetch(
           url: source.url,
           headers: headers,
           bytesToFetch: bytesToFetch,
           startPosition: safeStartPosition,
+          preloadDuration: normalizedRequest.preloadDuration,
           bitrateBitsPerSecond: source.bitrate,
           sizeBytes: source.sizeBytes,
           httpProxyUrl: normalizedRequest.httpProxyUrl,
@@ -469,11 +487,15 @@ class StreamPreloadService {
     }
   }
 
-  int _estimateBytesToFetch(int? bitrateBitsPerSecond) {
+  int _estimateBytesToFetch(
+    int? bitrateBitsPerSecond, {
+    required Duration preloadDuration,
+  }) {
     final bps = bitrateBitsPerSecond ?? 0;
     if (bps <= 0) return _minBytes;
     final bytesPerSecond = bps / 8.0;
-    final estimated = (bytesPerSecond * preloadDuration.inSeconds).round();
+    final seconds = preloadDuration.inMilliseconds / 1000.0;
+    final estimated = (bytesPerSecond * seconds).round();
     return estimated.clamp(_minBytes, _maxBytes);
   }
 
@@ -529,6 +551,7 @@ class StreamPreloadService {
     required Map<String, String> headers,
     required int bytesToFetch,
     required Duration startPosition,
+    required Duration preloadDuration,
     required int? bitrateBitsPerSecond,
     required int? sizeBytes,
     String? httpProxyUrl,
@@ -563,6 +586,7 @@ class StreamPreloadService {
         headers: headers,
         bytesToFetch: bytesToFetch,
         startPosition: startPosition,
+        preloadDuration: preloadDuration,
         bitrateBitsPerSecond: bitrateBitsPerSecond,
         sizeBytes: sizeBytes,
       );
@@ -608,6 +632,7 @@ class StreamPreloadService {
     required Map<String, String> headers,
     required int bytesToFetch,
     required Duration startPosition,
+    required Duration preloadDuration,
     required int? bitrateBitsPerSecond,
     required int? sizeBytes,
   }) async {
@@ -686,6 +711,7 @@ class StreamPreloadService {
       playlistText: playlistText,
       headers: headers,
       startPosition: startPosition,
+      preloadDuration: preloadDuration,
     );
   }
 
@@ -721,6 +747,7 @@ class StreamPreloadService {
     required String playlistText,
     required Map<String, String> headers,
     required Duration startPosition,
+    required Duration preloadDuration,
   }) async {
     var parsed = _parseHls(playlistText, base: playlistUri);
     if (parsed == null) {
