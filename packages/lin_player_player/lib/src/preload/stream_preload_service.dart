@@ -466,6 +466,8 @@ class StreamPreloadService {
           );
           final outcome = await _prefetch(
             url: source.url,
+            mediaTypeHint: source.mediaTypeHint,
+            supportsByteRange: source.supportsByteRange,
             headers: headers,
             cacheHeaders: source.httpHeaders,
             bytesToFetch: bytesToFetch,
@@ -599,6 +601,8 @@ class StreamPreloadService {
 
   Future<_PreloadAttemptResult> _prefetch({
     required String url,
+    required ResolvedPlaybackMediaType mediaTypeHint,
+    required bool? supportsByteRange,
     required Map<String, String> headers,
     required Map<String, String> cacheHeaders,
     required int bytesToFetch,
@@ -636,6 +640,8 @@ class StreamPreloadService {
       return await _prefetchUri(
         client: client,
         uri: uri,
+        mediaTypeHint: mediaTypeHint,
+        supportsByteRange: supportsByteRange,
         headers: headers,
         cacheHeaders: cacheHeaders,
         bytesToFetch: bytesToFetch,
@@ -684,6 +690,8 @@ class StreamPreloadService {
   Future<_PreloadAttemptResult> _prefetchUri({
     required HttpClient client,
     required Uri uri,
+    required ResolvedPlaybackMediaType mediaTypeHint,
+    required bool? supportsByteRange,
     required Map<String, String> headers,
     required Map<String, String> cacheHeaders,
     required int bytesToFetch,
@@ -693,6 +701,19 @@ class StreamPreloadService {
     required int? sizeBytes,
     HttpStreamCacheKey? cacheKey,
   }) async {
+    if (mediaTypeHint == ResolvedPlaybackMediaType.file) {
+      return _prefetchDirectFile(
+        uri: uri,
+        cacheHeaders: cacheHeaders,
+        bytesToFetch: bytesToFetch,
+        startPosition: startPosition,
+        bitrateBitsPerSecond: bitrateBitsPerSecond,
+        sizeBytes: sizeBytes,
+        cacheKey: cacheKey,
+        supportsByteRange: supportsByteRange,
+      );
+    }
+
     final useOffset = startPosition > Duration.zero;
     final sniffBytes = useOffset ? 512 * 1024 : bytesToFetch;
     final firstCaptureLimit = useOffset
@@ -803,6 +824,64 @@ class StreamPreloadService {
       startPosition: startPosition,
       preloadDuration: preloadDuration,
     );
+  }
+
+  Future<_PreloadAttemptResult> _prefetchDirectFile({
+    required Uri uri,
+    required Map<String, String> cacheHeaders,
+    required int bytesToFetch,
+    required Duration startPosition,
+    required int? bitrateBitsPerSecond,
+    required int? sizeBytes,
+    required bool? supportsByteRange,
+    HttpStreamCacheKey? cacheKey,
+  }) async {
+    final prefixBytes =
+        startPosition > Duration.zero ? 512 * 1024 : bytesToFetch;
+    try {
+      await HttpStreamProxyServer.instance.warmRangeToCache(
+        remoteUri: uri,
+        httpHeaders: cacheHeaders,
+        fileName: _suggestProxyFileName(uri),
+        cacheKey: cacheKey,
+        startByte: 0,
+        lengthBytes: prefixBytes,
+      );
+    } catch (error) {
+      return _PreloadAttemptResult.failure(
+        _classifyException(error, url: uri.toString()),
+      );
+    }
+
+    if (startPosition <= Duration.zero || supportsByteRange == false) {
+      return const _PreloadAttemptResult.success();
+    }
+
+    final startByte = _estimateRangeStartBytes(
+      startPosition: startPosition,
+      bytesToFetch: bytesToFetch,
+      bitrateBitsPerSecond: bitrateBitsPerSecond,
+      sizeBytes: sizeBytes,
+    );
+    if (startByte <= 0) {
+      return const _PreloadAttemptResult.success();
+    }
+
+    try {
+      await HttpStreamProxyServer.instance.warmRangeToCache(
+        remoteUri: uri,
+        httpHeaders: cacheHeaders,
+        fileName: _suggestProxyFileName(uri),
+        cacheKey: cacheKey,
+        startByte: startByte,
+        lengthBytes: bytesToFetch,
+      );
+      return const _PreloadAttemptResult.success();
+    } catch (error) {
+      return _PreloadAttemptResult.failure(
+        _classifyException(error, url: uri.toString()),
+      );
+    }
   }
 
   int _estimateRangeStartBytes({

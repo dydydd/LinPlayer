@@ -36,6 +36,8 @@ class HttpStreamProxyServer {
   final Map<String, List<_HttpStreamProxyInFlightCacheWrite>>
       _inFlightCacheWrites =
       <String, List<_HttpStreamProxyInFlightCacheWrite>>{};
+  final Map<String, Future<HttpStreamWarmupResult>> _inFlightWarmups =
+      <String, Future<HttpStreamWarmupResult>>{};
   final List<_HttpStreamProxyDiagnosticEntry> _recentDiagnostics =
       <_HttpStreamProxyDiagnosticEntry>[];
 
@@ -109,6 +111,60 @@ class HttpStreamProxyServer {
     return _proxyUriFor(registered.baseUri, registered.entry);
   }
 
+  Future<HttpStreamWarmupResult> warmRangeToCache({
+    required Uri remoteUri,
+    Map<String, String>? httpHeaders,
+    String? fileName,
+    required int startByte,
+    required int lengthBytes,
+    HttpStreamCacheKey? cacheKey,
+  }) async {
+    final registered = await _ensureEntry(
+      remoteUri: remoteUri,
+      httpHeaders: httpHeaders,
+      fileName: fileName,
+      cacheKey: cacheKey,
+    );
+    final proxyUri = _proxyUriFor(registered.baseUri, registered.entry);
+    final normalizedStart = startByte < 0 ? 0 : startByte;
+    final normalizedLength = lengthBytes < 0 ? 0 : lengthBytes;
+    if (normalizedLength <= 0) {
+      return HttpStreamWarmupResult(
+        proxyUri: proxyUri,
+        effectiveRemoteUri: registered.entry.remoteUri,
+        startByte: normalizedStart,
+        requestedBytes: 0,
+        bytesWritten: 0,
+        satisfiedFromCache: true,
+        contentTypeMime: null,
+        totalBytes: null,
+        acceptRanges: false,
+      );
+    }
+
+    final dedupeKey =
+        '${registered.entry.fingerprint}|$normalizedStart|$normalizedLength';
+    final existing = _inFlightWarmups[dedupeKey];
+    if (existing != null) {
+      return existing;
+    }
+
+    final run = _warmRangeToCacheRegistered(
+      registered,
+      proxyUri: proxyUri,
+      startByte: normalizedStart,
+      lengthBytes: normalizedLength,
+    );
+    _inFlightWarmups[dedupeKey] = run;
+    try {
+      return await run;
+    } finally {
+      if (identical(_inFlightWarmups[dedupeKey], run)) {
+        _inFlightWarmups.remove(dedupeKey);
+      }
+    }
+  }
+
   void beginStreamWarmup({
     required Uri remoteUri,
     Map<String, String>? httpHeaders,
@@ -162,8 +218,8 @@ class HttpStreamProxyServer {
           (entry) => entry.snapshot(
             now: now,
             ttl: _entryTtl,
-            warmupInProgress: _warmupStates[entry.fingerprint]?.isActive ??
-                false,
+            warmupInProgress:
+                _warmupStates[entry.fingerprint]?.isActive ?? false,
           ),
         )
         .toList(growable: false);
@@ -287,6 +343,7 @@ class HttpStreamProxyServer {
     _entryIdByFingerprint.clear();
     _warmupStates.clear();
     _inFlightCacheWrites.clear();
+    _inFlightWarmups.clear();
     _recentDiagnostics.clear();
     final server = _server;
     _server = null;
@@ -339,6 +396,151 @@ class HttpStreamProxyServer {
       warmupInProgress:
           _warmupStates[registered.entry.fingerprint]?.isActive ?? false,
     );
+  }
+
+  Future<HttpStreamWarmupResult> _warmRangeToCacheRegistered(
+    _RegisteredProxyEntry registered, {
+    required Uri proxyUri,
+    required int startByte,
+    required int lengthBytes,
+  }) async {
+    final entry = registered.entry;
+    final requestedEnd = startByte + lengthBytes - 1;
+
+    var coverage = entry.cachedCoverageStartingAt(startByte);
+    if (_coverageSatisfiesLength(coverage, lengthBytes)) {
+      return HttpStreamWarmupResult(
+        proxyUri: proxyUri,
+        effectiveRemoteUri: entry.remoteUri,
+        startByte: startByte,
+        requestedBytes: lengthBytes,
+        bytesWritten: 0,
+        satisfiedFromCache: true,
+        contentTypeMime: coverage?.contentTypeMime,
+        totalBytes: coverage?.totalBytes,
+        acceptRanges: coverage?.acceptRanges ?? false,
+      );
+    }
+
+    final existingCovered = coverage?.lengthBytes ?? 0;
+    final missingStart = startByte + existingCovered;
+    final missingBytes = lengthBytes - existingCovered;
+
+    if (missingBytes <= 0) {
+      return HttpStreamWarmupResult(
+        proxyUri: proxyUri,
+        effectiveRemoteUri: entry.remoteUri,
+        startByte: startByte,
+        requestedBytes: lengthBytes,
+        bytesWritten: 0,
+        satisfiedFromCache: true,
+        contentTypeMime: coverage?.contentTypeMime,
+        totalBytes: coverage?.totalBytes,
+        acceptRanges: coverage?.acceptRanges ?? false,
+      );
+    }
+
+    final waited = await _awaitInFlightCacheWrite(
+      entry,
+      requestedStartByte: missingStart,
+    );
+    if (waited) {
+      coverage = entry.cachedCoverageStartingAt(startByte);
+      if (_coverageSatisfiesLength(coverage, lengthBytes)) {
+        return HttpStreamWarmupResult(
+          proxyUri: proxyUri,
+          effectiveRemoteUri: entry.remoteUri,
+          startByte: startByte,
+          requestedBytes: lengthBytes,
+          bytesWritten: 0,
+          satisfiedFromCache: true,
+          contentTypeMime: coverage?.contentTypeMime,
+          totalBytes: coverage?.totalBytes,
+          acceptRanges: coverage?.acceptRanges ?? false,
+        );
+      }
+    }
+
+    final requestRange = _CacheableRangeRequest(
+      startByte: missingStart,
+      endByte: requestedEnd,
+      hasRange: true,
+    );
+    final inFlightCacheWrite = _beginInFlightCacheWrite(
+      entry: entry,
+      startByte: missingStart,
+      plannedEndByteExclusive: requestedEnd + 1,
+    );
+    _OpenedRemote? remote;
+    try {
+      remote = await _openRemote(
+        entry,
+        requestUri: proxyUri,
+        method: 'GET',
+        range: 'bytes=$missingStart-$requestedEnd',
+        ifRange: null,
+      );
+
+      final cacheStartByte = _cacheStartByteForResponse(
+        requestRange: requestRange,
+        remote: remote.response,
+      );
+      if (cacheStartByte == null) {
+        throw StateError(
+          'range-not-cacheable:${remote.response.statusCode}',
+        );
+      }
+
+      await entry.updateRemoteUri(
+        _effectiveRemoteUriFromResponse(
+          remote.response,
+          fallback: entry.remoteUri,
+        ),
+      );
+
+      final contentTypeMime =
+          _contentTypeMimeFromHeaders(remote.response.headers);
+      final acceptRanges = _acceptsByteRanges(remote.response.headers) ||
+          remote.response.statusCode == HttpStatus.partialContent;
+      final totalBytes = _inferTotalBytesFromHeaders(
+        remote.response.statusCode,
+        remote.response.headers,
+        cacheStartByte,
+      );
+      final cacheResult = await _cacheRemoteToEntry(
+        entry: entry,
+        remote: remote.response,
+        cacheStartByte: cacheStartByte,
+        skipBytes: 0,
+        maxBytes: missingBytes,
+        contentTypeMime: contentTypeMime,
+        totalBytes: totalBytes,
+        acceptRanges: acceptRanges,
+      );
+      remote = null;
+      if (cacheResult.bytesRelayed <= 0) {
+        throw StateError('range-empty');
+      }
+      _notifyWarmupProgress(entry.fingerprint);
+
+      final snapshotCoverage = entry.cachedCoverageStartingAt(startByte);
+      return HttpStreamWarmupResult(
+        proxyUri: proxyUri,
+        effectiveRemoteUri: entry.remoteUri,
+        startByte: startByte,
+        requestedBytes: lengthBytes,
+        bytesWritten: cacheResult.bytesRelayed,
+        satisfiedFromCache: false,
+        contentTypeMime: snapshotCoverage?.contentTypeMime ?? contentTypeMime,
+        totalBytes: snapshotCoverage?.totalBytes ?? totalBytes,
+        acceptRanges: snapshotCoverage?.acceptRanges ?? acceptRanges,
+      );
+    } finally {
+      _finishInFlightCacheWrite(entry, inFlightCacheWrite);
+      if (remote != null) {
+        await remote.close();
+      }
+    }
   }
 
   Future<void> _ensureCacheRootDirectory() async {
@@ -1207,6 +1409,80 @@ class HttpStreamProxyServer {
     }
   }
 
+  Future<_RemoteCacheResult> _cacheRemoteToEntry({
+    required _HttpStreamProxyEntry entry,
+    required http.StreamedResponse remote,
+    required int cacheStartByte,
+    required int skipBytes,
+    required int? maxBytes,
+    required String? contentTypeMime,
+    required int? totalBytes,
+    required bool acceptRanges,
+  }) async {
+    final pendingFile = await entry.createPendingRangeFile(cacheStartByte);
+    final sink = pendingFile.openWrite();
+    var bytesRelayed = 0;
+    var remainingSkip = skipBytes < 0 ? 0 : skipBytes;
+    var remainingMax = maxBytes != null && maxBytes >= 0 ? maxBytes : null;
+    try {
+      await for (final chunk in remote.stream) {
+        var data = chunk;
+        if (remainingSkip > 0) {
+          if (remainingSkip >= data.length) {
+            remainingSkip -= data.length;
+            continue;
+          }
+          data = data.sublist(remainingSkip);
+          remainingSkip = 0;
+        }
+        if (data.isEmpty) continue;
+        if (remainingMax != null) {
+          if (remainingMax <= 0) break;
+          if (data.length > remainingMax) {
+            data = data.sublist(0, remainingMax);
+          }
+        }
+        if (data.isEmpty) continue;
+        sink.add(data);
+        bytesRelayed += data.length;
+        if (remainingMax != null) {
+          remainingMax -= data.length;
+          if (remainingMax <= 0) break;
+        }
+      }
+      await sink.flush();
+      await sink.close();
+      if (bytesRelayed > 0) {
+        await entry.storePendingRangeFile(
+          pendingFile: pendingFile,
+          startByte: cacheStartByte,
+          lengthBytes: bytesRelayed,
+          contentTypeMime: contentTypeMime,
+          totalBytes: totalBytes,
+          acceptRanges: acceptRanges,
+          maxRanges: _maxCachedRangesPerEntry,
+          maxBytes: _maxCachedBytesPerEntry,
+        );
+        return _RemoteCacheResult(bytesRelayed: bytesRelayed, cached: true);
+      }
+      try {
+        await pendingFile.delete();
+      } catch (_) {}
+      return const _RemoteCacheResult(bytesRelayed: 0, cached: false);
+    } catch (_) {
+      try {
+        await sink.flush();
+      } catch (_) {}
+      try {
+        await sink.close();
+      } catch (_) {}
+      try {
+        await pendingFile.delete();
+      } catch (_) {}
+      rethrow;
+    }
+  }
+
   Future<int> _drainRemoteToResponse(
     HttpResponse response,
     Stream<List<int>> stream,
@@ -1340,6 +1616,15 @@ class HttpStreamProxyServer {
     );
   }
 
+  static bool _coverageSatisfiesLength(
+    _HttpStreamProxyCachedCoverage? coverage,
+    int requiredBytes,
+  ) {
+    if (coverage == null) return false;
+    if (requiredBytes <= 0) return true;
+    return coverage.lengthBytes >= requiredBytes;
+  }
+
   static int? _cacheStartByteForResponse({
     required _CacheableRangeRequest requestRange,
     required http.StreamedResponse remote,
@@ -1411,6 +1696,19 @@ class HttpStreamProxyServer {
     final raw = _headerValue(headers, HttpHeaders.contentTypeHeader)?.trim();
     if (raw == null || raw.isEmpty) return null;
     return raw.split(';').first.trim();
+  }
+
+  static Uri _effectiveRemoteUriFromResponse(
+    http.StreamedResponse response, {
+    required Uri fallback,
+  }) {
+    if (response is http.BaseResponseWithUrl) {
+      final url = (response as http.BaseResponseWithUrl).url;
+      if (url.scheme.trim().isNotEmpty && url.host.trim().isNotEmpty) {
+        return url;
+      }
+    }
+    return fallback;
   }
 
   static bool _acceptsByteRanges(Map<String, String> headers) {
@@ -1699,6 +1997,14 @@ class _HttpStreamProxyEntry {
     lastFailureAt = now;
     final message = (error ?? '').toString().trim();
     lastFailureMessage = message.isEmpty ? 'unknown' : message;
+    await _writeMetadata();
+  }
+
+  Future<void> updateRemoteUri(Uri value) async {
+    if (remoteUri == value) return;
+    remoteUri = value;
+    lastUpdatedAt = DateTime.now();
+    expiresAt = lastUpdatedAt.add(HttpStreamProxyServer._entryTtl);
     await _writeMetadata();
   }
 
@@ -2027,7 +2333,8 @@ class _HttpStreamProxyEntry {
       final rawFailureMessage =
           decoded['lastFailureMessage']?.toString().trim() ?? '';
       lastFailureMessage = rawFailureMessage.isEmpty ? null : rawFailureMessage;
-      _hasObservedPlaybackRequest = decoded['hasObservedPlaybackRequest'] == true;
+      _hasObservedPlaybackRequest =
+          decoded['hasObservedPlaybackRequest'] == true;
 
       final ranges = decoded['ranges'];
       if (ranges is List) {
@@ -2199,6 +2506,30 @@ class _HttpStreamProxyCachedRange {
           DateTime.now(),
     );
   }
+}
+
+class HttpStreamWarmupResult {
+  const HttpStreamWarmupResult({
+    required this.proxyUri,
+    required this.effectiveRemoteUri,
+    required this.startByte,
+    required this.requestedBytes,
+    required this.bytesWritten,
+    required this.satisfiedFromCache,
+    required this.contentTypeMime,
+    required this.totalBytes,
+    required this.acceptRanges,
+  });
+
+  final Uri proxyUri;
+  final Uri effectiveRemoteUri;
+  final int startByte;
+  final int requestedBytes;
+  final int bytesWritten;
+  final bool satisfiedFromCache;
+  final String? contentTypeMime;
+  final int? totalBytes;
+  final bool acceptRanges;
 }
 
 class _RegisteredProxyEntry {

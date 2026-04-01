@@ -581,9 +581,218 @@ void main() {
     );
   });
 
+  test('HttpStreamProxyServer warmRangeToCache resumes partially cached ranges',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await server.close(force: true);
+    });
+
+    final observedRanges = <String?>[];
+    server.listen((HttpRequest req) async {
+      observedRanges.add(req.headers.value(HttpHeaders.rangeHeader));
+      final range = req.headers.value(HttpHeaders.rangeHeader);
+      req.response.statusCode = HttpStatus.partialContent;
+      req.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+      req.response.headers.contentType = ContentType('video', 'mp4');
+      if (range == 'bytes=4-7') {
+        req.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes 4-7/8',
+        );
+        req.response.contentLength = 4;
+        req.response.add(const <int>[4, 5, 6, 7]);
+      } else {
+        req.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes 0-3/8',
+        );
+        req.response.contentLength = 4;
+        req.response.add(const <int>[0, 1, 2, 3]);
+      }
+      await req.response.close();
+    });
+
+    final remoteUri = Uri.parse('http://127.0.0.1:${server.port}/media');
+    const headers = <String, String>{'User-Agent': 'BrowserUA'};
+    await HttpStreamProxyServer.instance.seedStreamCache(
+      remoteUri: remoteUri,
+      httpHeaders: headers,
+      fileName: 'video.mp4',
+      startByte: 0,
+      bytes: const <int>[0, 1, 2, 3],
+      contentTypeMime: 'video/mp4',
+      totalBytes: 8,
+      acceptRanges: true,
+    );
+
+    final first = await HttpStreamProxyServer.instance.warmRangeToCache(
+      remoteUri: remoteUri,
+      httpHeaders: headers,
+      fileName: 'video.mp4',
+      startByte: 0,
+      lengthBytes: 8,
+    );
+    final second = await HttpStreamProxyServer.instance.warmRangeToCache(
+      remoteUri: remoteUri,
+      httpHeaders: headers,
+      fileName: 'video.mp4',
+      startByte: 0,
+      lengthBytes: 8,
+    );
+
+    expect(first.bytesWritten, 4);
+    expect(first.satisfiedFromCache, isFalse);
+    expect(second.bytesWritten, 0);
+    expect(second.satisfiedFromCache, isTrue);
+    expect(observedRanges, <String?>['bytes=4-7']);
+
+    final proxyUri = await HttpStreamProxyServer.instance.registerStream(
+      remoteUri: remoteUri,
+      httpHeaders: headers,
+      fileName: 'video.mp4',
+    );
+
+    final client = HttpClient();
+    addTearDown(() {
+      client.close(force: true);
+    });
+
+    final response = await (await client.getUrl(proxyUri)).close();
+    final body = await response.fold<List<int>>(
+      <int>[],
+      (acc, chunk) => <int>[...acc, ...chunk],
+    );
+
+    expect(response.statusCode, HttpStatus.ok);
+    expect(body, <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  test(
+      'HttpStreamProxyServer warmRangeToCache records redirect-final URL for later tail fetch',
+      () async {
+    final upstreamProxy =
+        await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await upstreamProxy.close(force: true);
+    });
+
+    var startHits = 0;
+    var finalHits = 0;
+    final observedTargets = <String>[];
+    final observedRanges = <String?>[];
+
+    upstreamProxy.listen((HttpRequest request) async {
+      final target =
+          '${request.headers.value(HttpHeaders.hostHeader) ?? ''} ${request.uri}';
+      observedTargets.add(target);
+
+      if (target.contains('start.mp4')) {
+        startHits++;
+        request.response.statusCode = HttpStatus.found;
+        request.response.headers.set(
+          HttpHeaders.locationHeader,
+          'http://cdn.example.invalid/final.mp4',
+        );
+        await request.response.close();
+        return;
+      }
+
+      if (target.contains('final.mp4')) {
+        finalHits++;
+        final range = request.headers.value(HttpHeaders.rangeHeader);
+        observedRanges.add(range);
+        final bytes = <int>[0, 1, 2, 3, 4, 5, 6, 7];
+        if ((range ?? '').startsWith('bytes=4-')) {
+          request.response.statusCode = HttpStatus.partialContent;
+          request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+          request.response.headers.set(
+            HttpHeaders.contentRangeHeader,
+            'bytes 4-7/8',
+          );
+          request.response.headers.contentType = ContentType('video', 'mp4');
+          request.response.contentLength = 4;
+          request.response.add(bytes.sublist(4));
+          await request.response.close();
+          return;
+        }
+
+        request.response.statusCode = HttpStatus.partialContent;
+        request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+        request.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes 0-3/8',
+        );
+        request.response.headers.contentType = ContentType('video', 'mp4');
+        request.response.contentLength = 4;
+        request.response.add(bytes.sublist(0, 4));
+        await request.response.close();
+        return;
+      }
+
+      request.response.statusCode = HttpStatus.notFound;
+      await request.response.close();
+    });
+
+    final proxyUrl = 'http://127.0.0.1:${upstreamProxy.port}';
+    const remoteUrl = 'http://media.example.invalid/start.mp4';
+    final cacheKey = HttpStreamCacheKey.fromNetworkSource(
+      remoteUri: Uri.parse(remoteUrl),
+      httpHeaders: const <String, String>{},
+      mediaSourceId: 'ms-redirect-direct',
+      proxyUrl: proxyUrl,
+    );
+
+    final warmup = await HttpStreamProxyServer.instance.warmRangeToCache(
+      remoteUri: Uri.parse(remoteUrl),
+      httpHeaders: const <String, String>{},
+      fileName: 'start.mp4',
+      cacheKey: cacheKey,
+      startByte: 0,
+      lengthBytes: 4,
+    );
+
+    expect(warmup.effectiveRemoteUri.toString(),
+        'http://cdn.example.invalid/final.mp4');
+    expect(startHits, 1);
+    expect(finalHits, 1);
+
+    final proxyUri = await HttpStreamProxyServer.instance.registerStream(
+      remoteUri: Uri.parse(remoteUrl),
+      httpHeaders: const <String, String>{},
+      fileName: 'start.mp4',
+      cacheKey: cacheKey,
+    );
+
+    final client = HttpClient();
+    addTearDown(() {
+      client.close(force: true);
+    });
+
+    final response = await (await client.getUrl(proxyUri)).close();
+    final body = await response.fold<List<int>>(
+      <int>[],
+      (acc, chunk) => <int>[...acc, ...chunk],
+    );
+
+    expect(response.statusCode, HttpStatus.ok);
+    expect(body, <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(startHits, 1);
+    expect(finalHits, 2);
+    expect(
+      observedRanges.whereType<String>(),
+      contains(predicate<String>((value) => value.startsWith('bytes=4-'))),
+    );
+    expect(
+      observedTargets.where((value) => value.contains('start.mp4')).length,
+      1,
+    );
+  });
+
   test('HttpStreamProxyServer routes cache misses through the entry proxy',
       () async {
-    final upstreamProxy = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final upstreamProxy =
+        await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() async {
       await upstreamProxy.close(force: true);
     });

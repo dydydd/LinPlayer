@@ -161,6 +161,7 @@ Legacy TV Activity(XML/View)
 - 共享 source builder 内部已复用 STRM / redirect / body-link 解析逻辑，并把 `proxyUrl` 等元数据保留在 `ResolvedPlaybackSource` 中，供播放页与预加载共同消费。
 - `PlaybackPreloadCoordinator` 会把 `targetKind` 编进去重命名空间，因此 `currentItem` / `nextItem` 分开判重，但不会因为 `triggerSource` 不同而重复预热同一语义目标。
 - 预加载固定命中共享 `ResolvedPlaybackSource` 的远端 URL；若真实播放需要自定义 HTTP 代理，则通过 `httpProxyUrl` 继承代理语义，而不是改为命中本地回环代理 URL。
+- direct file / redirect file / body-link file 的预热已收口到 `HttpStreamProxyServer.warmRangeToCache(...)`：按 Range 直接写入磁盘缓存，续播场景会复用同一 `CacheKey` 追加热续播附近区间，并把 redirect-final URL 写回缓存元数据供后续播放补尾复用。
 
 行为：
 - 集详情页（`EpisodeDetailPage`）加载完成后，使用 UA `preload-linplayer` 预取：
