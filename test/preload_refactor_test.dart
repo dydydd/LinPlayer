@@ -830,6 +830,137 @@ void main() {
     expect(preloadProxyRequests, 1);
   });
 
+  test(
+      'StreamPreloadService records redirect-final URL so playback tail fetch skips the redirect hop',
+      () async {
+    final upstreamProxy = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await upstreamProxy.close(force: true);
+    });
+
+    var startHits = 0;
+    var finalHits = 0;
+    final observedTargets = <String>[];
+    final observedRanges = <String?>[];
+
+    upstreamProxy.listen((HttpRequest request) async {
+      final target =
+          '${request.headers.value(HttpHeaders.hostHeader) ?? ''} ${request.uri}';
+      observedTargets.add(target);
+
+      if (target.contains('start.mp4')) {
+        startHits++;
+        request.response.statusCode = HttpStatus.found;
+        request.response.headers.set(
+          HttpHeaders.locationHeader,
+          'http://cdn.example.invalid/final.mp4',
+        );
+        await request.response.close();
+        return;
+      }
+
+      if (target.contains('final.mp4')) {
+        finalHits++;
+        final range = request.headers.value(HttpHeaders.rangeHeader);
+        observedRanges.add(range);
+        final bytes = <int>[0, 1, 2, 3, 4, 5, 6, 7];
+        if ((range ?? '').startsWith('bytes=4-')) {
+          request.response.statusCode = HttpStatus.partialContent;
+          request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+          request.response.headers.set(
+            HttpHeaders.contentRangeHeader,
+            'bytes 4-7/8',
+          );
+          request.response.headers.contentType = ContentType('video', 'mp4');
+          request.response.contentLength = 4;
+          request.response.add(bytes.sublist(4));
+          await request.response.close();
+          return;
+        }
+
+        request.response.statusCode = HttpStatus.partialContent;
+        request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+        request.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes 0-3/8',
+        );
+        request.response.headers.contentType = ContentType('video', 'mp4');
+        request.response.contentLength = 4;
+        request.response.add(bytes.sublist(0, 4));
+        await request.response.close();
+        return;
+      }
+
+      request.response.statusCode = HttpStatus.notFound;
+      await request.response.close();
+    });
+
+    final proxyUrl = 'http://127.0.0.1:${upstreamProxy.port}';
+    const remoteUrl = 'http://media.example.invalid/start.mp4';
+    final resolvedSource = ResolvedPlaybackSource(
+      itemId: 'episode-redirect-final-url',
+      playSessionId: 'ps-redirect-final-url',
+      mediaSourceId: 'ms-redirect-final-url',
+      url: remoteUrl,
+      httpHeaders: const <String, String>{},
+      isExternal: true,
+      mediaTypeHint: ResolvedPlaybackMediaType.file,
+      fromStrm: false,
+      redirectChain: const <String>[remoteUrl],
+      bitrate: 8000000,
+      sizeBytes: 8,
+    );
+
+    final preloadResult =
+        await StreamPreloadService.instance.preloadResolvedSource(
+      PreloadRequest(
+        resolvedSource: resolvedSource,
+        triggerSource: 'detail_current',
+        httpProxyUrl: proxyUrl,
+      ),
+    );
+
+    expect(preloadResult.status, StreamPreloadStatus.success);
+    expect(startHits, 1);
+    expect(finalHits, 1);
+
+    final cacheKey = buildResolvedPlaybackCacheKey(
+      resolvedSource,
+      proxyUrl: proxyUrl,
+    );
+    final proxyUri = await HttpStreamProxyServer.instance.registerStream(
+      remoteUri: Uri.parse(remoteUrl),
+      httpHeaders: const <String, String>{},
+      fileName: 'start.mp4',
+      cacheKey: cacheKey,
+    );
+
+    final client = HttpClient();
+    addTearDown(() {
+      client.close(force: true);
+    });
+
+    final response = await (await client.getUrl(proxyUri)).close();
+    final body = await response.fold<List<int>>(
+      <int>[],
+      (acc, chunk) => <int>[...acc, ...chunk],
+    );
+
+    expect(response.statusCode, HttpStatus.ok);
+    expect(body, <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(startHits, 1);
+    expect(finalHits, 2);
+    expect(
+      observedRanges.whereType<String>(),
+      contains(predicate<String>((value) => value.startsWith('bytes=0-'))),
+    );
+    expect(observedRanges, contains('bytes=4-'));
+    expect(
+      observedTargets.where((value) => value.contains('start.mp4')).length,
+      1,
+    );
+  });
+
   test('StreamPreloadService merges concurrent in-flight requests', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() async {

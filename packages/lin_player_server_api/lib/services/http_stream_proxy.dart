@@ -1654,7 +1654,7 @@ class _HttpStreamProxyEntry {
   final String id;
   final String fingerprint;
   final HttpStreamCacheKey cacheKey;
-  final Uri remoteUri;
+  Uri remoteUri;
   final Map<String, String> httpHeaders;
   final List<String> localPathSegments;
   final Directory cacheDirectory;
@@ -2015,6 +2015,13 @@ class _HttpStreamProxyEntry {
 
       final rawUpdatedAt = decoded['lastUpdatedAt']?.toString().trim() ?? '';
       lastUpdatedAt = DateTime.tryParse(rawUpdatedAt) ?? lastUpdatedAt;
+      final rawRemoteUri = decoded['remoteUri']?.toString().trim() ?? '';
+      final storedRemoteUri = Uri.tryParse(rawRemoteUri);
+      if (storedRemoteUri != null &&
+          storedRemoteUri.scheme.trim().isNotEmpty &&
+          storedRemoteUri.host.trim().isNotEmpty) {
+        remoteUri = storedRemoteUri;
+      }
       lastFailureAt =
           DateTime.tryParse(decoded['lastFailureAt']?.toString() ?? '');
       final rawFailureMessage =

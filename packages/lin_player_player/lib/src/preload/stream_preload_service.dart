@@ -850,14 +850,18 @@ class StreamPreloadService {
     HttpStreamCacheKey? cacheKey,
   }) async {
     if (kIsWeb) return;
-    if (!_shouldSeedLoopbackCache(uri)) return;
+    final seedUri = result.effectiveUri;
+    if (!_shouldSeedLoopbackCache(seedUri)) return;
     if (result.capturedBytes.isEmpty) return;
 
     try {
       await HttpStreamProxyServer.instance.seedStreamCache(
-        remoteUri: uri,
+        // Keep the cache key bound to the original playback semantics, but let
+        // the proxy reuse the redirect-final transport URL for later cache
+        // fills so playback does not need to repeat the redirect hop.
+        remoteUri: seedUri,
         httpHeaders: headers,
-        fileName: _suggestProxyFileName(uri),
+        fileName: _suggestProxyFileName(seedUri),
         cacheKey: cacheKey,
         startByte: startByte,
         bytes: result.capturedBytes,
