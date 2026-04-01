@@ -1,587 +1,295 @@
-# 预加载重构任务清单
-
-> 配套文档：`docs/dev/PRELOAD_ASSESSMENT.md`
+# 预加载问题复盘与下一阶段任务清单
+> 更新日期：2026-04-01
 >
-> 目标不是“再做一个预加载功能”，而是把现有预加载从“页面侧 best-effort 功能”继续收敛为“播放器统一的底层能力”。
+> 配套文档：`docs/dev/PRELOAD_ASSESSMENT.md`
 
-## 1. 文档目的
+## 1. 当前结论
 
-本文把 `PRELOAD_ASSESSMENT.md` 中的评估结论，整理为可执行的开发任务清单，便于：
+当前“预加载”已经不是空功能，但它的本质仍然是：
 
-- 排期
-- 拆分阶段
-- 明确依赖关系
-- 定义验收标准
-- 作为后续实现与 review 的执行清单
+- 先按最终播放源做一轮网络预热
+- 尝试把首段字节灌进本地 loopback 代理缓存
+- 期望播放器后续请求能命中这部分缓存
 
-## 2. 当前问题摘要
+这条链路在少数场景下可能有收益，但它**还不等于真正的播放器缓冲复用**。
 
-当前预加载能力已经可用，但仍存在以下结构性问题：
+用户当前实测现象已经很明确：
 
-- 预加载和真实播放没有完全共享同一条 source pipeline
-- 对 STRM / 外链 / 重定向 / 本地回环代理的对齐不彻底
-- 去重 key 过粗
-- 熔断范围过大
-- 下一集预加载没有完整继承系列级版本选择
-- 缺少专门测试与运行期诊断
+- 电影、剧集进入播放后依然要等待加载
+- 等预加载完全跑完再点播放，依然会重新跑一次流量
+- 体感上并没有达到“直接播放”的效果
 
-因此这轮任务的核心方向只有一个：
+这说明我们当前方案的主要问题已经不是“有没有触发预加载”，而是：
 
-> 让预加载尽量消费“播放器最终要播放的 source 结果”，而不是自己重复做一遍选源和拼 URL。
+> 预加载拿到的字节，并没有被 MPV / EXO 以稳定、可靠、可复用的方式直接消费。
 
-## 3. 重构目标
+## 2. 为什么现在还是会重复加载
 
-### 3.1 主目标
+根因已经基本确认：
 
-- 统一预加载与真实播放的 source 决策链
-- 降低 `play_network_page*.dart` 与 `stream_preload_service.dart` 之间的重复逻辑
-- 提升 STRM / 外链 / 代理 / 多版本场景的一致性
-- 建立可观测、可测试、便于手工回归的预加载基础设施
+- MPV 当前仍然是 `player.open(Media(url))`，本质上还是给播放器一个 URL，让它自己重新开流。
+- EXO 当前仍然是 `VideoPlayerController.networkUrl(...)`，同样是播放器自己按 URL 发请求。
+- 我们现有的 loopback 代理缓存，只能在“播放器首个请求的 URL / Header / Range 恰好命中我们提前灌进去的缓存范围”时复用。
+- 一旦播放器实际请求模式和预热范围不一致，就会继续回源，导致重复流量和重新等待。
 
-### 3.2 次目标
+换句话说，现在的问题不是“预加载太少”，而是：
 
-- 减少页面层直接拼流 URL 的代码
-- 让详情页与播放页的预加载接入方式更统一
-- 为后续继续扩展预读策略保留稳定接口
+> 我们做的是“网络预热”，不是“播放器直接消费同一份本地缓存数据”。
 
-### 3.3 非目标
+## 3. 直接把预加载流怼进去播放，当前为什么做不到
 
-本轮不建议把范围扩大到以下方向：
+从现在的播放器接入方式看，直接把一段已经下载到内存里的视频字节“塞给播放器边播边续”，并不现实：
 
-- 不在本轮引入“任意时长可配置预加载”
-- 不在本轮做复杂 ABR 预测
-- 不在本轮追求 Web 端产品化支持
-- 不在本轮重写整个播放链路
+- MPV 目前接的是 URL / file 路径，不是我们可持续写入的自定义内存流。
+- EXO 当前 Flutter 接入层也是 URL / file / contentUri 这一类数据源，不是一个我们自己掌控的实时字节流接口。
+- `Media.memory` 这类能力更接近“一次性已有数据落临时文件”，不适合持续增长的网络视频流。
 
-## 4. 建议实施顺序
+所以这件事难，不是因为“预加载功能不好写”，而是因为：
 
-建议按以下阶段推进：
+> 要想真正复用，必须把播放器入口从“远端 URL”改造成“本地缓存代理 / 本地文件 / 可按需补齐的数据源”。
 
-1. Phase 0：补诊断与基线
-2. Phase 1：抽出统一的播放源准备阶段
-3. Phase 2：让预加载消费统一 source 描述
-4. Phase 3：统一详情页 / 播放页接入
-5. Phase 4：改造去重与熔断策略
-6. Phase 5：补 STRM / HLS / 代理专项处理
-7. Phase 6：测试与手工回归
-8. Phase 7：清理旧逻辑、补文档
+## 4. 方案决策
 
-如果时间紧，至少优先完成：
+结论已经很清楚，下一阶段不应继续在“首段内存缓存命中率”上做小修小补，而要切换到新的主方案：
 
-- Phase 0
-- Phase 1
-- Phase 2
+> 从“网络预热”升级为“磁盘落地的边下边播缓存”。
 
-这三步完成后，预加载的“底层能力”属性会明显提升。
+新方案目标：
 
-## 5. 任务总览
+- 预加载先把视频数据写入本地缓存
+- 播放时优先消费同一份本地缓存
+- 缓存缺哪一段，就由本地缓存代理继续回源补哪一段
+- 预加载和播放共享同一个缓存 key、同一个下载状态、同一份字节数据
 
-### 5.1 高优先级
+这样才能真正做到：
 
-- 统一 `play_network_page.dart`、`play_network_page_exo.dart` 与 `stream_preload_service.dart` 的 source 决策逻辑
-- 建立“最终播放 source”共享模型
-- 让预加载直接基于共享 source 做预热
-- 补预加载诊断日志与结果标记
+- 不重复下载已经拿到的前缀数据
+- 等预加载跑完后，进入播放页能明显更快起播
+- 甚至可以实现“先播已缓存部分，后面边下边补”
 
-### 5.2 中优先级
+## 5. 本阶段的设计边界
 
-- 缩小全局熔断范围
-- 扩展去重 key
-- 统一下一集预加载的版本继承逻辑
-- 补 HLS / STRM / 代理专项测试
+### 5.1 本阶段目标
 
-### 5.3 低优先级
+- 把“当前片源预加载”升级成“当前片源本地缓存预热”
+- 让 MPV / EXO 的实际播放优先走同一份本地缓存代理
+- 让“预加载完成后再进播放”不再重复跑前缀流量
+- 保持现有 `ResolvedPlaybackSource` / `PlaybackSourceBuilder` 主干不回退
 
-- 进一步优化 HLS rendition 选择策略
-- 增加更细粒度指标统计
-- 对预加载任务做更丰富的优先级调度
+### 5.2 本阶段不做
 
-## 6. Phase 0：补基线与诊断
+- 不在这一轮追求 Web 支持
+- 不在第一阶段就把 HLS ABR 做到完美
+- 不在第一阶段重写全部播放器接入层
+- 不在第一阶段做下载器产品化 UI
 
-### 6.1 目标
+## 6. 已确认可保留的成果
 
-在改结构之前，先让现有预加载可观测，避免后续重构后难以判断效果是否变好。
+这些已经做过的工作仍然有效，不需要推倒重来：
 
-### 6.2 任务项
-
-- [x] 为 `StreamPreloadService` 增加统一日志入口
-- [x] 记录每次预加载的触发来源
-  - 详情页当前项
-  - 详情页下一集
-  - 续看恢复点
-  - 播放结束前下一集
-- [x] 记录每次预加载的目标信息
-  - `itemId`
-  - `startPosition`
-  - `mediaSourceId`
-  - 是否 HLS
-  - 是否外链
-  - 是否走代理
-- [x] 记录执行结果
-  - success
-  - skippedDisabled
-  - skippedAlreadyDone
-  - failedDisabled
-  - 非致命失败原因
-- [x] 在 `app_diagnostics_report` 中加入预加载最近状态摘要
-
-### 6.3 建议涉及文件
-
-- `packages/lin_player_player/lib/src/preload/stream_preload_service.dart`
-- `lib/services/app_diagnostics_report.dart`
-- `lib/services/app_diagnostics_log.dart`
-- `lib/show_detail_page.dart`
-- `lib/play_network_page.dart`
-- `lib/play_network_page_exo.dart`
+- [x] `PlaybackSourceBuilder` / `ResolvedPlaybackSource` 已经统一了大部分播放源决策
+- [x] 详情页、MPV 播放页、EXO 播放页都已经接入统一预加载入口
+- [x] 当前片源 / 下一集 / 续播点预加载触发链路已经接通
+- [x] loopback 代理已具备基础缓存、warmup、range 处理能力
+- [x] MPV / EXO 的自动横竖屏和自动起播问题已单独修正
 
-### 6.4 验收标准
+这些工作会作为“本地缓存代理方案”的上游基础继续复用。
 
-- 能从日志中区分预加载是否触发、由谁触发、命中了什么 source、最终是否成功
-- 遇到“用户说没效果”时，能快速分辨是未触发、被判重、被熔断、还是实际请求失败
-- 构建后打开预加载选项，能通过手工点击路径直观看到日志与行为是否符合预期
+## 7. 下一阶段任务清单
 
-## 7. Phase 1：抽出统一的播放源准备阶段
+## Phase A：补全事实诊断
 
-### 7.1 目标
+目标：把“为什么没有复用”从主观体感变成可定位日志。
 
-把当前散落在播放页中的“播放源准备逻辑”抽成共享能力，避免 MPV / Exo / 预加载各自维护一套。
+- [ ] 给 MPV / EXO 首次播放请求增加诊断日志
+- [ ] 记录播放器首个请求的 URL、Range、Header 摘要
+- [ ] 记录 loopback 代理命中情况
+- [ ] 记录命中失败原因
+- [ ] 区分“缓存不存在 / 范围不覆盖 / Header 不一致 / 被直接回源”
+- [ ] 在诊断报告里加入“预加载缓存复用结果”摘要
 
-### 7.2 当前重复点
+验收标准：
 
-当前存在明显重复实现的区域：
+- 能明确回答“预加载完成后为什么还是重新跑流量”
+- 能区分是播放器请求模式问题，还是缓存覆盖范围问题
 
-- 版本选择逻辑
-- `playbackInfo` 拉取
-- 直链 / 转码 / `Path` 外链选择
-- query 参数附加
-- 同源判定
-- header 选择
+## Phase B：定义磁盘缓存模型
 
-这些逻辑目前同时存在于：
+目标：为“边下边播”建立稳定的数据结构。
 
-- `lib/play_network_page.dart`
-- `lib/play_network_page_exo.dart`
-- `packages/lin_player_player/lib/src/preload/stream_preload_service.dart`
+- [ ] 设计统一 `CacheKey`
+- [ ] `CacheKey` 至少纳入：
+  - [ ] 最终远端 URL 指纹
+  - [ ] 必要请求头指纹
+  - [ ] `mediaSourceId`
+  - [ ] 音轨 / 字幕选择
+  - [ ] 代理语义
+- [ ] 设计缓存目录结构
+- [ ] 设计元数据文件
+- [ ] 设计已完成字节区间描述
+- [ ] 设计缓存状态
+  - [ ] warming
+  - [ ] playable
+  - [ ] completed
+  - [ ] failed
+  - [ ] stale
+- [ ] 设计 TTL、清理、淘汰策略
 
-### 7.3 任务项
+验收标准：
 
-- [x] 设计一个共享的“已解析播放源”模型
-- [x] 抽一个统一 builder / resolver 服务，负责生成“播放器最终候选 source”
-- [x] 模型中至少包含以下字段
-  - 原始 `itemId`
-  - `playSessionId`
-  - `mediaSourceId`
-  - 最终 URL
-  - 最终 headers
-  - 是否外链
-  - 是否 HLS / DASH / file / unknown
-  - 码率 / size 等可选元数据
-  - 是否来自 STRM
-  - redirect / body-link / 代理相关信息
-- [x] 统一“同源判定 + query 参数附加”逻辑
-- [x] 统一“系列级媒体源偏好 + 手动选源 + 全局偏好”的决策逻辑
-- [x] 让 MPV 与 Exo 共同依赖这个共享 builder，而不是各自维护 `_buildStreamUrl`
-- [x] 尽量保留兼容层，避免一次性改动过大
+- 同一片源的预加载和播放能稳定映射到同一个 `CacheKey`
+- 能表达“前 8MB 已就绪、后续仍未完成”这种状态
 
-### 7.4 推荐落点
+## Phase C：实现磁盘写入下载器
 
-建议新建一个共享模块，命名可以在实现时再定，但方向建议如下：
+目标：把预加载从“只读网络”改成“持续写入本地缓存”。
 
-- `packages/lin_player_player/lib/src/source/`
+- [ ] 新建磁盘缓存下载器服务
+- [ ] 支持 HTTP Range 下载
+- [ ] 支持断点续写
+- [ ] 支持记录重定向后的最终 URL
+- [ ] 支持继承当前播放源的 Header / 代理配置
+- [ ] 支持并发去重
+- [ ] 支持下载进度通知
+- [ ] 支持失败重试和 scoped 熔断
 
-候选文件可以包括：
+验收标准：
 
-- `resolved_playback_source.dart`
-- `playback_source_builder.dart`
-- `playback_source_request.dart`
+- 能把当前片源前若干 MB 写入本地缓存文件
+- 重复触发同一片源预加载时，不会重复下载同一段
 
-### 7.5 建议涉及文件
+## Phase D：实现本地缓存代理
 
-- 新建共享 source 模块
-- `lib/play_network_page.dart`
-- `lib/play_network_page_exo.dart`
-- `lib/show_detail_page.dart`
-- `packages/lin_player_player/lib/src/preload/stream_preload_service.dart`
+目标：让播放器真正消费本地缓存，而不是碰运气命中内存前缀。
 
-### 7.6 验收标准
+- [ ] 新建“磁盘缓存代理”模式
+- [ ] 播放请求进入代理时，优先从磁盘缓存响应
+- [ ] 缓存缺失区间时，由代理按需拉远端并写回磁盘
+- [ ] 支持顺序播放
+- [ ] 支持显式 Range 请求
+- [ ] 支持 `bytes=start-end`
+- [ ] 支持 `bytes=start-`
+- [ ] 支持 HEAD / 元数据探测
+- [ ] 支持多请求并发读同一个缓存对象
+- [ ] 保证播放器只需要感知一个本地代理 URL
 
-- MPV 与 Exo 不再各自维护独立的 `_buildStreamUrl` 主要逻辑
-- 预加载不再需要自己复制一整套媒体源选择与 URL 拼装逻辑
-- 真实播放与预加载都能拿到同一份 source 描述
+验收标准：
 
-## 8. Phase 2：让预加载直接消费共享 source
+- 预加载完成前缀后，播放器首次请求前缀区间时不再重复回源
+- 同一片源播放期间，后续缺失区间会被边播边补
 
-### 8.1 目标
+## Phase E：播放链路切到统一缓存入口
 
-把 `StreamPreloadService` 从“自己构造 URL 的服务”改成“对既定播放 source 做预热的服务”。
+目标：让 MPV / EXO 实际播放走统一缓存代理。
 
-### 8.2 任务项
+- [ ] MPV 播放优先走本地缓存代理 URL
+- [ ] EXO 播放优先走本地缓存代理 URL
+- [ ] 当前片源预加载与实际播放共享同一个缓存对象
+- [ ] 去掉页面侧“等一下预加载”的临时策略
+- [ ] 保持自动播放、自动横竖屏、续播逻辑不回退
 
-- [x] 重新设计 `StreamPreloadService` 输入模型
-- [x] 新接口优先接收共享 source 描述，而不是只接收 `itemId + auth`
-- [x] 保留旧接口作为过渡 wrapper
-- [x] 旧接口内部也改为先走共享 source builder
-- [x] 让预加载逻辑优先基于“最终可播放 source”做请求
-- [x] 如果 source 已经经过 `LocalHttpStreamProxy` 包装，需要明确预加载应对“远端源”还是“本地回环源”生效
-- [x] 对 STRM / 外链 / redirect resolved source 做统一处理
+验收标准：
 
-### 8.3 设计建议
+- “等预加载完成后进入播放”时，首段不再重新下载
+- MPV 与 EXO 的表现一致，不再出现一个内核复用、另一个不复用
 
-建议把预加载服务拆成两层：
+## Phase F：续播点与下一集策略收口
 
-- 上层：负责触发策略与去重
-- 下层：负责对具体 source 做预热执行
+目标：让缓存预热和真实观看路径一致。
 
-这样好处是：
+- [ ] 当前片源从 0 秒开播时预热前缀区间
+- [ ] 当前片源从续播点进入时预热续播区间
+- [ ] 下一集预加载沿用系列级版本偏好
+- [ ] 当前集与下一集缓存 key 隔离
+- [ ] 详情页预热和播放页兜底预热共享同一缓存状态
 
-- 页面层只负责“什么时候预加载”
-- source builder 负责“预加载哪个 source”
-- preload executor 负责“怎么预加载这个 source”
+验收标准：
 
-### 8.4 建议涉及文件
+- 续播进入时，播放器优先命中续播点附近的缓存
+- 下一集预加载不会误热到错误版本
 
-- `packages/lin_player_player/lib/src/preload/stream_preload_service.dart`
-- 新建 `packages/lin_player_player/lib/src/preload/preload_request.dart`
-- 新建 `packages/lin_player_player/lib/src/preload/preload_executor.dart`
-- Phase 1 中的共享 source 模块
+## Phase G：HLS 专项
 
-### 8.5 验收标准
+目标：把 direct file 方案跑通后，再处理 HLS 的真实难点。
 
-- `StreamPreloadService` 不再维护一份独立的 `_buildStreamUrl`
-- STRM / 外链 / 代理命中率与真实播放 source 明显更一致
+- [ ] 先明确第一阶段是否只保证 direct file / redirect file / body-link file
+- [ ] 为 HLS 单独设计缓存策略
+- [ ] 明确是缓存最终 rendition，还是缓存 master/segment 层
+- [ ] 评估播放器实际所选 rendition 的可观测性
+- [ ] 评估 HLS 是否需要单独的本地清单重写方案
 
-## 9. Phase 3：统一详情页与播放页接入
+验收标准：
 
-### 9.1 目标
+- direct file 方案先稳定落地
+- HLS 不再混在主链路里模糊推进
 
-减少页面层各自拼参数、各自判断代理、各自决定版本的重复代码。
+## Phase H：测试与回归
 
-### 9.2 任务项
+目标：把这件事变成可持续维护能力。
 
-- [x] 统一详情页电影预加载入口
-- [x] 统一详情页剧集预加载入口
-- [x] 统一续看恢复点预加载入口
-- [x] 统一播放结束前下一集预加载入口
-- [x] 给所有入口提供统一的 `triggerSource` 标识
-- [x] 明确“当前项预加载”和“下一项预加载”所需元数据最小集合
-- [x] 统一代理传递逻辑，不再让某些入口自己猜代理、某些入口直接透传
+- [ ] 单测：`CacheKey` 稳定性
+- [ ] 单测：磁盘区间写入与读取
+- [ ] 单测：并发下载去重
+- [ ] 单测：代理范围请求命中
+- [ ] 单测：播放请求等待 in-flight 预加载后直接命中缓存
+- [ ] 集成测试：预加载完成后播放不重复下载前缀
+- [ ] 集成测试：播放中缺失区间边播边补
+- [ ] 手工回归：电影首播
+- [ ] 手工回归：剧集首播
+- [ ] 手工回归：续播进入
+- [ ] 手工回归：切集进入下一集
+- [ ] 手工回归：MPV / EXO 双内核一致性
 
-### 9.3 重点问题
+验收标准：
 
-这里特别要解决两件事：
+- 可以明确证明“流量没有重复跑前缀”
+- 可以明确证明“等待预加载完成后再点播放，起播更快”
 
-- 下一集预加载要不要继承当前剧集的 `mediaSourceId`
-- 详情页预加载是否应该先通过共享 source builder 得到真实 source，再交给预加载服务
+## 8. 推荐实施顺序
 
-建议结论是：
+建议严格按下面顺序推进：
 
-- 要继承系列级版本选择
-- 能拿到最终 source 时，不要再只传 `itemId`
+1. Phase A：先补诊断
+2. Phase B：定缓存模型
+3. Phase C：做磁盘下载器
+4. Phase D：做磁盘缓存代理
+5. Phase E：把 MPV / EXO 切过去
+6. Phase F：补续播与下一集
+7. Phase G：最后做 HLS
+8. Phase H：补测试与手工回归
 
-### 9.4 建议涉及文件
+不建议再继续在“当前内存前缀缓存命中率”这条线上投入太多时间。
 
-- `lib/show_detail_page.dart`
-- `lib/play_network_page.dart`
-- `lib/play_network_page_exo.dart`
+## 9. 第一优先级 TODO
 
-### 9.5 验收标准
+如果接下来只能先做一件事，优先做：
 
-- 详情页 / 播放页所有预加载调用点都改为走统一入口
-- 页面对预加载的直接参数拼装明显减少
+- [ ] 实现“磁盘缓存代理”最小可用版本，只覆盖 direct file / redirect file / body-link file
 
-## 10. Phase 4：重做去重与熔断策略
+这是最有可能直接改变用户体感的一步，因为它能第一次真正做到：
 
-### 10.1 目标
+- 预加载和播放共享同一份字节
+- 不再依赖播放器首个 Range 恰好命中内存前缀
+- 等预加载结束后进入播放，能直接利用已经落地的数据
 
-让预加载在实际使用中更稳，避免“一个坏片源打死整轮会话”。
+## 10. 完成定义
 
-### 10.2 去重改造任务
+当满足以下条件时，才算“预加载真正可用”：
 
-- [x] 扩展去重 key
-- [x] 至少纳入以下字段
-  - `itemId`
-  - `startPositionSec`
-  - `mediaSourceId`
-  - `audioStreamIndex`
-  - `subtitleStreamIndex`
-  - source URL 指纹
-  - 代理标识
-- [x] 明确“当前项”和“下一项”不共享去重空间
-- [x] 明确“详情页预热”和“播放页兜底预热”对同一语义目标共用命中记录
+- [ ] 等预加载完成后再进入播放，不会重复下载前缀数据
+- [ ] 电影首播可明显缩短等待
+- [ ] 剧集首播可明显缩短等待
+- [ ] 续播点附近可明显缩短等待
+- [ ] MPV / EXO 两个内核表现一致
+- [ ] 诊断日志能解释命中与未命中的原因
 
-说明：
-- 去重 key 继续基于 resolved source 本身计算，但会额外叠加 `targetKind` 命名空间
-- `currentItem` 与 `nextItem` 分开判重
-- `triggerSource` 不进入 key，因此详情页预热与播放页兜底预热可共享同一命中记录
+## 11. 最终判断
 
-### 10.3 熔断改造任务
+这件事确实难做，但难点已经不是“有没有思路”，而是：
 
-- [x] 把全局 `_permanentlyDisabled` 改为更细粒度状态
-- [x] 候选策略一：按 server/baseUrl 熔断
-- [x] 候选策略二：按错误类型熔断
-- [x] 候选策略三：按时间窗口 + 连续失败次数熔断
-- [x] 对不可恢复错误与临时网络错误做区分
-- [x] 为熔断恢复设计 TTL 或重试窗口
+> 现在必须从“网络预热优化”切换到“本地缓存代理架构”。
 
-### 10.4 建议涉及文件
+继续修现有方案，收益会越来越小；切到“磁盘落地的边下边播缓存”，才有机会真正解决你现在遇到的两个核心问题：
 
-- `packages/lin_player_player/lib/src/preload/stream_preload_service.dart`
-
-### 10.5 验收标准
-
-- 单个片源持续失败，不再导致本次运行内所有其它内容全部失去预加载能力
-- 用户切换版本后，不会因为 key 过粗被误判为“已经预加载”
-
-## 11. Phase 5：补 STRM / HLS / 代理专项处理
-
-### 11.1 目标
-
-补齐最容易让预加载“看似触发了但实际收益很差”的几类场景。
-
-### 11.2 STRM / 外链专项任务
-
-- [x] 确认共享 source builder 已正确复用 `stream_resolver`
-- [x] 复用 redirect resolved 结果
-- [x] 复用 body-link resolved 结果
-- [x] 对 cross-origin header 做统一裁剪策略
-- [x] 确认依赖 cookie / referer 的链接在预加载时不丢失必要 header
-
-### 11.3 本地回环代理专项任务
-
-- [x] 明确预加载固定命中远端 URL，而不是命中本地回环代理后的 URL
-- [x] 预加载远端 URL 时，通过共享 `ResolvedPlaybackSource` + `httpProxyUrl` 继承真实播放 source 的 header / redirect / 代理语义
-- [x] 设计结论：本轮不采用本地回环代理 URL 作为预加载目标，因此无需为该路径单独验证预热收益
-
-### 11.4 HLS 专项任务
-
-- [ ] 检查共享 source builder 能否提供更准确的 HLS 元数据
-- [x] 评估并暂时保留“最高带宽 variant”逻辑
-- [ ] 评估是否应优先命中播放器最终预计使用的 rendition
-- [x] 保留当前“最多 3 段”的安全上限，并把策略配置收拢到统一位置
-
-当前结论：
-- 现阶段仍保留“最高带宽 variant + 最多 3 段”的保守 HLS 预热策略
-- 待后续拿到更接近播放器最终对象的 ABR / rendition 预测信息后，再继续往最终命中策略收敛
-
-### 11.5 建议涉及文件
-
-- `lib/services/stream_resolver/`
-- `lib/services/stream_proxy/local_http_stream_proxy.dart`
-- `packages/lin_player_server_api/lib/services/http_stream_proxy.dart`
-- `packages/lin_player_player/lib/src/preload/stream_preload_service.dart`
-- Phase 1 中的共享 source 模块
-
-### 11.6 验收标准
-
-- STRM 多跳场景下，预加载与真实播放指向同一最终 source 的概率明显提高
-- 代理和外链场景中，预加载成功率不再明显落后于真实播放成功率
-
-## 12. Phase 6：测试与手工回归
-
-### 12.1 目标
-
-以“改完直接构建，打开预加载选项做手工回归”为主，必要时只补最值钱的自动化测试。
-
-### 12.2 首选手工回归流程
-
-建议每完成一个阶段，就直接构建对应平台包或运行调试构建，然后：
-
-1. 打开应用
-2. 进入设置页，开启“预加载”
-3. 分别验证电影、剧集、续看、下一集尾声触发等主路径
-4. 对照日志确认触发来源、目标 source、结果状态
-5. 对有问题的样本重点回放并修正
-
-### 12.3 手工回归清单
-
-- [ ] 电影详情页进入播放
-- [ ] 剧集详情页进入播放
-- [ ] 从续看历史恢复
-- [ ] 剧集尾声切到下一集
-- [ ] 手动切换不同版本后播放下一集
-- [ ] 自定义播放代理开启
-- [ ] Android Exo 路径
-- [ ] Android / TV MPV 路径
-- [ ] Windows / macOS 网络播放路径
-- [ ] iOS 网络播放路径
-
-### 12.4 可选自动化测试补点
-
-如果后面某些逻辑经常改、又容易回归，再补下面这些自动化测试；这部分不是当前推进的阻塞条件。
-
-- [x] 直链预加载成功
-- [x] 直链续看 offset 预加载成功
-- [x] HLS media playlist 预加载成功
-- [x] HLS master playlist 解析与 variant 选择
-- [x] 初始化段存在时能正确请求 init segment
-- [x] in-flight 合并正确
-- [x] 去重 key 区分不同 mediaSource
-- [x] 熔断策略按新规则工作
-- [x] 代理配置能正确传入
-- [x] 外链 / 同源 header 策略正确
-- [x] STRM -> redirect -> final media 测试链
-- [x] body-link 返回直链测试链
-- [x] 播放页与预加载共享 source builder 的一致性测试
-
-### 12.5 建议涉及文件
-
-- `test/` 下新增 preload 专项测试文件
-- 必要时为 source builder 单独建立测试文件
-
-### 12.6 验收标准
-
-- 每个阶段完成后，都能通过实际构建 + 开启预加载选项完成主路径手工验证
-- 关键问题能通过日志快速定位
-- 若后续补自动化测试，应优先覆盖最容易回归的 source 决策与预加载执行逻辑
-
-## 13. Phase 7：清理旧逻辑与文档收口
-
-### 13.1 目标
-
-在新实现通过实际构建与手工回归验证后，删除旧重复逻辑，并把文档与实现收口。
-
-### 13.2 任务项
-
-- [ ] 确认新链路通过手工回归后，删除旧版 `_buildStreamUrl` 复制逻辑
-- [ ] 清理页面层散落的预加载参数拼装代码
-- [x] 更新开发文档
-  - `ARCHITECTURE.md`
-  - `PRELOAD_ASSESSMENT.md`
-  - 本文档
-
-### 13.3 验收标准
-
-- 代码库中不再并存多份意义相同的预加载 URL 选择逻辑
-- 文档与实现一致
-
-## 14. 推荐拆分到 PR 的方式
-
-建议不要一个 PR 全做完，推荐按以下粒度拆分：
-
-### PR 1：诊断与基线
-
-- 只加日志与诊断
-- 不改功能行为
-
-### PR 2：共享 source 模型
-
-- 新增共享 source builder
-- 暂不切预加载
-
-### PR 3：MPV / Exo 切共享 source builder
-
-- 播放页先统一
-- 验证真实播放不回归
-
-### PR 4：预加载改接共享 source
-
-- 旧接口保留作兼容 wrapper
-
-### PR 5：去重与熔断改造
-
-- 单独 review 风险
-
-### PR 6：测试补齐与清理
-
-- 删除旧逻辑
-- 更新文档
-
-## 15. 建议新增的内部模型
-
-下面是建议引入的最小模型集合，命名可以在实现时调整。
-
-### 15.1 `ResolvedPlaybackSource`
-
-职责：
-
-- 表达“播放器最终准备播放的 source”
-
-建议字段：
-
-- `itemId`
-- `playSessionId`
-- `mediaSourceId`
-- `url`
-- `httpHeaders`
-- `isExternal`
-- `mediaTypeHint`
-- `fromStrm`
-- `redirectChain`
-- `contentTypeHint`
-- `supportsByteRange`
-- `bitrate`
-- `sizeBytes`
-- `proxyUrl`
-
-### 15.2 `PlaybackSourceBuildRequest`
-
-职责：
-
-- 表达构建 source 时所需输入
-
-建议字段：
-
-- `adapter`
-- `auth`
-- `itemId`
-- `startPosition`
-- `playerCoreKind`
-- `selectedMediaSourceId`
-- `audioStreamIndex`
-- `subtitleStreamIndex`
-- `preferredVideoVersion`
-- `seriesId`
-- `serverId`
-- `allowTranscoding`
-
-### 15.3 `PreloadRequest`
-
-职责：
-
-- 表达一次预加载任务，不直接关心页面来源
-
-建议字段：
-
-- `resolvedSource`
-- `triggerSource`
-- `startPosition`
-- `preloadDuration`
-- `dedupeFingerprint`
-
-## 16. 关键风险提示
-
-### 16.1 最大风险
-
-这轮重构最容易出问题的地方不是预加载本身，而是：
-
-- 播放页真实播放 source 的兼容性回归
-
-所以一定要坚持：
-
-- 先抽共享 builder
-- 先让真实播放稳定使用
-- 再把预加载切过去
-
-### 16.2 次级风险
-
-- 误把本地回环代理 source 当成预加载目标，导致收益不明显
-- 清理旧逻辑过早，丢失某些平台特例
-- HLS 策略切换后个别源首段命中率下降
-
-## 17. 完成定义
-
-当满足以下条件时，可以认为“预加载底层化”基本完成：
-
-- 真实播放与预加载共享同一套 source 构建结果
-- 详情页与播放页不再各自维护一套预加载拼参逻辑
-- 去重 key 与熔断策略达到可接受粒度
-- STRM / 外链 / 代理场景具备基本一致性
-- 预加载拥有独立测试与诊断闭环
-
-## 18. 最终建议
-
-如果只能做一件最重要的事，那就是：
-
-> 先把“最终播放 source”抽成共享能力，再让预加载消费它。
-
-这是整份任务清单里收益最大、对后续所有任务都有放大效果的一步。
+- 为什么预加载完了还是要等
+- 为什么明明预加载过了还会重复跑流量
