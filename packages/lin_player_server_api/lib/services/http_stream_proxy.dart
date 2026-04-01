@@ -18,6 +18,8 @@ class HttpStreamProxyServer {
   static const Duration _entryTtl = Duration(hours: 6);
   static const int _maxCachedRangesPerEntry = 4;
   static const int _maxCachedBytesPerEntry = 24 * 1024 * 1024;
+  static const Duration _warmupWaitTimeout = Duration(milliseconds: 1200);
+  static const Duration _warmupStateTtl = Duration(seconds: 15);
 
   HttpServer? _server;
   Uri? _baseUri;
@@ -26,6 +28,8 @@ class HttpStreamProxyServer {
   final Map<String, _HttpStreamProxyEntry> _entries =
       <String, _HttpStreamProxyEntry>{};
   final Map<String, String> _entryIdByFingerprint = <String, String>{};
+  final Map<String, _HttpStreamProxyWarmupState> _warmupStates =
+      <String, _HttpStreamProxyWarmupState>{};
 
   void configureHttpClientFactory(http.Client Function()? factory) {
     _httpClientFactory = factory;
@@ -86,12 +90,46 @@ class HttpStreamProxyServer {
       maxRanges: _maxCachedRangesPerEntry,
       maxBytes: _maxCachedBytesPerEntry,
     );
+    _notifyWarmupProgress(registered.entry.fingerprint);
     return _proxyUriFor(registered.baseUri, registered.entry);
+  }
+
+  void beginStreamWarmup({
+    required Uri remoteUri,
+    Map<String, String>? httpHeaders,
+  }) {
+    final fingerprint = _fingerprintFor(
+      remoteUri,
+      _sanitizeStoredHeaders(httpHeaders),
+    );
+    _pruneWarmupStates();
+    final state = _warmupStates.putIfAbsent(
+      fingerprint,
+      _HttpStreamProxyWarmupState.new,
+    );
+    state.begin();
+  }
+
+  void endStreamWarmup({
+    required Uri remoteUri,
+    Map<String, String>? httpHeaders,
+  }) {
+    final fingerprint = _fingerprintFor(
+      remoteUri,
+      _sanitizeStoredHeaders(httpHeaders),
+    );
+    final state = _warmupStates[fingerprint];
+    if (state == null) return;
+    state.finish();
+    if (state.canRemove) {
+      _warmupStates.remove(fingerprint);
+    }
   }
 
   Future<void> debugResetForTest() async {
     _entries.clear();
     _entryIdByFingerprint.clear();
+    _warmupStates.clear();
     final server = _server;
     _server = null;
     _baseUri = null;
@@ -171,6 +209,7 @@ class HttpStreamProxyServer {
   }
 
   void _pruneEntries() {
+    _pruneWarmupStates();
     if (_entries.isEmpty) return;
 
     final now = DateTime.now();
@@ -192,6 +231,40 @@ class HttpStreamProxyServer {
     for (var i = 0; i < overflow; i++) {
       _removeEntry(keysByLastAccess[i].key);
     }
+  }
+
+  void _pruneWarmupStates() {
+    if (_warmupStates.isEmpty) return;
+    final stale = <String>[];
+    for (final entry in _warmupStates.entries) {
+      final state = entry.value;
+      if (state.canRemove || state.isStale(_warmupStateTtl)) {
+        stale.add(entry.key);
+      }
+    }
+    for (final key in stale) {
+      _warmupStates.remove(key);
+    }
+  }
+
+  void _notifyWarmupProgress(String fingerprint) {
+    final state = _warmupStates[fingerprint];
+    if (state == null) return;
+    state.notifyProgress();
+    if (state.canRemove) {
+      _warmupStates.remove(fingerprint);
+    }
+  }
+
+  Future<void> _awaitWarmupProgress(_HttpStreamProxyEntry entry) async {
+    _pruneWarmupStates();
+    final state = _warmupStates[entry.fingerprint];
+    final signal = state?.waitForProgress();
+    if (signal == null) return;
+    try {
+      await signal.timeout(_warmupWaitTimeout);
+    } catch (_) {}
+    _pruneWarmupStates();
   }
 
   Future<void> _serve(HttpServer server) async {
@@ -236,7 +309,11 @@ class HttpStreamProxyServer {
             )
           : null;
       if (cacheRange != null) {
-        final cached = entry.cachedRangeStartingAt(cacheRange.startByte);
+        var cached = entry.cachedRangeStartingAt(cacheRange.startByte);
+        if (cached == null || cached.bytes.isEmpty) {
+          await _awaitWarmupProgress(entry);
+          cached = entry.cachedRangeStartingAt(cacheRange.startByte);
+        }
         if (cached != null && cached.bytes.isNotEmpty) {
           final served = await _tryServeCachedRange(
             request: request,
@@ -367,11 +444,28 @@ class HttpStreamProxyServer {
     required _CacheableRangeRequest range,
   }) async {
     final totalFromCache = cached.totalBytes;
-    if (range.hasRange && totalFromCache == null) {
+    final requestedEnd = range.endByte;
+    final requestedLength = requestedEnd == null
+        ? null
+        : requestedEnd - range.startByte + 1;
+    if (requestedLength != null && requestedLength <= 0) {
       return false;
     }
 
-    final nextStart = range.startByte + cached.bytes.length;
+    var cachedBytes = cached.bytes;
+    if (requestedLength != null && cachedBytes.length > requestedLength) {
+      cachedBytes = Uint8List.fromList(
+        cachedBytes.sublist(0, requestedLength),
+      );
+    }
+    if (range.hasRange &&
+        totalFromCache == null &&
+        requestedLength != null &&
+        cachedBytes.length >= requestedLength) {
+      return false;
+    }
+
+    final nextStart = range.startByte + cachedBytes.length;
     _OpenedRemote? remote;
     try {
       var totalBytes = totalFromCache;
@@ -379,13 +473,18 @@ class HttpStreamProxyServer {
       var acceptRanges = cached.acceptRanges;
       Stream<List<int>> tailStream = const Stream<List<int>>.empty();
       Map<String, String> remoteHeaders = const <String, String>{};
+      final needsRemoteTail = requestedLength != null
+          ? cachedBytes.length < requestedLength
+          : (totalBytes == null || nextStart < totalBytes);
 
-      if (totalBytes == null || nextStart < totalBytes) {
+      if (needsRemoteTail) {
         remote = await _openRemote(
           entry,
           requestUri: request.uri,
           method: request.method.toUpperCase(),
-          range: 'bytes=$nextStart-',
+          range: requestedEnd == null
+              ? 'bytes=$nextStart-'
+              : 'bytes=$nextStart-$requestedEnd',
           ifRange: request.headers.value(HttpHeaders.ifRangeHeader),
         );
         remoteHeaders = remote.response.headers;
@@ -418,9 +517,10 @@ class HttpStreamProxyServer {
         acceptRanges: acceptRanges,
         totalBytes: totalBytes,
         startByte: range.startByte,
+        endByte: requestedEnd,
         hasRange: range.hasRange,
       );
-      response.add(cached.bytes);
+      response.add(cachedBytes);
       await response.addStream(tailStream);
       remote = null;
       return true;
@@ -512,16 +612,25 @@ class HttpStreamProxyServer {
   static _CacheableRangeRequest? _parseCacheableRange(String? raw) {
     final value = raw?.trim() ?? '';
     if (value.isEmpty) {
-      return const _CacheableRangeRequest(startByte: 0, hasRange: false);
+      return const _CacheableRangeRequest(
+        startByte: 0,
+        endByte: null,
+        hasRange: false,
+      );
     }
 
     final match = RegExp(r'^bytes=(\d+)-(\d*)$').firstMatch(value);
     if (match == null) return null;
-    final end = match.group(2)?.trim() ?? '';
-    if (end.isNotEmpty) return null;
     final start = int.tryParse(match.group(1) ?? '');
     if (start == null || start < 0) return null;
-    return _CacheableRangeRequest(startByte: start, hasRange: true);
+    final endText = match.group(2)?.trim() ?? '';
+    final end = endText.isEmpty ? null : int.tryParse(endText);
+    if (end != null && end < start) return null;
+    return _CacheableRangeRequest(
+      startByte: start,
+      endByte: end,
+      hasRange: true,
+    );
   }
 
   static Stream<List<int>> _skipBytes(
@@ -623,6 +732,7 @@ class HttpStreamProxyServer {
     required bool acceptRanges,
     required int? totalBytes,
     required int startByte,
+    required int? endByte,
     required bool hasRange,
   }) {
     if ((contentTypeMime ?? '').trim().isNotEmpty) {
@@ -647,13 +757,14 @@ class HttpStreamProxyServer {
     _copyHeaderIfPresent(remoteHeaders, target, 'content-disposition');
 
     if (totalBytes == null) return;
-    final length = totalBytes - startByte;
+    final resolvedEnd = hasRange ? (endByte ?? totalBytes - 1) : totalBytes - 1;
+    final length = resolvedEnd - startByte + 1;
     if (length < 0) return;
 
     if (hasRange) {
       target.set(
         HttpHeaders.contentRangeHeader,
-        'bytes $startByte-${totalBytes - 1}/$totalBytes',
+        'bytes $startByte-$resolvedEnd/$totalBytes',
       );
     }
     target.set(HttpHeaders.contentLengthHeader, '$length');
@@ -801,11 +912,59 @@ class _RegisteredProxyEntry {
 class _CacheableRangeRequest {
   const _CacheableRangeRequest({
     required this.startByte,
+    required this.endByte,
     required this.hasRange,
   });
 
   final int startByte;
+  final int? endByte;
   final bool hasRange;
+}
+
+class _HttpStreamProxyWarmupState {
+  int _activeCount = 0;
+  DateTime _updatedAt = DateTime.now();
+  Completer<void>? _progress = Completer<void>();
+
+  bool get canRemove => _activeCount <= 0 && (_progress == null || _progress!.isCompleted);
+
+  bool isStale(Duration ttl) => DateTime.now().difference(_updatedAt) > ttl;
+
+  void begin() {
+    _activeCount += 1;
+    _updatedAt = DateTime.now();
+    if (_progress == null || _progress!.isCompleted) {
+      _progress = Completer<void>();
+    }
+  }
+
+  Future<void>? waitForProgress() {
+    if (_activeCount <= 0) return null;
+    _updatedAt = DateTime.now();
+    _progress ??= Completer<void>();
+    return _progress!.future;
+  }
+
+  void notifyProgress() {
+    _updatedAt = DateTime.now();
+    final current = _progress;
+    if (current != null && !current.isCompleted) {
+      current.complete();
+    }
+    _progress = _activeCount > 0 ? Completer<void>() : null;
+  }
+
+  void finish() {
+    if (_activeCount > 0) {
+      _activeCount -= 1;
+    }
+    _updatedAt = DateTime.now();
+    final current = _progress;
+    if (current != null && !current.isCompleted) {
+      current.complete();
+    }
+    _progress = _activeCount > 0 ? Completer<void>() : null;
+  }
 }
 
 class _OpenedRemote {

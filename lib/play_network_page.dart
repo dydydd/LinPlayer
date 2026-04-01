@@ -69,8 +69,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     with WidgetsBindingObserver, RouteAware {
   static const String _kLocalPlaybackProgressPrefix =
       'networkPlaybackProgress_v1:';
-  static const Duration _currentItemPreloadWarmupMaxWait =
-      Duration(milliseconds: 900);
 
   final PlayerService _playerService = getPlayerService();
   MediaKitThumbnailGenerator? _thumbnailer;
@@ -488,10 +486,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
             : 'playback_start',
       );
       if (preloadWarmup != null) {
-        await Future.any<void>(<Future<void>>[
-          preloadWarmup,
-          Future<void>.delayed(_currentItemPreloadWarmupMaxWait),
-        ]);
+        unawaited(preloadWarmup);
       }
 
       final playbackSource = await _buildPlaybackSource(resolvedSource);

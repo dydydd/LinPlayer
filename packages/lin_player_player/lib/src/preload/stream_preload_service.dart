@@ -428,58 +428,74 @@ class StreamPreloadService {
 
     final run = () async {
       _PreloadFailureInfo? lastFailure;
+      final source = normalizedRequest.resolvedSource;
+      final sourceUri = Uri.tryParse(source.url);
+      if (sourceUri != null) {
+        HttpStreamProxyServer.instance.beginStreamWarmup(
+          remoteUri: sourceUri,
+          httpHeaders: source.httpHeaders,
+        );
+      }
+      try {
+        for (var attempt = 0; attempt < maxAttempts; attempt++) {
+          final headers = _buildRequestHeaders(source.httpHeaders);
+          final bytesToFetch = _estimateBytesToFetch(
+            source.bitrate,
+            preloadDuration: normalizedRequest.preloadDuration,
+          );
+          final outcome = await _prefetch(
+            url: source.url,
+            headers: headers,
+            cacheHeaders: source.httpHeaders,
+            bytesToFetch: bytesToFetch,
+            startPosition: safeStartPosition,
+            preloadDuration: normalizedRequest.preloadDuration,
+            bitrateBitsPerSecond: source.bitrate,
+            sizeBytes: source.sizeBytes,
+            httpProxyUrl: normalizedRequest.httpProxyUrl,
+          );
+          if (outcome.success) {
+            _doneKeys.add(key);
+            _circuitStates.remove(scopeKey);
+            final result =
+                const StreamPreloadResult(StreamPreloadStatus.success);
+            _recordResult(request: normalizedRequest, result: result);
+            return result;
+          }
+          lastFailure = outcome.failure;
 
-      for (var attempt = 0; attempt < maxAttempts; attempt++) {
-        final source = normalizedRequest.resolvedSource;
-        final headers = _buildRequestHeaders(source.httpHeaders);
-        final bytesToFetch = _estimateBytesToFetch(
-          source.bitrate,
-          preloadDuration: normalizedRequest.preloadDuration,
-        );
-        final outcome = await _prefetch(
-          url: source.url,
-          headers: headers,
-          cacheHeaders: source.httpHeaders,
-          bytesToFetch: bytesToFetch,
-          startPosition: safeStartPosition,
-          preloadDuration: normalizedRequest.preloadDuration,
-          bitrateBitsPerSecond: source.bitrate,
-          sizeBytes: source.sizeBytes,
-          httpProxyUrl: normalizedRequest.httpProxyUrl,
-        );
-        if (outcome.success) {
-          _doneKeys.add(key);
-          _circuitStates.remove(scopeKey);
-          final result = const StreamPreloadResult(StreamPreloadStatus.success);
-          _recordResult(request: normalizedRequest, result: result);
-          return result;
+          if (attempt < maxAttempts - 1 &&
+              lastFailure != null &&
+              lastFailure.isRecoverable) {
+            await Future<void>.delayed(
+              Duration(milliseconds: attempt == 0 ? 180 : 320),
+            );
+          }
         }
-        lastFailure = outcome.failure;
 
-        if (attempt < maxAttempts - 1 &&
-            lastFailure != null &&
-            lastFailure.isRecoverable) {
-          await Future<void>.delayed(
-            Duration(milliseconds: attempt == 0 ? 180 : 320),
+        final failure = lastFailure ??
+            _PreloadFailureInfo(
+              category: _PreloadFailureCategory.unknown,
+              url: normalizedRequest.resolvedSource.url,
+              message: 'prefetch-failed',
+            );
+        final disabledNow = _recordFailure(scopeKey, failure);
+        final result = StreamPreloadResult(
+          disabledNow
+              ? StreamPreloadStatus.failedDisabled
+              : StreamPreloadStatus.failed,
+          error: failure,
+        );
+        _recordResult(request: normalizedRequest, result: result);
+        return result;
+      } finally {
+        if (sourceUri != null) {
+          HttpStreamProxyServer.instance.endStreamWarmup(
+            remoteUri: sourceUri,
+            httpHeaders: source.httpHeaders,
           );
         }
       }
-
-      final failure = lastFailure ??
-          _PreloadFailureInfo(
-            category: _PreloadFailureCategory.unknown,
-            url: normalizedRequest.resolvedSource.url,
-            message: 'prefetch-failed',
-          );
-      final disabledNow = _recordFailure(scopeKey, failure);
-      final result = StreamPreloadResult(
-        disabledNow
-            ? StreamPreloadStatus.failedDisabled
-            : StreamPreloadStatus.failed,
-        error: failure,
-      );
-      _recordResult(request: normalizedRequest, result: result);
-      return result;
     }();
 
     _inFlight[key] = run;

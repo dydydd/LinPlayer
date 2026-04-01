@@ -237,4 +237,68 @@ void main() {
     expect(upstreamRange, 'bytes=4-');
     expect(upstreamUa, 'BrowserUA');
   });
+
+  test('HttpStreamProxyServer waits for in-flight warmup before falling back upstream', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await server.close(force: true);
+    });
+
+    var upstreamHits = 0;
+    server.listen((HttpRequest req) async {
+      upstreamHits++;
+      req.response.statusCode = 200;
+      req.response.headers.contentType = ContentType('video', 'mp4');
+      req.response.contentLength = 8;
+      req.response.add(const <int>[9, 9, 9, 9, 9, 9, 9, 9]);
+      await req.response.close();
+    });
+
+    final remoteUri = Uri.parse('http://127.0.0.1:${server.port}/media');
+    const headers = <String, String>{'User-Agent': 'BrowserUA'};
+    final proxyUri = await HttpStreamProxyServer.instance.registerStream(
+      remoteUri: remoteUri,
+      httpHeaders: headers,
+      fileName: 'video.mp4',
+    );
+
+    HttpStreamProxyServer.instance.beginStreamWarmup(
+      remoteUri: remoteUri,
+      httpHeaders: headers,
+    );
+    unawaited(
+      Future<void>(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 180));
+        await HttpStreamProxyServer.instance.seedStreamCache(
+          remoteUri: remoteUri,
+          httpHeaders: headers,
+          fileName: 'video.mp4',
+          startByte: 0,
+          bytes: const <int>[0, 1, 2, 3, 4, 5, 6, 7],
+          contentTypeMime: 'video/mp4',
+          totalBytes: 8,
+          acceptRanges: true,
+        );
+        HttpStreamProxyServer.instance.endStreamWarmup(
+          remoteUri: remoteUri,
+          httpHeaders: headers,
+        );
+      }),
+    );
+
+    final client = HttpClient();
+    addTearDown(() {
+      client.close(force: true);
+    });
+
+    final response = await (await client.getUrl(proxyUri)).close();
+    final body = await response.fold<List<int>>(
+      <int>[],
+      (acc, chunk) => <int>[...acc, ...chunk],
+    );
+
+    expect(response.statusCode, 200);
+    expect(body, <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(upstreamHits, 0);
+  });
 }

@@ -64,8 +64,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     with WidgetsBindingObserver, RouteAware {
   static const String _kLocalPlaybackProgressPrefix =
       'networkPlaybackProgress_v1:';
-  static const Duration _currentItemPreloadWarmupMaxWait =
-      Duration(milliseconds: 900);
 
   ServerAccess? _serverAccess;
   VideoPlayerController? _controller;
@@ -4268,10 +4266,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
             : 'playback_start',
       );
       if (preloadWarmup != null) {
-        await Future.any<void>(<Future<void>>[
-          preloadWarmup,
-          Future<void>.delayed(_currentItemPreloadWarmupMaxWait),
-        ]);
+        unawaited(preloadWarmup);
       }
       final playbackSource = await _buildPlaybackSource(resolvedSource);
       _resolvedStream = playbackSource.url;
