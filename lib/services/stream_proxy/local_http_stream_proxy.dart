@@ -31,15 +31,17 @@ class LocalHttpStreamProxy {
 
   static Future<PlayableSource?> wrapPlaybackSource(
     PlayableSource candidate,
+    {HttpStreamCacheKey? cacheKey}
   ) async {
     if (kIsWeb) return null;
     if (!_supportsCacheProxyMode(candidate)) return null;
     if (!_isSupportedHttpSource(candidate)) return null;
-    return _wrapHttpSource(candidate);
+    return _wrapHttpSource(candidate, cacheKey: cacheKey);
   }
 
   static Future<PlayableSource?> _wrapHttpSource(
-      PlayableSource candidate) async {
+      PlayableSource candidate,
+      {HttpStreamCacheKey? cacheKey}) async {
     if (!_isSupportedHttpSource(candidate)) return null;
 
     final uri = Uri.tryParse(candidate.url.trim());
@@ -50,6 +52,7 @@ class LocalHttpStreamProxy {
         remoteUri: uri,
         httpHeaders: candidate.httpHeaders,
         fileName: _suggestFileName(uri),
+        cacheKey: cacheKey,
       );
       AppDiagnosticsLogger.instance.info(
         'loopback_proxy',

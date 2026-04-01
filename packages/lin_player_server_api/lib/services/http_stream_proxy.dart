@@ -3,10 +3,12 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 
 import '../network/lin_http_client.dart';
+import 'http_stream_cache.dart';
+
+export 'http_stream_cache.dart';
 
 class HttpStreamProxyServer {
   HttpStreamProxyServer._();
@@ -64,11 +66,13 @@ class HttpStreamProxyServer {
     required Uri remoteUri,
     Map<String, String>? httpHeaders,
     String? fileName,
+    HttpStreamCacheKey? cacheKey,
   }) async {
     final registered = await _ensureEntry(
       remoteUri: remoteUri,
       httpHeaders: httpHeaders,
       fileName: fileName,
+      cacheKey: cacheKey,
     );
     return _proxyUriFor(registered.baseUri, registered.entry);
   }
@@ -82,11 +86,13 @@ class HttpStreamProxyServer {
     String? contentTypeMime,
     int? totalBytes,
     bool acceptRanges = false,
+    HttpStreamCacheKey? cacheKey,
   }) async {
     final registered = await _ensureEntry(
       remoteUri: remoteUri,
       httpHeaders: httpHeaders,
       fileName: fileName,
+      cacheKey: cacheKey,
     );
     if (bytes.isNotEmpty) {
       await registered.entry.storeBytesRange(
@@ -106,12 +112,15 @@ class HttpStreamProxyServer {
   void beginStreamWarmup({
     required Uri remoteUri,
     Map<String, String>? httpHeaders,
+    HttpStreamCacheKey? cacheKey,
   }) {
-    final fingerprint = _fingerprintFor(
-      remoteUri,
-      _sanitizeStoredHeaders(httpHeaders),
-    );
     _pruneWarmupStates();
+    final fingerprint = (cacheKey ??
+            HttpStreamCacheKey.fromNetworkSource(
+              remoteUri: remoteUri,
+              httpHeaders: _sanitizeStoredHeaders(httpHeaders),
+            ))
+        .fingerprint;
     final state = _warmupStates.putIfAbsent(
       fingerprint,
       _HttpStreamProxyWarmupState.new,
@@ -122,11 +131,14 @@ class HttpStreamProxyServer {
   void endStreamWarmup({
     required Uri remoteUri,
     Map<String, String>? httpHeaders,
+    HttpStreamCacheKey? cacheKey,
   }) {
-    final fingerprint = _fingerprintFor(
-      remoteUri,
-      _sanitizeStoredHeaders(httpHeaders),
-    );
+    final fingerprint = (cacheKey ??
+            HttpStreamCacheKey.fromNetworkSource(
+              remoteUri: remoteUri,
+              httpHeaders: _sanitizeStoredHeaders(httpHeaders),
+            ))
+        .fingerprint;
     final state = _warmupStates[fingerprint];
     if (state == null) return;
     state.finish();
@@ -139,15 +151,31 @@ class HttpStreamProxyServer {
     _pruneEntries();
     _pruneWarmupStates();
     _pruneInFlightCacheWrites();
+    final now = DateTime.now();
     final inFlightCacheWrites = _inFlightCacheWrites.values.fold<int>(
       0,
       (sum, states) => sum + states.length,
     );
+    final stateCounts = <String, int>{};
+    final snapshots = _entries.values
+        .map(
+          (entry) => entry.snapshot(
+            now: now,
+            ttl: _entryTtl,
+            warmupInProgress: _warmupStates[entry.fingerprint]?.isActive ??
+                false,
+          ),
+        )
+        .toList(growable: false);
+    for (final snapshot in snapshots) {
+      _bumpCounter(stateCounts, snapshot.state.name);
+    }
     final buffer = StringBuffer()
       ..writeln('cacheRoot: ${_cacheRootDirectory.path}')
       ..writeln('entries: ${_entries.length}')
       ..writeln('warmups: ${_warmupStates.length}')
       ..writeln('inFlightCacheWrites: $inFlightCacheWrites')
+      ..writeln('cacheStates: ${_formatCounterSummary(stateCounts)}')
       ..writeln('recent:');
     if (_recentDiagnostics.isEmpty) {
       buffer.writeln('(empty)');
@@ -185,6 +213,7 @@ class HttpStreamProxyServer {
     _pruneEntries();
     _pruneWarmupStates();
     _pruneInFlightCacheWrites();
+    final now = DateTime.now();
 
     final playback = _recentDiagnostics
         .where((entry) => _isPlaybackMethod(entry.method))
@@ -207,11 +236,21 @@ class HttpStreamProxyServer {
 
     final reusedRequests =
         (cacheCounts['hit'] ?? 0) + (cacheCounts['partial'] ?? 0);
+    final cacheStateCounts = <String, int>{};
+    for (final entry in _entries.values) {
+      final snapshot = entry.snapshot(
+        now: now,
+        ttl: _entryTtl,
+        warmupInProgress: _warmupStates[entry.fingerprint]?.isActive ?? false,
+      );
+      _bumpCounter(cacheStateCounts, snapshot.state.name);
+    }
     final buffer = StringBuffer()
       ..writeln('observedRequests: ${playback.length}')
       ..writeln('reusedRequests: $reusedRequests')
       ..writeln('warmupWaits: $waitedWarmup')
       ..writeln('cacheFillWaits: $waitedCacheFill')
+      ..writeln('cacheStates: ${_formatCounterSummary(cacheStateCounts)}')
       ..writeln('reuseOutcomes: ${_formatCounterSummary(reuseCounts)}')
       ..writeln('cacheStatuses: ${_formatCounterSummary(cacheCounts)}')
       ..writeln('missReasons: ${_formatCounterSummary(missCounts)}');
@@ -263,6 +302,43 @@ class HttpStreamProxyServer {
         await root.delete(recursive: true);
       } catch (_) {}
     }
+  }
+
+  Future<void> markStreamFailure({
+    required Uri remoteUri,
+    Map<String, String>? httpHeaders,
+    HttpStreamCacheKey? cacheKey,
+    Object? error,
+  }) async {
+    final registered = await _ensureEntry(
+      remoteUri: remoteUri,
+      httpHeaders: httpHeaders,
+      cacheKey: cacheKey,
+      fileName: null,
+      touchExisting: false,
+    );
+    await registered.entry.recordFailure(error);
+  }
+
+  Future<HttpStreamCacheSnapshot> debugDescribeStream({
+    required Uri remoteUri,
+    Map<String, String>? httpHeaders,
+    HttpStreamCacheKey? cacheKey,
+    DateTime? now,
+  }) async {
+    final registered = await _ensureEntry(
+      remoteUri: remoteUri,
+      httpHeaders: httpHeaders,
+      cacheKey: cacheKey,
+      fileName: null,
+      touchExisting: false,
+    );
+    return registered.entry.snapshot(
+      now: now ?? DateTime.now(),
+      ttl: _entryTtl,
+      warmupInProgress:
+          _warmupStates[registered.entry.fingerprint]?.isActive ?? false,
+    );
   }
 
   Future<void> _ensureCacheRootDirectory() async {
@@ -351,17 +427,26 @@ class HttpStreamProxyServer {
     required Uri remoteUri,
     Map<String, String>? httpHeaders,
     String? fileName,
+    HttpStreamCacheKey? cacheKey,
+    bool touchExisting = true,
   }) async {
     final base = await ensureStarted();
     _pruneEntries();
 
     final sanitizedHeaders = _sanitizeStoredHeaders(httpHeaders);
-    final fingerprint = _fingerprintFor(remoteUri, sanitizedHeaders);
+    final resolvedCacheKey = cacheKey ??
+        HttpStreamCacheKey.fromNetworkSource(
+          remoteUri: remoteUri,
+          httpHeaders: sanitizedHeaders,
+        );
+    final fingerprint = resolvedCacheKey.fingerprint;
     final existingId = _entryIdByFingerprint[fingerprint];
     if (existingId != null) {
       final existing = _entries[existingId];
       if (existing != null) {
-        existing.touch();
+        if (touchExisting) {
+          existing.touch();
+        }
         return _RegisteredProxyEntry(baseUri: base, entry: existing);
       }
       _entryIdByFingerprint.remove(fingerprint);
@@ -375,6 +460,7 @@ class HttpStreamProxyServer {
     final entry = await _HttpStreamProxyEntry.create(
       id: id,
       fingerprint: fingerprint,
+      cacheKey: resolvedCacheKey,
       remoteUri: remoteUri,
       httpHeaders: sanitizedHeaders,
       localPathSegments: _localPathSegmentsFor(
@@ -842,8 +928,12 @@ class HttpStreamProxyServer {
     }
 
     unawaited(request.sink.close());
-    final response = await _httpClient.send(request);
-    return _OpenedRemote(response: response);
+    final client = _createHttpClientForEntry(entry);
+    final response = await client.send(request);
+    return _OpenedRemote(
+      response: response,
+      ownedClient: identical(client, _httpClient) ? null : client,
+    );
   }
 
   Future<_CachedServeResult> _tryServeCachedRange({
@@ -1130,6 +1220,25 @@ class HttpStreamProxyServer {
     return total;
   }
 
+  http.Client _createHttpClientForEntry(_HttpStreamProxyEntry entry) {
+    final proxy = (entry.cacheKey.proxyUrl ?? '').trim();
+    final proxyUri = proxy.isEmpty ? null : Uri.tryParse(proxy);
+    final hasProxy = proxyUri != null &&
+        proxyUri.host.trim().isNotEmpty &&
+        proxyUri.port > 0 &&
+        proxyUri.port <= 65535;
+    if (!hasProxy) {
+      return _httpClient;
+    }
+
+    return LinHttpClientFactory.createClient(
+      LinHttpClientFactory.config.copyWith(
+        userAgent: '',
+        proxyResolver: (_) => 'PROXY ${proxyUri.host}:${proxyUri.port}',
+      ),
+    );
+  }
+
   http.Client get _httpClient {
     return _client ??= (_httpClientFactory?.call() ??
         LinHttpClientFactory.createClient(
@@ -1288,18 +1397,6 @@ class HttpStreamProxyServer {
     final match = RegExp(r'^bytes\s+(\d+)-\d+/(\d+|\*)$').firstMatch(value);
     if (match == null) return null;
     return int.tryParse(match.group(1) ?? '');
-  }
-
-  static String _fingerprintFor(Uri remoteUri, Map<String, String> headers) {
-    final normalizedHeaders = headers.entries
-        .map((entry) => '${entry.key.toLowerCase()}:${entry.value.trim()}')
-        .toList(growable: false)
-      ..sort();
-    final payload = <String>[
-      remoteUri.toString(),
-      ...normalizedHeaders,
-    ].join('|');
-    return sha1.convert(utf8.encode(payload)).toString();
   }
 
   static String? _headerValue(Map<String, String> headers, String name) {
@@ -1512,12 +1609,14 @@ class _HttpStreamProxyEntry {
   _HttpStreamProxyEntry._({
     required this.id,
     required this.fingerprint,
+    required this.cacheKey,
     required this.remoteUri,
     required this.httpHeaders,
     required this.localPathSegments,
     required this.cacheDirectory,
     required DateTime now,
   })  : lastAccessedAt = now,
+        lastUpdatedAt = now,
         expiresAt = now.add(HttpStreamProxyServer._entryTtl),
         metadataFile = File(
           HttpStreamProxyServer._joinPath(
@@ -1531,6 +1630,7 @@ class _HttpStreamProxyEntry {
   static Future<_HttpStreamProxyEntry> create({
     required String id,
     required String fingerprint,
+    required HttpStreamCacheKey cacheKey,
     required Uri remoteUri,
     required Map<String, String> httpHeaders,
     required List<String> localPathSegments,
@@ -1540,6 +1640,7 @@ class _HttpStreamProxyEntry {
     final entry = _HttpStreamProxyEntry._(
       id: id,
       fingerprint: fingerprint,
+      cacheKey: cacheKey,
       remoteUri: remoteUri,
       httpHeaders: httpHeaders,
       localPathSegments: localPathSegments,
@@ -1552,6 +1653,7 @@ class _HttpStreamProxyEntry {
 
   final String id;
   final String fingerprint;
+  final HttpStreamCacheKey cacheKey;
   final Uri remoteUri;
   final Map<String, String> httpHeaders;
   final List<String> localPathSegments;
@@ -1560,7 +1662,10 @@ class _HttpStreamProxyEntry {
   final Map<int, _HttpStreamProxyCachedRange> _cachedRanges =
       <int, _HttpStreamProxyCachedRange>{};
   DateTime lastAccessedAt;
+  DateTime lastUpdatedAt;
   DateTime expiresAt;
+  DateTime? lastFailureAt;
+  String? lastFailureMessage;
   bool _hasObservedPlaybackRequest = false;
 
   bool get hasCachedRanges => _cachedRanges.isNotEmpty;
@@ -1568,6 +1673,7 @@ class _HttpStreamProxyEntry {
   void touch() {
     final now = DateTime.now();
     lastAccessedAt = now;
+    lastUpdatedAt = now;
     expiresAt = now.add(HttpStreamProxyServer._entryTtl);
     unawaited(_writeMetadata());
   }
@@ -1582,7 +1688,18 @@ class _HttpStreamProxyEntry {
   bool markObservedPlaybackRequest() {
     if (_hasObservedPlaybackRequest) return false;
     _hasObservedPlaybackRequest = true;
+    lastUpdatedAt = DateTime.now();
+    unawaited(_writeMetadata());
     return true;
+  }
+
+  Future<void> recordFailure(Object? error) async {
+    final now = DateTime.now();
+    lastUpdatedAt = now;
+    lastFailureAt = now;
+    final message = (error ?? '').toString().trim();
+    lastFailureMessage = message.isEmpty ? 'unknown' : message;
+    await _writeMetadata();
   }
 
   Future<void> storeBytesRange({
@@ -1775,6 +1892,8 @@ class _HttpStreamProxyEntry {
     required int maxRanges,
     required int maxBytes,
   }) async {
+    lastFailureAt = null;
+    lastFailureMessage = null;
     final existing = _cachedRanges[range.startByte];
     if (existing == null || range.lengthBytes >= existing.lengthBytes) {
       _cachedRanges[range.startByte] = range;
@@ -1827,6 +1946,59 @@ class _HttpStreamProxyEntry {
     await cacheDirectory.create(recursive: true);
   }
 
+  HttpStreamCacheSnapshot snapshot({
+    required DateTime now,
+    required Duration ttl,
+    required bool warmupInProgress,
+  }) {
+    final ranges = _cachedRanges.values.toList(growable: false)
+      ..sort((a, b) => a.startByte.compareTo(b.startByte));
+    final descriptors = ranges
+        .map(
+          (range) => HttpStreamCacheRange(
+            startByte: range.startByte,
+            lengthBytes: range.lengthBytes,
+          ),
+        )
+        .toList(growable: false);
+    final cachedBytes =
+        ranges.fold<int>(0, (sum, range) => sum + range.lengthBytes);
+    final contiguousBytesFromStart = _contiguousBytesFromStart(ranges);
+    final totalBytes = _resolveKnownTotalBytes(ranges);
+    final acceptRanges = ranges.any((range) => range.acceptRanges);
+
+    var state = HttpStreamCacheState.warming;
+    if (now.difference(lastUpdatedAt) > ttl) {
+      state = HttpStreamCacheState.stale;
+    } else if (totalBytes != null &&
+        totalBytes > 0 &&
+        contiguousBytesFromStart >= totalBytes) {
+      state = HttpStreamCacheState.completed;
+    } else if (cachedBytes > 0) {
+      state = HttpStreamCacheState.playable;
+    } else if (lastFailureAt != null ||
+        (lastFailureMessage ?? '').trim().isNotEmpty) {
+      state = HttpStreamCacheState.failed;
+    } else if (warmupInProgress) {
+      state = HttpStreamCacheState.warming;
+    }
+
+    return HttpStreamCacheSnapshot(
+      key: cacheKey,
+      state: state,
+      ranges: descriptors,
+      cachedBytes: cachedBytes,
+      contiguousBytesFromStart: contiguousBytesFromStart,
+      totalBytes: totalBytes,
+      acceptRanges: acceptRanges,
+      lastUpdatedAt: lastUpdatedAt,
+      warmupInProgress: warmupInProgress,
+      hasObservedPlaybackRequest: _hasObservedPlaybackRequest,
+      lastFailureAt: lastFailureAt,
+      lastFailureMessage: lastFailureMessage,
+    );
+  }
+
   Future<void> _loadFromDisk() async {
     await _ensureDirectory();
     if (!await metadataFile.exists()) {
@@ -1840,6 +2012,15 @@ class _HttpStreamProxyEntry {
         await _writeMetadata();
         return;
       }
+
+      final rawUpdatedAt = decoded['lastUpdatedAt']?.toString().trim() ?? '';
+      lastUpdatedAt = DateTime.tryParse(rawUpdatedAt) ?? lastUpdatedAt;
+      lastFailureAt =
+          DateTime.tryParse(decoded['lastFailureAt']?.toString() ?? '');
+      final rawFailureMessage =
+          decoded['lastFailureMessage']?.toString().trim() ?? '';
+      lastFailureMessage = rawFailureMessage.isEmpty ? null : rawFailureMessage;
+      _hasObservedPlaybackRequest = decoded['hasObservedPlaybackRequest'] == true;
 
       final ranges = decoded['ranges'];
       if (ranges is List) {
@@ -1865,16 +2046,48 @@ class _HttpStreamProxyEntry {
       await _ensureDirectory();
       final ordered = _cachedRanges.values.toList(growable: false)
         ..sort((a, b) => a.startByte.compareTo(b.startByte));
+      final snapshotNow = snapshot(
+        now: DateTime.now(),
+        ttl: HttpStreamProxyServer._entryTtl,
+        warmupInProgress: false,
+      );
       final payload = <String, Object?>{
-        'version': 1,
+        'version': 2,
+        'cacheKey': cacheKey.toJson(),
         'remoteUri': remoteUri.toString(),
         'httpHeaders': httpHeaders,
-        'lastUpdatedAt': DateTime.now().toIso8601String(),
+        'lastUpdatedAt': lastUpdatedAt.toIso8601String(),
+        'lastFailureAt': lastFailureAt?.toIso8601String(),
+        'lastFailureMessage': lastFailureMessage,
+        'hasObservedPlaybackRequest': _hasObservedPlaybackRequest,
+        'state': snapshotNow.state.name,
+        'cachedBytes': snapshotNow.cachedBytes,
+        'contiguousBytesFromStart': snapshotNow.contiguousBytesFromStart,
+        'totalBytes': snapshotNow.totalBytes,
         'ranges':
             ordered.map((entry) => entry.toJson()).toList(growable: false),
       };
       await metadataFile.writeAsString(jsonEncode(payload), flush: true);
     } catch (_) {}
+  }
+
+  int _contiguousBytesFromStart(List<_HttpStreamProxyCachedRange> ranges) {
+    var cursor = 0;
+    for (final range in ranges) {
+      if (range.startByte > cursor) break;
+      if (range.endExclusive > cursor) {
+        cursor = range.endExclusive;
+      }
+    }
+    return cursor;
+  }
+
+  int? _resolveKnownTotalBytes(List<_HttpStreamProxyCachedRange> ranges) {
+    for (final range in ranges) {
+      final total = range.totalBytes;
+      if (total != null && total > 0) return total;
+    }
+    return null;
   }
 }
 
@@ -2008,6 +2221,7 @@ class _HttpStreamProxyWarmupState {
   DateTime _updatedAt = DateTime.now();
   Completer<void>? _progress = Completer<void>();
 
+  bool get isActive => _activeCount > 0;
   bool get canRemove =>
       _activeCount <= 0 && (_progress == null || _progress!.isCompleted);
 
@@ -2088,13 +2302,18 @@ class _HttpStreamProxyInFlightCacheWrite {
 class _OpenedRemote {
   _OpenedRemote({
     required this.response,
+    this.ownedClient,
   });
 
   final http.StreamedResponse response;
+  final http.Client? ownedClient;
 
   Future<void> close() async {
     try {
       await response.stream.drain<void>();
+    } catch (_) {}
+    try {
+      ownedClient?.close();
     } catch (_) {}
   }
 }

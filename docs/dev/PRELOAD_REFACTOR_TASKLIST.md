@@ -117,22 +117,22 @@
 
 目标：为“边下边播”建立稳定的数据结构。
 
-- [ ] 设计统一 `CacheKey`
-- [ ] `CacheKey` 至少纳入：
-  - [ ] 最终远端 URL 指纹
-  - [ ] 必要请求头指纹
-  - [ ] `mediaSourceId`
-  - [ ] 音轨 / 字幕选择
-  - [ ] 代理语义
+- [x] 设计统一 `CacheKey`
+- [x] `CacheKey` 至少纳入：
+  - [x] 最终远端 URL 指纹
+  - [x] 必要请求头指纹
+  - [x] `mediaSourceId`
+  - [x] 音轨 / 字幕选择
+  - [x] 代理语义
 - [x] 设计缓存目录结构
 - [x] 设计元数据文件
 - [x] 设计已完成字节区间描述
-- [ ] 设计缓存状态
-  - [ ] warming
-  - [ ] playable
-  - [ ] completed
-  - [ ] failed
-  - [ ] stale
+- [x] 设计缓存状态
+  - [x] warming
+  - [x] playable
+  - [x] completed
+  - [x] failed
+  - [x] stale
 - [x] 设计 TTL、清理、淘汰策略
 
 验收标准：
@@ -227,7 +227,7 @@
 
 目标：把这件事变成可持续维护能力。
 
-- [ ] 单测：`CacheKey` 稳定性
+- [x] 单测：`CacheKey` 稳定性
 - [x] 单测：磁盘区间写入与读取
 - [x] 单测：并发下载去重
 - [x] 单测：代理范围请求命中

@@ -8,6 +8,7 @@ import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:lin_player_server_api/services/http_stream_proxy.dart';
 
+import '../source/playback_cache_key.dart';
 import '../source/playback_source_builder.dart';
 import '../source/resolved_playback_source.dart';
 import 'preload_request.dart';
@@ -96,45 +97,19 @@ class StreamPreloadService {
 
   String _keyFor(PreloadRequest request) {
     final source = request.resolvedSource;
-    final sourceUri = Uri.tryParse(source.url);
     final startSec = request.startPosition <= Duration.zero
         ? 0
         : request.startPosition.inSeconds;
-    final audioStreamIndex =
-        sourceUri?.queryParameters['AudioStreamIndex']?.trim() ?? '';
-    final subtitleStreamIndex =
-        sourceUri?.queryParameters['SubtitleStreamIndex']?.trim() ?? '';
-    final urlFingerprint =
+    final cacheFingerprint = _cacheKeyForRequest(request)?.fingerprint ??
         sha1.convert(utf8.encode(source.url.trim())).toString();
     final requestFingerprint = _fingerprintText(request.dedupeFingerprint);
-    final headersFingerprint = _headersFingerprint(source.httpHeaders);
-    final proxyFingerprint = _fingerprintText(_effectiveProxyUrlFor(request));
     return [
       source.itemId.trim(),
       source.mediaSourceId.trim(),
       '$startSec',
-      audioStreamIndex,
-      subtitleStreamIndex,
-      urlFingerprint,
       requestFingerprint,
-      headersFingerprint,
-      proxyFingerprint,
+      cacheFingerprint,
     ].join('|');
-  }
-
-  String _headersFingerprint(Map<String, String> headers) {
-    if (headers.isEmpty) return '';
-    final normalized = headers.entries
-        .where(
-          (entry) =>
-              entry.key.trim().isNotEmpty &&
-              entry.key.toLowerCase() != HttpHeaders.userAgentHeader,
-        )
-        .map((entry) => '${entry.key.toLowerCase()}:${entry.value.trim()}')
-        .toList(growable: false)
-      ..sort();
-    if (normalized.isEmpty) return '';
-    return sha1.convert(utf8.encode(normalized.join('|'))).toString();
   }
 
   String _fingerprintText(String? raw) {
@@ -149,6 +124,13 @@ class StreamPreloadService {
     final sourceProxy = (request.resolvedSource.proxyUrl ?? '').trim();
     if (sourceProxy.isNotEmpty) return sourceProxy;
     return null;
+  }
+
+  HttpStreamCacheKey? _cacheKeyForRequest(PreloadRequest request) {
+    return buildResolvedPlaybackCacheKey(
+      request.resolvedSource,
+      proxyUrl: _effectiveProxyUrlFor(request),
+    );
   }
 
   String _scopeKeyFor(PreloadRequest request) {
@@ -467,10 +449,12 @@ class StreamPreloadService {
       _PreloadFailureInfo? lastFailure;
       final source = normalizedRequest.resolvedSource;
       final sourceUri = Uri.tryParse(source.url);
+      final cacheKey = _cacheKeyForRequest(normalizedRequest);
       if (sourceUri != null) {
         HttpStreamProxyServer.instance.beginStreamWarmup(
           remoteUri: sourceUri,
           httpHeaders: source.httpHeaders,
+          cacheKey: cacheKey,
         );
       }
       try {
@@ -490,6 +474,7 @@ class StreamPreloadService {
             bitrateBitsPerSecond: source.bitrate,
             sizeBytes: source.sizeBytes,
             httpProxyUrl: normalizedRequest.httpProxyUrl,
+            cacheKey: cacheKey,
           );
           if (outcome.success) {
             _doneKeys.add(key);
@@ -523,6 +508,14 @@ class StreamPreloadService {
               : StreamPreloadStatus.failed,
           error: failure,
         );
+        if (sourceUri != null) {
+          await HttpStreamProxyServer.instance.markStreamFailure(
+            remoteUri: sourceUri,
+            httpHeaders: source.httpHeaders,
+            cacheKey: cacheKey,
+            error: failure,
+          );
+        }
         _recordResult(request: normalizedRequest, result: result);
         return result;
       } finally {
@@ -530,6 +523,7 @@ class StreamPreloadService {
           HttpStreamProxyServer.instance.endStreamWarmup(
             remoteUri: sourceUri,
             httpHeaders: source.httpHeaders,
+            cacheKey: cacheKey,
           );
         }
       }
@@ -613,6 +607,7 @@ class StreamPreloadService {
     required int? bitrateBitsPerSecond,
     required int? sizeBytes,
     String? httpProxyUrl,
+    HttpStreamCacheKey? cacheKey,
   }) async {
     if (kIsWeb) {
       return _PreloadAttemptResult.failure(
@@ -648,6 +643,7 @@ class StreamPreloadService {
         preloadDuration: preloadDuration,
         bitrateBitsPerSecond: bitrateBitsPerSecond,
         sizeBytes: sizeBytes,
+        cacheKey: cacheKey,
       );
     } catch (error) {
       return _PreloadAttemptResult.failure(
@@ -695,6 +691,7 @@ class StreamPreloadService {
     required Duration preloadDuration,
     required int? bitrateBitsPerSecond,
     required int? sizeBytes,
+    HttpStreamCacheKey? cacheKey,
   }) async {
     final useOffset = startPosition > Duration.zero;
     final sniffBytes = useOffset ? 512 * 1024 : bytesToFetch;
@@ -725,6 +722,7 @@ class StreamPreloadService {
           headers: cacheHeaders,
           startByte: 0,
           result: first,
+          cacheKey: cacheKey,
         );
         return first.bytesRead > 0
             ? const _PreloadAttemptResult.success()
@@ -749,6 +747,7 @@ class StreamPreloadService {
           headers: cacheHeaders,
           startByte: 0,
           result: first,
+          cacheKey: cacheKey,
         );
         return first.bytesRead > 0
             ? const _PreloadAttemptResult.success()
@@ -783,12 +782,14 @@ class StreamPreloadService {
         headers: cacheHeaders,
         startByte: 0,
         result: first,
+        cacheKey: cacheKey,
       );
       await _seedLoopbackProxyCache(
         uri: uri,
         headers: cacheHeaders,
         startByte: startByte,
         result: second,
+        cacheKey: cacheKey,
       );
       return const _PreloadAttemptResult.success();
     }
@@ -846,6 +847,7 @@ class StreamPreloadService {
     required Map<String, String> headers,
     required int startByte,
     required StreamPreloadGetResult result,
+    HttpStreamCacheKey? cacheKey,
   }) async {
     if (kIsWeb) return;
     if (!_shouldSeedLoopbackCache(uri)) return;
@@ -856,6 +858,7 @@ class StreamPreloadService {
         remoteUri: uri,
         httpHeaders: headers,
         fileName: _suggestProxyFileName(uri),
+        cacheKey: cacheKey,
         startByte: startByte,
         bytes: result.capturedBytes,
         contentTypeMime: result.contentTypeMime,

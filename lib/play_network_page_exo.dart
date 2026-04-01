@@ -4493,6 +4493,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   Future<PlayableSource> _buildPlaybackSource(
     ResolvedPlaybackSource resolvedSource,
   ) async {
+    final cacheKey = buildResolvedPlaybackCacheKey(
+      resolvedSource,
+      proxyUrl: _preloadHttpProxyUrl,
+    );
     final mediaType = switch (resolvedSource.mediaTypeHint) {
       ResolvedPlaybackMediaType.hls => StreamMediaType.hls,
       ResolvedPlaybackMediaType.dash => StreamMediaType.dash,
@@ -4509,7 +4513,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       supportsByteRange: resolvedSource.supportsByteRange,
       httpStatusHint: resolvedSource.httpStatusHint,
     );
-    final proxied = await LocalHttpStreamProxy.wrapPlaybackSource(candidate);
+    final proxied = await LocalHttpStreamProxy.wrapPlaybackSource(
+      candidate,
+      cacheKey: cacheKey,
+    );
     return proxied ?? candidate;
   }
 

@@ -2545,6 +2545,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   Future<PlayableSource> _buildPlaybackSource(
     ResolvedPlaybackSource resolvedSource,
   ) async {
+    final cacheKey = buildResolvedPlaybackCacheKey(
+      resolvedSource,
+      proxyUrl: _preloadHttpProxyUrl,
+    );
     final mediaType = switch (resolvedSource.mediaTypeHint) {
       ResolvedPlaybackMediaType.hls => StreamMediaType.hls,
       ResolvedPlaybackMediaType.dash => StreamMediaType.dash,
@@ -2561,7 +2565,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       supportsByteRange: resolvedSource.supportsByteRange,
       httpStatusHint: resolvedSource.httpStatusHint,
     );
-    final proxied = await LocalHttpStreamProxy.wrapPlaybackSource(candidate);
+    final proxied = await LocalHttpStreamProxy.wrapPlaybackSource(
+      candidate,
+      cacheKey: cacheKey,
+    );
     return proxied ?? candidate;
   }
 

@@ -19,4 +19,5 @@ export 'src/player/server_playback_progress_sync.dart';
 export 'src/player/thumbnail_generator.dart';
 export 'src/player/track_preferences.dart';
 export 'src/source/playback_source_builder.dart';
+export 'src/source/playback_cache_key.dart';
 export 'src/source/resolved_playback_source.dart';

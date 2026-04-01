@@ -187,6 +187,133 @@ void main() {
     expect(second, first);
   });
 
+  test('HttpStreamProxyServer isolates cache entries by proxy semantics',
+      () async {
+    final remote = Uri.parse('http://example.com/media/video.mp4');
+    final keyA = HttpStreamCacheKey.fromNetworkSource(
+      remoteUri: remote,
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      mediaSourceId: 'ms-1',
+      proxyUrl: 'http://127.0.0.1:7890',
+    );
+    final keyB = HttpStreamCacheKey.fromNetworkSource(
+      remoteUri: remote,
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      mediaSourceId: 'ms-1',
+      proxyUrl: 'http://127.0.0.1:7891',
+    );
+
+    final first = await HttpStreamProxyServer.instance.registerStream(
+      remoteUri: remote,
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      fileName: 'video.mp4',
+      cacheKey: keyA,
+    );
+    final second = await HttpStreamProxyServer.instance.registerStream(
+      remoteUri: remote,
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      fileName: 'video.mp4',
+      cacheKey: keyB,
+    );
+
+    expect(second, isNot(first));
+  });
+
+  test('HttpStreamProxyServer reports cache state lifecycle', () async {
+    final remote = Uri.parse('http://example.com/media/video.mp4');
+    final key = HttpStreamCacheKey.fromNetworkSource(
+      remoteUri: remote,
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      mediaSourceId: 'ms-state',
+      audioStreamIndex: 2,
+      subtitleStreamIndex: 5,
+      proxyUrl: 'http://127.0.0.1:7890',
+    );
+
+    HttpStreamProxyServer.instance.beginStreamWarmup(
+      remoteUri: remote,
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      cacheKey: key,
+    );
+    final warming = await HttpStreamProxyServer.instance.debugDescribeStream(
+      remoteUri: remote,
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      cacheKey: key,
+    );
+
+    await HttpStreamProxyServer.instance.seedStreamCache(
+      remoteUri: remote,
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      fileName: 'video.mp4',
+      cacheKey: key,
+      startByte: 0,
+      bytes: const <int>[0, 1, 2, 3],
+      contentTypeMime: 'video/mp4',
+      totalBytes: 8,
+      acceptRanges: true,
+    );
+    final playable = await HttpStreamProxyServer.instance.debugDescribeStream(
+      remoteUri: remote,
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      cacheKey: key,
+    );
+
+    await HttpStreamProxyServer.instance.seedStreamCache(
+      remoteUri: remote,
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      fileName: 'video.mp4',
+      cacheKey: key,
+      startByte: 4,
+      bytes: const <int>[4, 5, 6, 7],
+      contentTypeMime: 'video/mp4',
+      totalBytes: 8,
+      acceptRanges: true,
+    );
+    HttpStreamProxyServer.instance.endStreamWarmup(
+      remoteUri: remote,
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      cacheKey: key,
+    );
+    final completed = await HttpStreamProxyServer.instance.debugDescribeStream(
+      remoteUri: remote,
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      cacheKey: key,
+    );
+
+    final failedKey = HttpStreamCacheKey.fromNetworkSource(
+      remoteUri: remote,
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      mediaSourceId: 'ms-failed',
+    );
+    await HttpStreamProxyServer.instance.markStreamFailure(
+      remoteUri: remote,
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      cacheKey: failedKey,
+      error: StateError('warmup failed'),
+    );
+    final failed = await HttpStreamProxyServer.instance.debugDescribeStream(
+      remoteUri: remote,
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      cacheKey: failedKey,
+    );
+    final stale = await HttpStreamProxyServer.instance.debugDescribeStream(
+      remoteUri: remote,
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      cacheKey: key,
+      now: DateTime.now().add(const Duration(hours: 7)),
+    );
+
+    expect(warming.state, HttpStreamCacheState.warming);
+    expect(playable.state, HttpStreamCacheState.playable);
+    expect(playable.contiguousBytesFromStart, 4);
+    expect(completed.state, HttpStreamCacheState.completed);
+    expect(completed.cachedBytes, 8);
+    expect(completed.key.proxyUrl, 'http://127.0.0.1:7890');
+    expect(failed.state, HttpStreamCacheState.failed);
+    expect(failed.lastFailureMessage, contains('warmup failed'));
+    expect(stale.state, HttpStreamCacheState.stale);
+  });
+
   test('HttpStreamProxyServer summarizes first playback request details',
       () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -452,6 +579,54 @@ void main() {
       HttpStreamProxyServer.instance.buildDiagnosticsText(),
       contains('cache=hit'),
     );
+  });
+
+  test('HttpStreamProxyServer routes cache misses through the entry proxy',
+      () async {
+    final upstreamProxy = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await upstreamProxy.close(force: true);
+    });
+
+    var proxyHits = 0;
+    upstreamProxy.listen((HttpRequest req) async {
+      proxyHits++;
+      req.response.statusCode = 200;
+      req.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+      req.response.headers.contentType = ContentType('video', 'mp4');
+      req.response.contentLength = 4;
+      req.response.add(const <int>[0, 1, 2, 3]);
+      await req.response.close();
+    });
+
+    const remoteUrl = 'http://media.example.invalid/proxy-media.mp4';
+    final cacheKey = HttpStreamCacheKey.fromNetworkSource(
+      remoteUri: Uri.parse(remoteUrl),
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      mediaSourceId: 'ms-proxy-route',
+      proxyUrl: 'http://127.0.0.1:${upstreamProxy.port}',
+    );
+    final proxyUri = await HttpStreamProxyServer.instance.registerStream(
+      remoteUri: Uri.parse(remoteUrl),
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      fileName: 'proxy-media.mp4',
+      cacheKey: cacheKey,
+    );
+
+    final client = HttpClient();
+    addTearDown(() {
+      client.close(force: true);
+    });
+
+    final response = await (await client.getUrl(proxyUri)).close();
+    final body = await response.fold<List<int>>(
+      <int>[],
+      (acc, chunk) => <int>[...acc, ...chunk],
+    );
+
+    expect(response.statusCode, HttpStatus.ok);
+    expect(body, <int>[0, 1, 2, 3]);
+    expect(proxyHits, 1);
   });
 
   test('HttpStreamProxyServer reuses in-flight cache fill for concurrent GETs',

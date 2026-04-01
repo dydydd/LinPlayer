@@ -132,6 +132,72 @@ void main() {
     },
   );
 
+  test('buildResolvedPlaybackCacheKey is stable and tracks proxy semantics',
+      () {
+    final sourceA = ResolvedPlaybackSource(
+      itemId: 'item-cache-key',
+      playSessionId: 'ps-cache-key',
+      mediaSourceId: 'ms-cache-key',
+      url:
+          'https://media.example.com/Videos/item-cache-key/stream.mp4?AudioStreamIndex=2&SubtitleStreamIndex=5',
+      httpHeaders: const <String, String>{
+        'X-Auth': 'token',
+        'User-Agent': 'SourceUA/1.0',
+      },
+      isExternal: false,
+      mediaTypeHint: ResolvedPlaybackMediaType.file,
+      fromStrm: false,
+      redirectChain: const <String>[
+        'https://media.example.com/Videos/item-cache-key/stream.mp4',
+      ],
+    );
+    final sourceB = ResolvedPlaybackSource(
+      itemId: 'item-cache-key',
+      playSessionId: 'ps-cache-key-2',
+      mediaSourceId: 'ms-cache-key',
+      url:
+          'https://media.example.com/Videos/item-cache-key/stream.mp4?SubtitleStreamIndex=5&AudioStreamIndex=2',
+      httpHeaders: const <String, String>{
+        'User-Agent': 'SourceUA/1.0',
+        'X-Auth': 'token',
+      },
+      isExternal: false,
+      mediaTypeHint: ResolvedPlaybackMediaType.file,
+      fromStrm: false,
+      redirectChain: const <String>[
+        'https://media.example.com/Videos/item-cache-key/stream.mp4',
+      ],
+    );
+
+    final keyA = buildResolvedPlaybackCacheKey(
+      sourceA,
+      proxyUrl: 'http://127.0.0.1:7890',
+    );
+    final keyB = buildResolvedPlaybackCacheKey(
+      sourceB,
+      proxyUrl: 'http://127.0.0.1:7890',
+    );
+    final keyDifferentProxy = buildResolvedPlaybackCacheKey(
+      sourceB,
+      proxyUrl: 'http://127.0.0.1:7891',
+    );
+    final keyDifferentMedia = buildResolvedPlaybackCacheKey(
+      sourceB.copyWith(mediaSourceId: 'ms-other'),
+      proxyUrl: 'http://127.0.0.1:7890',
+    );
+
+    expect(keyA, isNotNull);
+    expect(keyB, isNotNull);
+    expect(keyA!.fingerprint, keyB!.fingerprint);
+    expect(keyA.audioStreamIndex, 2);
+    expect(keyA.subtitleStreamIndex, 5);
+    expect(keyA.proxyUrl, 'http://127.0.0.1:7890');
+    expect(keyDifferentProxy, isNotNull);
+    expect(keyDifferentMedia, isNotNull);
+    expect(keyDifferentProxy!.fingerprint, isNot(keyA.fingerprint));
+    expect(keyDifferentMedia!.fingerprint, isNot(keyA.fingerprint));
+  });
+
   group('PlaybackSourceBuilder', () {
     test(
       'preferred media source index wins and inherits query parameters',
@@ -711,22 +777,27 @@ void main() {
     });
 
     const remoteUrl = 'http://media.example.invalid/reused.mp4';
+    final resolvedSource = ResolvedPlaybackSource(
+      itemId: 'episode-cache-reuse',
+      playSessionId: 'ps-cache-reuse',
+      mediaSourceId: 'ms-cache-reuse',
+      url: remoteUrl,
+      httpHeaders: const <String, String>{},
+      isExternal: true,
+      mediaTypeHint: ResolvedPlaybackMediaType.file,
+      fromStrm: false,
+      redirectChain: const <String>[remoteUrl],
+      bitrate: 8000000,
+      sizeBytes: 8,
+    );
+    final cacheKey = buildResolvedPlaybackCacheKey(
+      resolvedSource,
+      proxyUrl: 'http://127.0.0.1:${preloadProxy.port}',
+    );
     final preloadResult =
         await StreamPreloadService.instance.preloadResolvedSource(
       PreloadRequest(
-        resolvedSource: const ResolvedPlaybackSource(
-          itemId: 'episode-cache-reuse',
-          playSessionId: 'ps-cache-reuse',
-          mediaSourceId: 'ms-cache-reuse',
-          url: remoteUrl,
-          httpHeaders: <String, String>{},
-          isExternal: true,
-          mediaTypeHint: ResolvedPlaybackMediaType.file,
-          fromStrm: false,
-          redirectChain: <String>[remoteUrl],
-          bitrate: 8000000,
-          sizeBytes: 8,
-        ),
+        resolvedSource: resolvedSource,
         triggerSource: 'detail_current',
         httpProxyUrl: 'http://127.0.0.1:${preloadProxy.port}',
       ),
@@ -739,6 +810,7 @@ void main() {
       remoteUri: Uri.parse(remoteUrl),
       httpHeaders: const <String, String>{},
       fileName: 'reused.mp4',
+      cacheKey: cacheKey,
     );
 
     final client = HttpClient();
