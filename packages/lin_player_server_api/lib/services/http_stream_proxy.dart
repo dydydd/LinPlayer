@@ -31,6 +31,9 @@ class HttpStreamProxyServer {
   final Map<String, String> _entryIdByFingerprint = <String, String>{};
   final Map<String, _HttpStreamProxyWarmupState> _warmupStates =
       <String, _HttpStreamProxyWarmupState>{};
+  final Map<String, List<_HttpStreamProxyInFlightCacheWrite>>
+      _inFlightCacheWrites =
+      <String, List<_HttpStreamProxyInFlightCacheWrite>>{};
   final List<_HttpStreamProxyDiagnosticEntry> _recentDiagnostics =
       <_HttpStreamProxyDiagnosticEntry>[];
 
@@ -135,10 +138,16 @@ class HttpStreamProxyServer {
   String buildDiagnosticsText({int maxEntries = 40}) {
     _pruneEntries();
     _pruneWarmupStates();
+    _pruneInFlightCacheWrites();
+    final inFlightCacheWrites = _inFlightCacheWrites.values.fold<int>(
+      0,
+      (sum, states) => sum + states.length,
+    );
     final buffer = StringBuffer()
       ..writeln('cacheRoot: ${_cacheRootDirectory.path}')
       ..writeln('entries: ${_entries.length}')
       ..writeln('warmups: ${_warmupStates.length}')
+      ..writeln('inFlightCacheWrites: $inFlightCacheWrites')
       ..writeln('recent:');
     if (_recentDiagnostics.isEmpty) {
       buffer.writeln('(empty)');
@@ -153,14 +162,82 @@ class HttpStreamProxyServer {
       buffer.writeln(
         '${entry.timestamp.toIso8601String()} '
         'method=${entry.method} '
+        'first=${entry.firstPlaybackRequest} '
         'status=${entry.statusCode} '
+        'reuse=${entry.reuseOutcome} '
         'cache=${entry.cacheStatus} '
         'reason=${entry.reason} '
+        'miss=${entry.missReason} '
         'warmupWait=${entry.waitedWarmup} '
+        'cacheFillWait=${entry.waitedCacheFill} '
+        'reqHeaders=${entry.requestHeadersSummary} '
         'range=${entry.rangeHeader.isEmpty ? "-" : entry.rangeHeader} '
         'cached=${entry.cachedBytes} '
         'remote=${entry.remoteBytes} '
+        'request=${_summarizeUrl(entry.requestUrl)} '
         'url=${_summarizeUrl(entry.remoteUrl)}',
+      );
+    }
+    return buffer.toString().trim();
+  }
+
+  String buildReuseSummaryText({int maxFirstRequests = 8}) {
+    _pruneEntries();
+    _pruneWarmupStates();
+    _pruneInFlightCacheWrites();
+
+    final playback = _recentDiagnostics
+        .where((entry) => _isPlaybackMethod(entry.method))
+        .toList(growable: false);
+    final cacheCounts = <String, int>{};
+    final missCounts = <String, int>{};
+    final reuseCounts = <String, int>{};
+    var waitedWarmup = 0;
+    var waitedCacheFill = 0;
+    for (final entry in playback) {
+      _bumpCounter(cacheCounts, entry.cacheStatus);
+      _bumpCounter(reuseCounts, entry.reuseOutcome);
+      final miss = entry.missReason.trim();
+      if (miss.isNotEmpty && miss != '-') {
+        _bumpCounter(missCounts, miss);
+      }
+      if (entry.waitedWarmup) waitedWarmup += 1;
+      if (entry.waitedCacheFill) waitedCacheFill += 1;
+    }
+
+    final reusedRequests =
+        (cacheCounts['hit'] ?? 0) + (cacheCounts['partial'] ?? 0);
+    final buffer = StringBuffer()
+      ..writeln('observedRequests: ${playback.length}')
+      ..writeln('reusedRequests: $reusedRequests')
+      ..writeln('warmupWaits: $waitedWarmup')
+      ..writeln('cacheFillWaits: $waitedCacheFill')
+      ..writeln('reuseOutcomes: ${_formatCounterSummary(reuseCounts)}')
+      ..writeln('cacheStatuses: ${_formatCounterSummary(cacheCounts)}')
+      ..writeln('missReasons: ${_formatCounterSummary(missCounts)}');
+
+    final firstRequests = playback
+        .where((entry) => entry.firstPlaybackRequest)
+        .toList(growable: false);
+    buffer.writeln('firstPlaybackRequests: ${firstRequests.length}');
+    if (firstRequests.isEmpty) {
+      buffer.writeln('(empty)');
+      return buffer.toString().trim();
+    }
+
+    final keep = maxFirstRequests < 1 ? 1 : maxFirstRequests;
+    final startIndex =
+        firstRequests.length > keep ? firstRequests.length - keep : 0;
+    for (final entry in firstRequests.skip(startIndex)) {
+      buffer.writeln(
+        '${entry.timestamp.toIso8601String()} '
+        'reuse=${entry.reuseOutcome} '
+        'cache=${entry.cacheStatus} '
+        'miss=${entry.missReason} '
+        'range=${entry.rangeHeader.isEmpty ? "-" : entry.rangeHeader} '
+        'reqHeaders=${entry.requestHeadersSummary} '
+        'request=${_summarizeUrl(entry.requestUrl)} '
+        'remote=${_summarizeUrl(entry.remoteUrl)}',
       );
     }
     return buffer.toString().trim();
@@ -170,6 +247,7 @@ class HttpStreamProxyServer {
     _entries.clear();
     _entryIdByFingerprint.clear();
     _warmupStates.clear();
+    _inFlightCacheWrites.clear();
     _recentDiagnostics.clear();
     final server = _server;
     _server = null;
@@ -330,10 +408,12 @@ class HttpStreamProxyServer {
     if (mappedId == key) {
       _entryIdByFingerprint.remove(removed.fingerprint);
     }
+    _inFlightCacheWrites.remove(removed.fingerprint);
   }
 
   void _pruneEntries() {
     _pruneWarmupStates();
+    _pruneInFlightCacheWrites();
     if (_entries.isEmpty) return;
 
     final now = DateTime.now();
@@ -380,6 +460,72 @@ class HttpStreamProxyServer {
     }
   }
 
+  void _pruneInFlightCacheWrites() {
+    if (_inFlightCacheWrites.isEmpty) return;
+    final staleFingerprints = <String>[];
+    for (final entry in _inFlightCacheWrites.entries) {
+      entry.value.removeWhere(
+        (state) => state.canRemove || state.isStale(_warmupStateTtl),
+      );
+      if (entry.value.isEmpty) {
+        staleFingerprints.add(entry.key);
+      }
+    }
+    for (final fingerprint in staleFingerprints) {
+      _inFlightCacheWrites.remove(fingerprint);
+    }
+  }
+
+  _HttpStreamProxyInFlightCacheWrite _beginInFlightCacheWrite({
+    required _HttpStreamProxyEntry entry,
+    required int startByte,
+    required int? plannedEndByteExclusive,
+  }) {
+    _pruneInFlightCacheWrites();
+    final state = _HttpStreamProxyInFlightCacheWrite(
+      startByte: startByte,
+      plannedEndByteExclusive: plannedEndByteExclusive,
+    );
+    _inFlightCacheWrites
+        .putIfAbsent(
+          entry.fingerprint,
+          () => <_HttpStreamProxyInFlightCacheWrite>[],
+        )
+        .add(state);
+    return state;
+  }
+
+  void _finishInFlightCacheWrite(
+    _HttpStreamProxyEntry entry,
+    _HttpStreamProxyInFlightCacheWrite state,
+  ) {
+    state.finish();
+    _pruneInFlightCacheWrites();
+  }
+
+  Future<bool> _awaitInFlightCacheWrite(
+    _HttpStreamProxyEntry entry, {
+    required int requestedStartByte,
+  }) async {
+    _pruneInFlightCacheWrites();
+    final states = _inFlightCacheWrites[entry.fingerprint];
+    if (states == null || states.isEmpty) return false;
+    final relevant = states
+        .where((state) => state.mightCover(requestedStartByte))
+        .toList(growable: false);
+    if (relevant.isEmpty) return false;
+    try {
+      await Future.any<void>(
+        relevant.map((state) => state.waitForCompletion()),
+      ).timeout(_warmupWaitTimeout);
+      _pruneInFlightCacheWrites();
+      return true;
+    } catch (_) {
+      _pruneInFlightCacheWrites();
+      return true;
+    }
+  }
+
   void _recordDiagnostic(_HttpStreamProxyDiagnosticEntry entry) {
     _recentDiagnostics.add(entry);
     if (_recentDiagnostics.length > _maxRecentDiagnostics) {
@@ -415,6 +561,8 @@ class HttpStreamProxyServer {
   Future<void> _handle(HttpRequest request) async {
     final response = request.response;
     _OpenedRemote? remote;
+    _HttpStreamProxyEntry? activeEntry;
+    _HttpStreamProxyInFlightCacheWrite? inFlightCacheWrite;
     final diag = _ProxyRequestTrace(
       method: request.method.toUpperCase(),
       rangeHeader:
@@ -428,6 +576,7 @@ class HttpStreamProxyServer {
         response.statusCode = HttpStatus.notFound;
         diag.statusCode = response.statusCode;
         diag.cacheStatus = 'reject';
+        diag.reuseOutcome = 'rejected';
         diag.reason = 'unknown-path';
         await response.close();
         return;
@@ -438,12 +587,19 @@ class HttpStreamProxyServer {
         response.statusCode = HttpStatus.notFound;
         diag.statusCode = response.statusCode;
         diag.cacheStatus = 'reject';
+        diag.reuseOutcome = 'rejected';
         diag.reason = 'unknown-entry';
         await response.close();
         return;
       }
+      activeEntry = entry;
       entry.touch();
       diag.remoteUrl = entry.remoteUri.toString();
+      diag.requestUrl =
+          (_baseUri?.resolveUri(request.uri) ?? request.uri).toString();
+      diag.requestHeadersSummary = _summarizeIncomingRequestHeaders(
+        request.headers,
+      );
 
       final method = request.method.toUpperCase();
       if (method != 'GET' && method != 'HEAD') {
@@ -451,10 +607,12 @@ class HttpStreamProxyServer {
         response.headers.set(HttpHeaders.allowHeader, 'GET, HEAD');
         diag.statusCode = response.statusCode;
         diag.cacheStatus = 'reject';
+        diag.reuseOutcome = 'rejected';
         diag.reason = 'method-not-allowed';
         await response.close();
         return;
       }
+      diag.firstPlaybackRequest = entry.markObservedPlaybackRequest();
 
       final cacheRange = _parseCacheableRange(
         request.headers.value(HttpHeaders.rangeHeader),
@@ -482,6 +640,7 @@ class HttpStreamProxyServer {
           diag.statusCode = response.statusCode;
           diag.cacheStatus = 'hit';
           diag.reason = 'head-metadata';
+          diag.reuseOutcome = 'cache-only';
           await response.close();
           return;
         }
@@ -492,6 +651,14 @@ class HttpStreamProxyServer {
         if (coverage == null || coverage.lengthBytes <= 0) {
           final waited = await _awaitWarmupProgress(entry);
           diag.waitedWarmup = waited;
+          coverage = entry.cachedCoverageStartingAt(cacheRange.startByte);
+        }
+        if (coverage == null || coverage.lengthBytes <= 0) {
+          final waited = await _awaitInFlightCacheWrite(
+            entry,
+            requestedStartByte: cacheRange.startByte,
+          );
+          diag.waitedCacheFill = waited;
           coverage = entry.cachedCoverageStartingAt(cacheRange.startByte);
         }
         if (coverage != null && coverage.lengthBytes > 0) {
@@ -506,11 +673,30 @@ class HttpStreamProxyServer {
             diag.statusCode = served.statusCode;
             diag.cacheStatus = served.remoteBytes > 0 ? 'partial' : 'hit';
             diag.reason = served.reason;
+            diag.reuseOutcome =
+                served.remoteBytes > 0 ? 'cache+remote-tail' : 'cache-only';
             diag.cachedBytes = served.cachedBytes;
             diag.remoteBytes = served.remoteBytes;
             return;
           }
+          if (served.reason.isNotEmpty) {
+            diag.missReason = served.reason;
+          }
+        } else {
+          diag.missReason = _classifyCacheMiss(
+            entry,
+            requestedStartByte: cacheRange.startByte,
+          );
         }
+      }
+
+      if (method == 'GET' && cacheRange != null) {
+        inFlightCacheWrite = _beginInFlightCacheWrite(
+          entry: entry,
+          startByte: cacheRange.startByte,
+          plannedEndByteExclusive:
+              cacheRange.endByte == null ? null : cacheRange.endByte! + 1,
+        );
       }
 
       remote = await _openRemote(
@@ -534,22 +720,43 @@ class HttpStreamProxyServer {
         );
         diag.cacheStatus = relay.cached ? 'miss' : 'remote';
         diag.reason = relay.reason;
+        diag.reuseOutcome = 'direct-upstream';
+        if (diag.missReason == '-' || diag.missReason.trim().isEmpty) {
+          diag.missReason = relay.reason;
+        }
         diag.remoteBytes = relay.bytesRelayed;
         remote = null;
       } else {
         diag.cacheStatus = 'miss';
         diag.reason = 'head-remote';
+        diag.reuseOutcome = 'direct-upstream';
+        if (diag.missReason == '-' || diag.missReason.trim().isEmpty) {
+          diag.missReason = 'head-remote';
+        }
       }
     } catch (_) {
-      response.statusCode = HttpStatus.badGateway;
-      diag.statusCode = response.statusCode;
+      diag.statusCode =
+          diag.statusCode == 0 ? HttpStatus.badGateway : diag.statusCode;
+      try {
+        response.statusCode = HttpStatus.badGateway;
+        response.headers
+            .set(HttpHeaders.contentTypeHeader, 'text/plain; charset=utf-8');
+        response.write('HTTP stream proxy error');
+      } catch (_) {}
       diag.cacheStatus = 'error';
       diag.reason = 'proxy-error';
-      response.headers
-          .set(HttpHeaders.contentTypeHeader, 'text/plain; charset=utf-8');
-      response.write('HTTP stream proxy error');
+      diag.reuseOutcome = 'proxy-error';
+      try {
+        await response.close();
+      } catch (_) {}
     } finally {
       _recordDiagnostic(diag.build());
+      if (activeEntry != null && inFlightCacheWrite != null) {
+        _finishInFlightCacheWrite(
+          activeEntry,
+          inFlightCacheWrite,
+        );
+      }
       if (remote != null) {
         await remote.close();
       }
@@ -651,7 +858,9 @@ class HttpStreamProxyServer {
     final requestedLength =
         requestedEnd == null ? null : requestedEnd - range.startByte + 1;
     if (requestedLength != null && requestedLength <= 0) {
-      return const _CachedServeResult.notServed();
+      return const _CachedServeResult.notServed(
+        reason: 'invalid-requested-range',
+      );
     }
 
     var cachedBytesToServe = coverage.lengthBytes;
@@ -662,11 +871,14 @@ class HttpStreamProxyServer {
         totalFromCache == null &&
         requestedLength != null &&
         cachedBytesToServe >= requestedLength) {
-      return const _CachedServeResult.notServed();
+      return const _CachedServeResult.notServed(
+        reason: 'range-total-unknown',
+      );
     }
 
     final nextStart = range.startByte + cachedBytesToServe;
     _OpenedRemote? remote;
+    _HttpStreamProxyInFlightCacheWrite? inFlightCacheWrite;
     try {
       var totalBytes = totalFromCache;
       var contentTypeMime = coverage.contentTypeMime;
@@ -677,6 +889,12 @@ class HttpStreamProxyServer {
           : (totalBytes == null || nextStart < totalBytes);
 
       if (needsRemoteTail) {
+        inFlightCacheWrite = _beginInFlightCacheWrite(
+          entry: entry,
+          startByte: nextStart,
+          plannedEndByteExclusive:
+              requestedEnd == null ? totalBytes : requestedEnd + 1,
+        );
         remote = await _openRemote(
           entry,
           requestUri: request.uri,
@@ -689,7 +907,9 @@ class HttpStreamProxyServer {
         final remoteStatus = remote.response.statusCode;
         if (range.hasRange && remoteStatus != HttpStatus.partialContent) {
           await remote.close();
-          return const _CachedServeResult.notServed();
+          return const _CachedServeResult.notServed(
+            reason: 'tail-range-ignored',
+          );
         }
 
         contentTypeMime ??=
@@ -703,7 +923,9 @@ class HttpStreamProxyServer {
         );
         if (range.hasRange && totalBytes == null) {
           await remote.close();
-          return const _CachedServeResult.notServed();
+          return const _CachedServeResult.notServed(
+            reason: 'tail-total-unknown',
+          );
         }
       }
 
@@ -765,7 +987,13 @@ class HttpStreamProxyServer {
       if (remote != null) {
         await remote.close();
       }
-      return const _CachedServeResult.notServed();
+      return const _CachedServeResult.notServed(
+        reason: 'cache-serve-error',
+      );
+    } finally {
+      if (inFlightCacheWrite != null) {
+        _finishInFlightCacheWrite(entry, inFlightCacheWrite);
+      }
     }
   }
 
@@ -1019,6 +1247,41 @@ class HttpStreamProxyServer {
     return null;
   }
 
+  String _classifyCacheMiss(
+    _HttpStreamProxyEntry entry, {
+    required int requestedStartByte,
+  }) {
+    final hasAlternateCachedEntry = _hasAlternateCachedEntry(
+      entry,
+      requestedStartByte: requestedStartByte,
+    );
+    if (!entry.hasCachedRanges) {
+      if (hasAlternateCachedEntry) return 'header-mismatch';
+      return 'cache-empty';
+    }
+    if (!entry.coversCachedByte(requestedStartByte)) {
+      if (hasAlternateCachedEntry) return 'header-mismatch';
+      return 'range-not-covered';
+    }
+    return 'cache-unusable';
+  }
+
+  bool _hasAlternateCachedEntry(
+    _HttpStreamProxyEntry entry, {
+    required int requestedStartByte,
+  }) {
+    for (final other in _entries.values) {
+      if (identical(other, entry) || other.fingerprint == entry.fingerprint) {
+        continue;
+      }
+      if (other.remoteUri != entry.remoteUri) continue;
+      if (!other.hasCachedRanges) continue;
+      if (!other.coversCachedByte(requestedStartByte)) continue;
+      return true;
+    }
+    return false;
+  }
+
   static int? _startByteFromContentRange(String? raw) {
     final value = raw?.trim() ?? '';
     if (value.isEmpty) return null;
@@ -1209,6 +1472,40 @@ class HttpStreamProxyServer {
     if (text.length <= limit) return text;
     return '${text.substring(0, limit - 3)}...';
   }
+
+  static String _summarizeIncomingRequestHeaders(HttpHeaders headers) {
+    final names = <String>{};
+    headers.forEach((name, values) {
+      final fixed = name.trim().toLowerCase();
+      if (fixed.isEmpty) return;
+      names.add(fixed);
+    });
+    if (names.isEmpty) return '-';
+    final sorted = names.toList(growable: false)..sort();
+    return sorted.join('|');
+  }
+
+  static bool _isPlaybackMethod(String method) {
+    final fixed = method.trim().toUpperCase();
+    return fixed == 'GET' || fixed == 'HEAD';
+  }
+
+  static void _bumpCounter(Map<String, int> counts, String key) {
+    final fixed = key.trim();
+    if (fixed.isEmpty) return;
+    counts[fixed] = (counts[fixed] ?? 0) + 1;
+  }
+
+  static String _formatCounterSummary(Map<String, int> counts) {
+    if (counts.isEmpty) return '(empty)';
+    final entries = counts.entries.toList(growable: false)
+      ..sort((a, b) {
+        final countCmp = b.value.compareTo(a.value);
+        if (countCmp != 0) return countCmp;
+        return a.key.compareTo(b.key);
+      });
+    return entries.map((entry) => '${entry.key}=${entry.value}').join(', ');
+  }
 }
 
 class _HttpStreamProxyEntry {
@@ -1264,12 +1561,28 @@ class _HttpStreamProxyEntry {
       <int, _HttpStreamProxyCachedRange>{};
   DateTime lastAccessedAt;
   DateTime expiresAt;
+  bool _hasObservedPlaybackRequest = false;
+
+  bool get hasCachedRanges => _cachedRanges.isNotEmpty;
 
   void touch() {
     final now = DateTime.now();
     lastAccessedAt = now;
     expiresAt = now.add(HttpStreamProxyServer._entryTtl);
     unawaited(_writeMetadata());
+  }
+
+  bool coversCachedByte(int byteOffset) {
+    for (final range in _cachedRanges.values) {
+      if (range.coversByte(byteOffset)) return true;
+    }
+    return false;
+  }
+
+  bool markObservedPlaybackRequest() {
+    if (_hasObservedPlaybackRequest) return false;
+    _hasObservedPlaybackRequest = true;
+    return true;
   }
 
   Future<void> storeBytesRange({
@@ -1326,6 +1639,14 @@ class _HttpStreamProxyEntry {
     final finalPath =
         HttpStreamProxyServer._joinPath(cacheDirectory.path, finalName);
     final finalFile = File(finalPath);
+    List<int>? fallbackBytes;
+    if (Platform.isWindows) {
+      try {
+        if (await pendingFile.exists()) {
+          fallbackBytes = await pendingFile.readAsBytes();
+        }
+      } catch (_) {}
+    }
     try {
       if (await finalFile.exists()) {
         await finalFile.delete();
@@ -1336,12 +1657,22 @@ class _HttpStreamProxyEntry {
     try {
       storedFile = await pendingFile.rename(finalPath);
     } catch (_) {
-      await finalFile.writeAsBytes(await pendingFile.readAsBytes(),
-          flush: true);
-      storedFile = finalFile;
-      try {
-        await pendingFile.delete();
-      } catch (_) {}
+      await _ensureDirectory();
+      if (await finalFile.exists()) {
+        storedFile = finalFile;
+      } else if (await pendingFile.exists()) {
+        await finalFile.writeAsBytes(await pendingFile.readAsBytes(),
+            flush: true);
+        storedFile = finalFile;
+        try {
+          await pendingFile.delete();
+        } catch (_) {}
+      } else if (fallbackBytes != null && fallbackBytes.isNotEmpty) {
+        await finalFile.writeAsBytes(fallbackBytes, flush: true);
+        storedFile = finalFile;
+      } else {
+        rethrow;
+      }
     }
 
     final range = _HttpStreamProxyCachedRange(
@@ -1719,6 +2050,41 @@ class _HttpStreamProxyWarmupState {
   }
 }
 
+class _HttpStreamProxyInFlightCacheWrite {
+  _HttpStreamProxyInFlightCacheWrite({
+    required this.startByte,
+    required this.plannedEndByteExclusive,
+  });
+
+  final int startByte;
+  final int? plannedEndByteExclusive;
+  final Completer<void> _completion = Completer<void>();
+  DateTime _updatedAt = DateTime.now();
+
+  bool get canRemove => _completion.isCompleted;
+
+  bool isStale(Duration ttl) => DateTime.now().difference(_updatedAt) > ttl;
+
+  bool mightCover(int byteOffset) {
+    if (byteOffset < startByte) return false;
+    final endExclusive = plannedEndByteExclusive;
+    if (endExclusive == null) return true;
+    return byteOffset < endExclusive;
+  }
+
+  Future<void> waitForCompletion() {
+    _updatedAt = DateTime.now();
+    return _completion.future;
+  }
+
+  void finish() {
+    _updatedAt = DateTime.now();
+    if (!_completion.isCompleted) {
+      _completion.complete();
+    }
+  }
+}
+
 class _OpenedRemote {
   _OpenedRemote({
     required this.response,
@@ -1778,12 +2144,12 @@ class _HttpStreamProxyHeadMetadata {
 }
 
 class _CachedServeResult {
-  const _CachedServeResult.notServed()
-      : served = false,
+  const _CachedServeResult.notServed({
+    this.reason = '',
+  })  : served = false,
         statusCode = 0,
         cachedBytes = 0,
-        remoteBytes = 0,
-        reason = '';
+        remoteBytes = 0;
 
   const _CachedServeResult.served({
     required this.statusCode,
@@ -1830,9 +2196,15 @@ class _ProxyRequestTrace {
   final String method;
   final String rangeHeader;
   String remoteUrl = '';
+  String requestUrl = '';
+  String requestHeadersSummary = '-';
+  bool firstPlaybackRequest = false;
   bool waitedWarmup = false;
+  bool waitedCacheFill = false;
   String cacheStatus = '';
+  String reuseOutcome = '';
   String reason = '';
+  String missReason = '-';
   int cachedBytes = 0;
   int remoteBytes = 0;
   int statusCode = 0;
@@ -1843,9 +2215,16 @@ class _ProxyRequestTrace {
       method: method,
       rangeHeader: rangeHeader,
       remoteUrl: remoteUrl,
+      requestUrl: requestUrl,
+      requestHeadersSummary:
+          requestHeadersSummary.trim().isEmpty ? '-' : requestHeadersSummary,
+      firstPlaybackRequest: firstPlaybackRequest,
       waitedWarmup: waitedWarmup,
+      waitedCacheFill: waitedCacheFill,
       cacheStatus: cacheStatus.isEmpty ? 'unknown' : cacheStatus,
+      reuseOutcome: reuseOutcome.trim().isEmpty ? 'unknown' : reuseOutcome,
       reason: reason.isEmpty ? '-' : reason,
+      missReason: missReason.trim().isEmpty ? '-' : missReason,
       cachedBytes: cachedBytes,
       remoteBytes: remoteBytes,
       statusCode: statusCode,
@@ -1859,9 +2238,15 @@ class _HttpStreamProxyDiagnosticEntry {
     required this.method,
     required this.rangeHeader,
     required this.remoteUrl,
+    required this.requestUrl,
+    required this.requestHeadersSummary,
+    required this.firstPlaybackRequest,
     required this.waitedWarmup,
+    required this.waitedCacheFill,
     required this.cacheStatus,
+    required this.reuseOutcome,
     required this.reason,
+    required this.missReason,
     required this.cachedBytes,
     required this.remoteBytes,
     required this.statusCode,
@@ -1871,9 +2256,15 @@ class _HttpStreamProxyDiagnosticEntry {
   final String method;
   final String rangeHeader;
   final String remoteUrl;
+  final String requestUrl;
+  final String requestHeadersSummary;
+  final bool firstPlaybackRequest;
   final bool waitedWarmup;
+  final bool waitedCacheFill;
   final String cacheStatus;
+  final String reuseOutcome;
   final String reason;
+  final String missReason;
   final int cachedBytes;
   final int remoteBytes;
   final int statusCode;

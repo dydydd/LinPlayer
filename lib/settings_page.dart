@@ -1605,6 +1605,12 @@ class _SettingsPageState extends State<SettingsPage> {
         context,
         () async {
           final extraSections = <String, String>{};
+          extraSections['Preload Cache Reuse Summary'] = [
+            StreamPreloadService.instance.buildStatusSummaryText(),
+            HttpStreamProxyServer.instance.buildReuseSummaryText(
+              maxFirstRequests: 12,
+            ),
+          ].where((section) => section.trim().isNotEmpty).join('\n\n');
           extraSections['Preload Diagnostics'] =
               StreamPreloadService.instance.buildDiagnosticsText(
             maxEntries: 24,

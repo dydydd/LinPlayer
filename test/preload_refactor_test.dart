@@ -25,7 +25,8 @@ void main() {
     await HttpStreamProxyServer.instance.debugResetForTest();
   });
 
-  test('PlaybackPreloadCoordinator keeps proxy metadata on prepared requests', () {
+  test('PlaybackPreloadCoordinator keeps proxy metadata on prepared requests',
+      () {
     const proxyUrl = 'http://127.0.0.1:8900';
     final prepared = PlaybackPreloadCoordinator.prepareResolved(
       appState: AppState(),
@@ -191,7 +192,8 @@ void main() {
       },
     );
 
-    test('cross-origin path stays external without server auth decoration', () async {
+    test('cross-origin path stays external without server auth decoration',
+        () async {
       final adapter = _FakeAdapter(
         playbackInfo: PlaybackInfoResult(
           playSessionId: 'play-2',
@@ -231,12 +233,14 @@ void main() {
       );
     });
 
-    test('body-link resolution strips sensitive headers on cross-origin target', () async {
+    test('body-link resolution strips sensitive headers on cross-origin target',
+        () async {
       final linkServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       addTearDown(() async {
         await linkServer.close(force: true);
       });
-      final mediaServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final mediaServer =
+          await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       addTearDown(() async {
         await mediaServer.close(force: true);
       });
@@ -254,8 +258,7 @@ void main() {
         request.response.statusCode = 200;
         request.response.headers.contentType = ContentType('text', 'plain');
         if (request.method != 'HEAD') {
-          final link =
-              'http://127.0.0.1:${mediaServer.port}/final.mp4'
+          final link = 'http://127.0.0.1:${mediaServer.port}/final.mp4'
               '|Referer=${Uri.encodeQueryComponent('https://ref.example/path')}'
               '&Cookie=${Uri.encodeQueryComponent('session=abc')}'
               '&Authorization=${Uri.encodeQueryComponent('Bearer secret')}';
@@ -340,8 +343,10 @@ void main() {
               return;
             case '/final.mp4':
               request.response.statusCode = 200;
-              request.response.headers.contentType = ContentType('video', 'mp4');
-              request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+              request.response.headers.contentType =
+                  ContentType('video', 'mp4');
+              request.response.headers
+                  .set(HttpHeaders.acceptRangesHeader, 'bytes');
               await request.response.close();
               return;
           }
@@ -405,7 +410,9 @@ void main() {
     );
   });
 
-  test('StreamPreloadService preserves upstream UA and dedupes repeated requests', () async {
+  test(
+      'StreamPreloadService preserves upstream UA and dedupes repeated requests',
+      () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() async {
       await server.close(force: true);
@@ -462,12 +469,17 @@ void main() {
     final diagnostics = StreamPreloadService.instance.buildDiagnosticsText(
       maxEntries: 2,
     );
+    final summary = StreamPreloadService.instance.buildStatusSummaryText();
     expect(diagnostics, contains('trigger=detail_current'));
     expect(diagnostics, contains('status=success'));
     expect(diagnostics, contains('status=skippedAlreadyDone'));
+    expect(summary, contains('observedAttempts: 2'));
+    expect(summary, contains('success=1'));
+    expect(summary, contains('skippedAlreadyDone=1'));
   });
 
-  test('StreamPreloadService preloads direct links near the resume offset', () async {
+  test('StreamPreloadService preloads direct links near the resume offset',
+      () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() async {
       await server.close(force: true);
@@ -567,7 +579,8 @@ void main() {
     },
   );
 
-  test('StreamPreloadService dedupe key distinguishes different media sources', () async {
+  test('StreamPreloadService dedupe key distinguishes different media sources',
+      () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() async {
       await server.close(force: true);
@@ -624,7 +637,8 @@ void main() {
     expect(requestCount, 2);
   });
 
-  test('StreamPreloadService routes requests through the configured HTTP proxy', () async {
+  test('StreamPreloadService routes requests through the configured HTTP proxy',
+      () async {
     final proxyServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() async {
       await proxyServer.close(force: true);
@@ -673,7 +687,9 @@ void main() {
     );
   });
 
-  test('StreamPreloadService seeds loopback proxy cache for later playback reuse', () async {
+  test(
+      'StreamPreloadService seeds loopback proxy cache for later playback reuse',
+      () async {
     final preloadProxy = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() async {
       await preloadProxy.close(force: true);
@@ -794,7 +810,9 @@ void main() {
     expect(requestCount, 1);
   });
 
-  test('StreamPreloadService preloads HLS master playlist with init and first segments', () async {
+  test(
+      'StreamPreloadService preloads HLS master playlist with init and first segments',
+      () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() async {
       await server.close(force: true);
@@ -950,7 +968,8 @@ void main() {
     },
   );
 
-  test('StreamPreloadService opens scoped circuit and recovers after TTL', () async {
+  test('StreamPreloadService opens scoped circuit and recovers after TTL',
+      () async {
     final service = StreamPreloadService.instance;
     var now = DateTime.utc(2026, 4, 1, 0, 0, 0);
     service.debugResetForTest(nowProvider: () => now);
@@ -1035,7 +1054,8 @@ class _FakeAdapter extends Fake implements MediaServerAdapter {
   String get deviceId => 'device-test';
 
   @override
-  Map<String, String> buildStreamHeaders(ServerAuthSession auth) => streamHeaders;
+  Map<String, String> buildStreamHeaders(ServerAuthSession auth) =>
+      streamHeaders;
 
   @override
   Future<PlaybackInfoResult> fetchPlaybackInfo(

@@ -73,8 +73,7 @@ class StreamPreloadService {
   static const int _maxLoopbackSeedBytes = 16 * 1024 * 1024;
   static const Duration _failureWindow = Duration(minutes: 2);
   static const Duration _recoverableDisableDuration = Duration(minutes: 2);
-  static const Duration _nonRecoverableDisableDuration =
-      Duration(minutes: 10);
+  static const Duration _nonRecoverableDisableDuration = Duration(minutes: 10);
   static const int _recoverableFailuresBeforeOpen = 2;
   static const int _nonRecoverableFailuresBeforeOpen = 1;
 
@@ -105,7 +104,8 @@ class StreamPreloadService {
         sourceUri?.queryParameters['AudioStreamIndex']?.trim() ?? '';
     final subtitleStreamIndex =
         sourceUri?.queryParameters['SubtitleStreamIndex']?.trim() ?? '';
-    final urlFingerprint = sha1.convert(utf8.encode(source.url.trim())).toString();
+    final urlFingerprint =
+        sha1.convert(utf8.encode(source.url.trim())).toString();
     final requestFingerprint = _fingerprintText(request.dedupeFingerprint);
     final headersFingerprint = _headersFingerprint(source.httpHeaders);
     final proxyFingerprint = _fingerprintText(_effectiveProxyUrlFor(request));
@@ -169,8 +169,7 @@ class StreamPreloadService {
       return 'inline:${_fingerprintText(raw)}';
     }
     if (uri.host.trim().isNotEmpty) {
-      final port =
-          uri.hasPort ? uri.port : (scheme == 'https' ? 443 : 80);
+      final port = uri.hasPort ? uri.port : (scheme == 'https' ? 443 : 80);
       return '$scheme://${uri.host.toLowerCase()}:$port';
     }
     final path = uri.path.trim();
@@ -196,8 +195,8 @@ class StreamPreloadService {
         final remaining = state.openUntil == null
             ? 0
             : state.openUntil!.difference(now).inSeconds.clamp(0, 1 << 30);
-        final reason =
-            state.lastFailure?.category.name ?? _PreloadFailureCategory.unknown.name;
+        final reason = state.lastFailure?.category.name ??
+            _PreloadFailureCategory.unknown.name;
         buffer.writeln(
           'scope=${state.scopeKey} '
           'failures=${state.consecutiveFailures} '
@@ -207,16 +206,16 @@ class StreamPreloadService {
       }
     }
     final count = maxEntries < 1 ? 1 : maxEntries;
-    final startIndex = _recentEntries.length > count
-        ? _recentEntries.length - count
-        : 0;
+    final startIndex =
+        _recentEntries.length > count ? _recentEntries.length - count : 0;
     if (_recentEntries.isEmpty) {
       buffer.writeln('recent: (empty)');
       return buffer.toString().trim();
     }
     buffer.writeln('recent:');
     for (final entry in _recentEntries.skip(startIndex)) {
-      final errorText = entry.error == null ? '' : ' error=${_summarizeInline(entry.error)}';
+      final errorText =
+          entry.error == null ? '' : ' error=${_summarizeInline(entry.error)}';
       buffer.writeln(
         '${entry.timestamp.toIso8601String()} '
         'trigger=${entry.triggerSource} '
@@ -230,6 +229,43 @@ class StreamPreloadService {
         'url=${_summarizeUrl(entry.url)}'
         '$errorText',
       );
+    }
+    return buffer.toString().trim();
+  }
+
+  String buildStatusSummaryText() {
+    final now = _clock();
+    _pruneCircuitStates(now: now);
+    final counts = <StreamPreloadStatus, int>{};
+    var proxyRequests = 0;
+    var externalSources = 0;
+    for (final entry in _recentEntries) {
+      counts[entry.status] = (counts[entry.status] ?? 0) + 1;
+      if (entry.usesProxy) proxyRequests += 1;
+      if (entry.isExternal) externalSources += 1;
+    }
+
+    final orderedStatuses = StreamPreloadStatus.values
+        .where((status) => (counts[status] ?? 0) > 0)
+        .map((status) => '${status.name}=${counts[status]}')
+        .join(', ');
+    final activeCircuits =
+        _circuitStates.values.where((state) => state.isOpen(now)).length;
+
+    final latest = _recentEntries.isEmpty ? null : _recentEntries.last;
+    final buffer = StringBuffer()
+      ..writeln('observedAttempts: ${_recentEntries.length}')
+      ..writeln(
+        'statusCounts: ${orderedStatuses.isEmpty ? "(empty)" : orderedStatuses}',
+      )
+      ..writeln('activeCircuits: $activeCircuits')
+      ..writeln('proxyAttempts: $proxyRequests')
+      ..writeln('externalSourceAttempts: $externalSources');
+    if (latest != null) {
+      buffer
+        ..writeln('latestTrigger: ${latest.triggerSource}')
+        ..writeln('latestStatus: ${latest.status.name}')
+        ..writeln('latestUrl: ${_summarizeUrl(latest.url)}');
     }
     return buffer.toString().trim();
   }
@@ -379,7 +415,8 @@ class StreamPreloadService {
     }
   }
 
-  Future<StreamPreloadResult> preloadResolvedSource(PreloadRequest request) async {
+  Future<StreamPreloadResult> preloadResolvedSource(
+      PreloadRequest request) async {
     final safeStartPosition = request.startPosition < Duration.zero
         ? Duration.zero
         : request.startPosition;
@@ -411,8 +448,8 @@ class StreamPreloadService {
       final result = StreamPreloadResult(
         StreamPreloadStatus.skippedDisabled,
         error: _PreloadFailureInfo(
-          category:
-              openCircuit.lastFailure?.category ?? _PreloadFailureCategory.unknown,
+          category: openCircuit.lastFailure?.category ??
+              _PreloadFailureCategory.unknown,
           statusCode: openCircuit.lastFailure?.statusCode,
           url: normalizedRequest.resolvedSource.url,
           message:
@@ -556,7 +593,8 @@ class StreamPreloadService {
         continue;
       }
       final lastFailureAt = state.lastFailureAt;
-      if (lastFailureAt == null || now.difference(lastFailureAt) > _failureWindow) {
+      if (lastFailureAt == null ||
+          now.difference(lastFailureAt) > _failureWindow) {
         staleKeys.add(entry.key);
       }
     }
@@ -660,10 +698,9 @@ class StreamPreloadService {
   }) async {
     final useOffset = startPosition > Duration.zero;
     final sniffBytes = useOffset ? 512 * 1024 : bytesToFetch;
-    final firstCaptureLimit =
-        useOffset
-            ? sniffBytes
-            : sniffBytes.clamp(0, _maxLoopbackSeedBytes).toInt();
+    final firstCaptureLimit = useOffset
+        ? sniffBytes
+        : sniffBytes.clamp(0, _maxLoopbackSeedBytes).toInt();
     final first = await _get(
       client: client,
       uri: uri,
@@ -730,14 +767,15 @@ class StreamPreloadService {
         headers: headers,
         rangeStartBytes: startByte,
         rangeBytes: bytesToFetch,
-        captureLimitBytes:
-            bytesToFetch.clamp(0, _maxLoopbackSeedBytes).toInt(),
+        captureLimitBytes: bytesToFetch.clamp(0, _maxLoopbackSeedBytes).toInt(),
       );
       if (!second.ok || second.bytesRead <= 0) {
         return _failureFromGetResult(
           second,
           fallbackUri: first.effectiveUri,
-          message: second.bytesRead <= 0 ? 'empty-offset-response' : 'offset-fetch-failed',
+          message: second.bytesRead <= 0
+              ? 'empty-offset-response'
+              : 'offset-fetch-failed',
         );
       }
       await _seedLoopbackProxyCache(
@@ -955,7 +993,8 @@ class StreamPreloadService {
       fetchedAny = true;
       segmentCount++;
 
-      final durMs = seg.durationMs > 0 ? seg.durationMs : preloadDuration.inMilliseconds;
+      final durMs =
+          seg.durationMs > 0 ? seg.durationMs : preloadDuration.inMilliseconds;
       remainingMs -= durMs;
     }
 
@@ -989,7 +1028,8 @@ class StreamPreloadService {
     required int? rangeBytes,
     required int captureLimitBytes,
   }) async {
-    final request = await client.getUrl(uri).timeout(const Duration(seconds: 8));
+    final request =
+        await client.getUrl(uri).timeout(const Duration(seconds: 8));
     request.followRedirects = true;
     request.maxRedirects = 5;
     headers.forEach((k, v) {
@@ -1185,7 +1225,6 @@ class StreamPreloadService {
       message: error.toString(),
     );
   }
-
 }
 
 enum _PreloadFailureCategory {
