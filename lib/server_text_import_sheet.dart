@@ -264,8 +264,9 @@ class _ServerTextImportSheetState extends State<ServerTextImportSheet> {
 
     if (success > 0 && mounted) {
       final appState = widget.appState;
-      Navigator.of(context).pop();
-      if (DeviceType.isTv && firstAddedServerId != null) {
+      final shouldEnter = firstAddedServerId != null;
+      Navigator.of(context).pop(shouldEnter);
+      if (shouldEnter) {
         unawaited(
           Future<void>.delayed(
             const Duration(milliseconds: 10),

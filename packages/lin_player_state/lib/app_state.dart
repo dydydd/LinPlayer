@@ -2328,7 +2328,9 @@ class AppState extends ChangeNotifier {
         _randomRecommendationsInFlight = null;
         _continueWatching = null;
         _continueWatchingInFlight = null;
+        _resetPerServerCaches();
         await prefs.setString(_kActiveServerIdKey, server.id);
+        unawaited(loadHome(forceRefresh: true));
       } catch (e) {
         final msg = _userFacingErrorText(e);
         _error = msg;

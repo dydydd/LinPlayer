@@ -8,6 +8,7 @@ import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'mobile_ui/server/mobile_server_page.dart';
 import 'player_screen.dart';
 import 'player_screen_exo.dart';
 import 'settings_page.dart';
@@ -87,8 +88,8 @@ class _ServerPageState extends State<ServerPage> {
     );
   }
 
-  Future<void> _showBulkImportSheet() async {
-    await showModalBottomSheet<void>(
+  Future<bool?> _showBulkImportSheet() async {
+    return showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
@@ -1015,6 +1016,17 @@ class _ServerPageState extends State<ServerPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktopPlatform = !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.linux ||
+            defaultTargetPlatform == TargetPlatform.macOS);
+    if (!DeviceType.isTv && !isDesktopPlatform && !widget.desktopLayout) {
+      return MobileServerPage(
+        appState: widget.appState,
+        showInlineLocalEntry: widget.showInlineLocalEntry,
+      );
+    }
+
     return AnimatedBuilder(
       animation: widget.appState,
       builder: (context, _) {
