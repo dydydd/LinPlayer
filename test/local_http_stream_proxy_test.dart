@@ -314,6 +314,81 @@ void main() {
     expect(stale.state, HttpStreamCacheState.stale);
   });
 
+  test('HttpStreamProxyServer emits warmup download progress snapshots',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await server.close(force: true);
+    });
+
+    server.listen((HttpRequest req) async {
+      req.response.statusCode = HttpStatus.partialContent;
+      req.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+      req.response.headers.set(
+        HttpHeaders.contentRangeHeader,
+        'bytes 0-7/8',
+      );
+      req.response.headers.contentType = ContentType('video', 'mp4');
+      req.response.contentLength = 8;
+      req.response.add(const <int>[0, 1, 2, 3]);
+      await req.response.flush();
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      req.response.add(const <int>[4, 5, 6, 7]);
+      await req.response.close();
+    });
+
+    final activeProgress = Completer<HttpStreamCacheDownloadProgressSnapshot>();
+    final completed = Completer<void>();
+    final sub = HttpStreamProxyServer.instance.downloadProgressStream.listen((
+      snapshots,
+    ) {
+      if (!activeProgress.isCompleted) {
+        final current = snapshots.where((entry) {
+          return entry.kind == HttpStreamCacheDownloadKind.warmup &&
+              entry.bytesWritten > 0;
+        });
+        if (current.isNotEmpty) {
+          activeProgress.complete(current.last);
+        }
+      }
+      if (activeProgress.isCompleted &&
+          !completed.isCompleted &&
+          snapshots.isEmpty) {
+        completed.complete();
+      }
+    });
+    addTearDown(() async {
+      await sub.cancel();
+    });
+
+    final warmup = HttpStreamProxyServer.instance.warmRangeToCache(
+      remoteUri: Uri.parse('http://127.0.0.1:${server.port}/media'),
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      fileName: 'video.mp4',
+      startByte: 0,
+      lengthBytes: 8,
+    );
+
+    final snapshot = await activeProgress.future.timeout(
+      const Duration(seconds: 2),
+    );
+    expect(snapshot.kind, HttpStreamCacheDownloadKind.warmup);
+    expect(snapshot.startByte, 0);
+    expect(snapshot.requestedBytes, 8);
+    expect(snapshot.bytesWritten, greaterThan(0));
+    expect(snapshot.progress, isNotNull);
+    expect(snapshot.progress!, greaterThan(0));
+
+    final result = await warmup;
+    expect(result.bytesWritten, 8);
+
+    await completed.future.timeout(const Duration(seconds: 2));
+    expect(
+      HttpStreamProxyServer.instance.currentDownloadProgressSnapshots(),
+      isEmpty,
+    );
+  });
+
   test('HttpStreamProxyServer summarizes first playback request details',
       () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);

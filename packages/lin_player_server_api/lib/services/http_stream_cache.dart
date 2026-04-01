@@ -10,6 +10,11 @@ enum HttpStreamCacheState {
   stale,
 }
 
+enum HttpStreamCacheDownloadKind {
+  warmup,
+  playbackFill,
+}
+
 class HttpStreamCacheKey {
   const HttpStreamCacheKey._({
     required this.fingerprint,
@@ -243,4 +248,44 @@ class HttpStreamCacheSnapshot {
   bool get isPlayable =>
       state == HttpStreamCacheState.playable ||
       state == HttpStreamCacheState.completed;
+}
+
+class HttpStreamCacheDownloadProgressSnapshot {
+  const HttpStreamCacheDownloadProgressSnapshot({
+    required this.id,
+    required this.key,
+    required this.kind,
+    required this.remoteUrl,
+    required this.startByte,
+    required this.bytesWritten,
+    required this.startedAt,
+    required this.updatedAt,
+    this.requestedBytes,
+    this.totalBytes,
+    this.contentTypeMime,
+  });
+
+  final String id;
+  final HttpStreamCacheKey key;
+  final HttpStreamCacheDownloadKind kind;
+  final String remoteUrl;
+  final int startByte;
+  final int bytesWritten;
+  final int? requestedBytes;
+  final int? totalBytes;
+  final String? contentTypeMime;
+  final DateTime startedAt;
+  final DateTime updatedAt;
+
+  bool get isIndeterminate => requestedBytes == null || requestedBytes! <= 0;
+
+  double? get progress {
+    final requested = requestedBytes;
+    if (requested == null || requested <= 0) return null;
+    if (bytesWritten <= 0) return 0;
+    final fraction = bytesWritten / requested;
+    if (fraction < 0) return 0;
+    if (fraction > 1) return 1;
+    return fraction;
+  }
 }

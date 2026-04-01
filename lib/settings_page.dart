@@ -1619,6 +1619,10 @@ class _SettingsPageState extends State<SettingsPage> {
               HttpStreamProxyServer.instance.buildDiagnosticsText(
             maxEntries: 40,
           );
+          extraSections['HTTP Stream Active Downloads'] =
+              HttpStreamProxyServer.instance.buildActiveDownloadsText(
+            maxEntries: 12,
+          );
           if (DeviceType.isTv) {
             try {
               extraSections['Built-in Proxy Diagnostics'] =

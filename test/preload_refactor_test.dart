@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -828,6 +829,202 @@ void main() {
     expect(response.headers.contentLength, 8);
     expect(body, <int>[0, 1, 2, 3, 4, 5, 6, 7]);
     expect(preloadProxyRequests, 1);
+  });
+
+  test(
+      'Preload + proxy playback reuses cached prefix and only fills the missing tail',
+      () async {
+    final upstreamProxy = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await upstreamProxy.close(force: true);
+    });
+
+    var prefixHits = 0;
+    var tailHits = 0;
+    final observedRanges = <String?>[];
+
+    upstreamProxy.listen((HttpRequest request) async {
+      final range = request.headers.value(HttpHeaders.rangeHeader);
+      observedRanges.add(range);
+      final bytes = <int>[0, 1, 2, 3, 4, 5, 6, 7];
+      if ((range ?? '').startsWith('bytes=4-')) {
+        tailHits++;
+        request.response.statusCode = HttpStatus.partialContent;
+        request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+        request.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes 4-7/8',
+        );
+        request.response.headers.contentType = ContentType('video', 'mp4');
+        request.response.contentLength = 4;
+        request.response.add(bytes.sublist(4));
+        await request.response.close();
+        return;
+      }
+
+      prefixHits++;
+      request.response.statusCode = HttpStatus.partialContent;
+      request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+      request.response.headers.set(
+        HttpHeaders.contentRangeHeader,
+        'bytes 0-3/8',
+      );
+      request.response.headers.contentType = ContentType('video', 'mp4');
+      request.response.contentLength = 4;
+      request.response.add(bytes.sublist(0, 4));
+      await request.response.close();
+    });
+
+    final proxyUrl = 'http://127.0.0.1:${upstreamProxy.port}';
+    const remoteUrl = 'http://media.example.invalid/preload-tail.mp4';
+    final resolvedSource = ResolvedPlaybackSource(
+      itemId: 'episode-preload-tail',
+      playSessionId: 'ps-preload-tail',
+      mediaSourceId: 'ms-preload-tail',
+      url: remoteUrl,
+      httpHeaders: const <String, String>{},
+      isExternal: true,
+      mediaTypeHint: ResolvedPlaybackMediaType.file,
+      fromStrm: false,
+      redirectChain: const <String>[remoteUrl],
+      bitrate: 8000000,
+      sizeBytes: 8,
+    );
+
+    final preloadResult =
+        await StreamPreloadService.instance.preloadResolvedSource(
+      PreloadRequest(
+        resolvedSource: resolvedSource,
+        triggerSource: 'detail_current',
+        httpProxyUrl: proxyUrl,
+      ),
+    );
+
+    expect(preloadResult.status, StreamPreloadStatus.success);
+    expect(prefixHits, 1);
+    expect(tailHits, 0);
+
+    final cacheKey = buildResolvedPlaybackCacheKey(
+      resolvedSource,
+      proxyUrl: proxyUrl,
+    );
+    final proxyUri = await HttpStreamProxyServer.instance.registerStream(
+      remoteUri: Uri.parse(remoteUrl),
+      httpHeaders: const <String, String>{},
+      fileName: 'preload-tail.mp4',
+      cacheKey: cacheKey,
+    );
+
+    final client = HttpClient();
+    addTearDown(() {
+      client.close(force: true);
+    });
+
+    final response = await (await client.getUrl(proxyUri)).close();
+    final body = await response.fold<List<int>>(
+      <int>[],
+      (acc, chunk) => <int>[...acc, ...chunk],
+    );
+
+    expect(response.statusCode, HttpStatus.ok);
+    expect(body, <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(prefixHits, 1);
+    expect(tailHits, 1);
+    expect(
+      observedRanges.whereType<String>().where((value) => value.startsWith('bytes=0-')).length,
+      1,
+    );
+    expect(observedRanges, contains('bytes=4-'));
+    expect(
+      HttpStreamProxyServer.instance.buildDiagnosticsText(),
+      contains('reuse=cache+remote-tail'),
+    );
+  });
+
+  test(
+      'Playback waits for in-flight preload warmup instead of duplicating upstream prefix download',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await server.close(force: true);
+    });
+
+    var upstreamHits = 0;
+    final firstRequestStarted = Completer<void>();
+    server.listen((HttpRequest request) async {
+      upstreamHits++;
+      if (!firstRequestStarted.isCompleted) {
+        firstRequestStarted.complete();
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 180));
+      request.response.statusCode = HttpStatus.partialContent;
+      request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+      request.response.headers.set(
+        HttpHeaders.contentRangeHeader,
+        'bytes 0-7/8',
+      );
+      request.response.headers.contentType = ContentType('video', 'mp4');
+      request.response.contentLength = 8;
+      request.response.add(const <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+      await request.response.close();
+    });
+
+    final url = 'http://127.0.0.1:${server.port}/warming.mp4';
+    final resolvedSource = ResolvedPlaybackSource(
+      itemId: 'episode-warmup-wait',
+      playSessionId: 'ps-warmup-wait',
+      mediaSourceId: 'ms-warmup-wait',
+      url: url,
+      httpHeaders: const <String, String>{'User-Agent': 'SourceUA/1.0'},
+      isExternal: false,
+      mediaTypeHint: ResolvedPlaybackMediaType.file,
+      fromStrm: false,
+      redirectChain: <String>[url],
+      bitrate: 8000000,
+      sizeBytes: 8,
+    );
+
+    final preloadFuture = StreamPreloadService.instance.preloadResolvedSource(
+      PreloadRequest(
+        resolvedSource: resolvedSource,
+        triggerSource: 'detail_current',
+      ),
+    );
+
+    await firstRequestStarted.future.timeout(const Duration(seconds: 2));
+
+    final cacheKey = buildResolvedPlaybackCacheKey(resolvedSource);
+    final proxyUri = await HttpStreamProxyServer.instance.registerStream(
+      remoteUri: Uri.parse(url),
+      httpHeaders: resolvedSource.httpHeaders,
+      fileName: 'warming.mp4',
+      cacheKey: cacheKey,
+    );
+
+    final client = HttpClient();
+    addTearDown(() {
+      client.close(force: true);
+    });
+
+    final response = await (await client.getUrl(proxyUri)).close();
+    final body = await response.fold<List<int>>(
+      <int>[],
+      (acc, chunk) => <int>[...acc, ...chunk],
+    );
+    final preloadResult = await preloadFuture;
+
+    expect(preloadResult.status, StreamPreloadStatus.success);
+    expect(response.statusCode, HttpStatus.ok);
+    expect(body, <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(upstreamHits, 1);
+    expect(
+      HttpStreamProxyServer.instance.buildDiagnosticsText(),
+      contains('warmupWait=true'),
+    );
+    expect(
+      HttpStreamProxyServer.instance.buildDiagnosticsText(),
+      contains('reuse=cache-only'),
+    );
   });
 
   test(

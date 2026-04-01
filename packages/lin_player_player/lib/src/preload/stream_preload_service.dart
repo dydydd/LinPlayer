@@ -233,6 +233,9 @@ class StreamPreloadService {
         .join(', ');
     final activeCircuits =
         _circuitStates.values.where((state) => state.isOpen(now)).length;
+    final activeCacheDownloads = HttpStreamProxyServer.instance
+        .currentDownloadProgressSnapshots()
+        .length;
 
     final latest = _recentEntries.isEmpty ? null : _recentEntries.last;
     final buffer = StringBuffer()
@@ -241,6 +244,7 @@ class StreamPreloadService {
         'statusCounts: ${orderedStatuses.isEmpty ? "(empty)" : orderedStatuses}',
       )
       ..writeln('activeCircuits: $activeCircuits')
+      ..writeln('activeCacheDownloads: $activeCacheDownloads')
       ..writeln('proxyAttempts: $proxyRequests')
       ..writeln('externalSourceAttempts: $externalSources');
     if (latest != null) {

@@ -40,10 +40,63 @@ class HttpStreamProxyServer {
       <String, Future<HttpStreamWarmupResult>>{};
   final List<_HttpStreamProxyDiagnosticEntry> _recentDiagnostics =
       <_HttpStreamProxyDiagnosticEntry>[];
+  final StreamController<List<HttpStreamCacheDownloadProgressSnapshot>>
+      _downloadProgressController =
+      StreamController<List<HttpStreamCacheDownloadProgressSnapshot>>.broadcast(
+        sync: true,
+      );
+  final Map<String, _HttpStreamProxyDownloadProgress> _activeDownloads =
+      <String, _HttpStreamProxyDownloadProgress>{};
+  int _nextDownloadProgressId = 0;
+
+  Stream<List<HttpStreamCacheDownloadProgressSnapshot>>
+      get downloadProgressStream => _downloadProgressController.stream;
 
   void configureHttpClientFactory(http.Client Function()? factory) {
     _httpClientFactory = factory;
     _client = null;
+  }
+
+  List<HttpStreamCacheDownloadProgressSnapshot> currentDownloadProgressSnapshots(
+      {int? maxEntries}) {
+    final snapshots = _activeDownloads.values
+        .map((entry) => entry.snapshot())
+        .toList(growable: false)
+      ..sort((a, b) => a.startedAt.compareTo(b.startedAt));
+    if (maxEntries == null || maxEntries < 1 || snapshots.length <= maxEntries) {
+      return List<HttpStreamCacheDownloadProgressSnapshot>.unmodifiable(
+        snapshots,
+      );
+    }
+    return List<HttpStreamCacheDownloadProgressSnapshot>.unmodifiable(
+      snapshots.sublist(snapshots.length - maxEntries),
+    );
+  }
+
+  String buildActiveDownloadsText({int maxEntries = 8}) {
+    final snapshots = currentDownloadProgressSnapshots(maxEntries: maxEntries);
+    final buffer = StringBuffer()
+      ..writeln('activeDownloads: ${_activeDownloads.length}');
+    if (snapshots.isEmpty) {
+      buffer.writeln('(empty)');
+      return buffer.toString().trim();
+    }
+    for (final snapshot in snapshots) {
+      final requestedText =
+          snapshot.requestedBytes == null ? '?' : '${snapshot.requestedBytes}';
+      final progress = snapshot.progress;
+      final progressText = progress == null
+          ? 'indeterminate'
+          : '${(progress * 100).toStringAsFixed(progress >= 0.1 ? 0 : 1)}%';
+      buffer.writeln(
+        '${snapshot.kind.name} '
+        'start=${snapshot.startByte} '
+        'written=${snapshot.bytesWritten}/$requestedText '
+        'progress=$progressText '
+        'url=${_summarizeUrl(snapshot.remoteUrl)}',
+      );
+    }
+    return buffer.toString().trim();
   }
 
   Future<Uri> ensureStarted() async {
@@ -230,6 +283,7 @@ class HttpStreamProxyServer {
       ..writeln('cacheRoot: ${_cacheRootDirectory.path}')
       ..writeln('entries: ${_entries.length}')
       ..writeln('warmups: ${_warmupStates.length}')
+      ..writeln('activeDownloads: ${_activeDownloads.length}')
       ..writeln('inFlightCacheWrites: $inFlightCacheWrites')
       ..writeln('cacheStates: ${_formatCounterSummary(stateCounts)}')
       ..writeln('recent:');
@@ -306,6 +360,7 @@ class HttpStreamProxyServer {
       ..writeln('reusedRequests: $reusedRequests')
       ..writeln('warmupWaits: $waitedWarmup')
       ..writeln('cacheFillWaits: $waitedCacheFill')
+      ..writeln('activeDownloads: ${_activeDownloads.length}')
       ..writeln('cacheStates: ${_formatCounterSummary(cacheStateCounts)}')
       ..writeln('reuseOutcomes: ${_formatCounterSummary(reuseCounts)}')
       ..writeln('cacheStatuses: ${_formatCounterSummary(cacheCounts)}')
@@ -345,6 +400,8 @@ class HttpStreamProxyServer {
     _inFlightCacheWrites.clear();
     _inFlightWarmups.clear();
     _recentDiagnostics.clear();
+    _activeDownloads.clear();
+    _emitDownloadProgressSnapshot();
     final server = _server;
     _server = null;
     _baseUri = null;
@@ -396,6 +453,50 @@ class HttpStreamProxyServer {
       warmupInProgress:
           _warmupStates[registered.entry.fingerprint]?.isActive ?? false,
     );
+  }
+
+  String _startDownloadProgress({
+    required _HttpStreamProxyEntry entry,
+    required HttpStreamCacheDownloadKind kind,
+    required Uri remoteUri,
+    required int startByte,
+    int? requestedBytes,
+    int? totalBytes,
+    String? contentTypeMime,
+  }) {
+    final id = 'dl-${++_nextDownloadProgressId}';
+    _activeDownloads[id] = _HttpStreamProxyDownloadProgress(
+      id: id,
+      key: entry.cacheKey,
+      kind: kind,
+      remoteUrl: remoteUri.toString(),
+      startByte: startByte,
+      requestedBytes: requestedBytes,
+      totalBytes: totalBytes,
+      contentTypeMime: contentTypeMime,
+    );
+    _emitDownloadProgressSnapshot();
+    return id;
+  }
+
+  void _incrementDownloadProgress(String id, int deltaBytes) {
+    final current = _activeDownloads[id];
+    if (current == null) return;
+    current.bytesWritten += deltaBytes < 0 ? 0 : deltaBytes;
+    current.updatedAt = DateTime.now();
+    _emitDownloadProgressSnapshot();
+  }
+
+  void _finishDownloadProgress(String? id) {
+    if (id == null) return;
+    if (_activeDownloads.remove(id) == null) return;
+    _emitDownloadProgressSnapshot();
+  }
+
+  void _emitDownloadProgressSnapshot() {
+    try {
+      _downloadProgressController.add(currentDownloadProgressSnapshots());
+    } catch (_) {}
   }
 
   Future<HttpStreamWarmupResult> _warmRangeToCacheRegistered(
@@ -472,6 +573,7 @@ class HttpStreamProxyServer {
       plannedEndByteExclusive: requestedEnd + 1,
     );
     _OpenedRemote? remote;
+    String? progressId;
     try {
       remote = await _openRemote(
         entry,
@@ -507,6 +609,22 @@ class HttpStreamProxyServer {
         remote.response.headers,
         cacheStartByte,
       );
+      final effectiveRemoteUri = _effectiveRemoteUriFromResponse(
+        remote.response,
+        fallback: entry.remoteUri,
+      );
+      final expectedBytes = totalBytes != null && totalBytes > cacheStartByte
+          ? min(missingBytes, totalBytes - cacheStartByte)
+          : missingBytes;
+      progressId = _startDownloadProgress(
+        entry: entry,
+        kind: HttpStreamCacheDownloadKind.warmup,
+        remoteUri: effectiveRemoteUri,
+        startByte: cacheStartByte,
+        requestedBytes: expectedBytes <= 0 ? null : expectedBytes,
+        totalBytes: totalBytes,
+        contentTypeMime: contentTypeMime,
+      );
       final cacheResult = await _cacheRemoteToEntry(
         entry: entry,
         remote: remote.response,
@@ -516,6 +634,7 @@ class HttpStreamProxyServer {
         contentTypeMime: contentTypeMime,
         totalBytes: totalBytes,
         acceptRanges: acceptRanges,
+        progressId: progressId,
       );
       remote = null;
       if (cacheResult.bytesRelayed <= 0) {
@@ -536,6 +655,7 @@ class HttpStreamProxyServer {
         acceptRanges: snapshotCoverage?.acceptRanges ?? acceptRanges,
       );
     } finally {
+      _finishDownloadProgress(progressId);
       _finishInFlightCacheWrite(entry, inFlightCacheWrite);
       if (remote != null) {
         await remote.close();
@@ -1171,6 +1291,7 @@ class HttpStreamProxyServer {
     final nextStart = range.startByte + cachedBytesToServe;
     _OpenedRemote? remote;
     _HttpStreamProxyInFlightCacheWrite? inFlightCacheWrite;
+    String? progressId;
     try {
       var totalBytes = totalFromCache;
       var contentTypeMime = coverage.contentTypeMime;
@@ -1254,6 +1375,25 @@ class HttpStreamProxyServer {
             (!range.hasRange && remote.response.statusCode == HttpStatus.ok)
                 ? nextStart
                 : 0;
+        final expectedBytes = requestedEnd == null
+            ? (totalBytes != null && totalBytes > nextStart
+                ? totalBytes - nextStart
+                : null)
+            : ((requestedEnd - nextStart + 1).clamp(0, 1 << 30));
+        progressId = _startDownloadProgress(
+          entry: entry,
+          kind: HttpStreamCacheDownloadKind.playbackFill,
+          remoteUri: _effectiveRemoteUriFromResponse(
+            remote.response,
+            fallback: entry.remoteUri,
+          ),
+          startByte: nextStart,
+          requestedBytes:
+              expectedBytes == null || expectedBytes <= 0 ? null : expectedBytes,
+          totalBytes: totalBytes,
+          contentTypeMime: contentTypeMime ??
+              _contentTypeMimeFromHeaders(remote.response.headers),
+        );
         final relay = await _relayRemoteToResponse(
           entry: entry,
           response: response,
@@ -1264,6 +1404,7 @@ class HttpStreamProxyServer {
               _contentTypeMimeFromHeaders(remote.response.headers),
           totalBytes: totalBytes,
           acceptRanges: acceptRanges,
+          progressId: progressId,
         );
         remoteBytes = relay.bytesRelayed;
         remote = null;
@@ -1283,6 +1424,7 @@ class HttpStreamProxyServer {
         reason: 'cache-serve-error',
       );
     } finally {
+      _finishDownloadProgress(progressId);
       if (inFlightCacheWrite != null) {
         _finishInFlightCacheWrite(entry, inFlightCacheWrite);
       }
@@ -1327,23 +1469,51 @@ class HttpStreamProxyServer {
       );
     }
 
-    final relay = await _relayRemoteToResponse(
+    final totalBytes =
+        _inferTotalBytesFromHeaders(status, remote.headers, cacheStartByte);
+    final expectedBytes = requestRange.hasRange
+        ? (requestRange.endByte == null
+            ? (totalBytes != null && totalBytes > cacheStartByte
+                ? totalBytes - cacheStartByte
+                : null)
+            : ((requestRange.endByte! - cacheStartByte + 1).clamp(0, 1 << 30)))
+        : (totalBytes != null && totalBytes > cacheStartByte
+            ? totalBytes - cacheStartByte
+            : null);
+    final progressId = _startDownloadProgress(
       entry: entry,
-      response: response,
-      remote: remote,
-      cacheStartByte: cacheStartByte,
-      skipBytes: requestRange.hasRange ? 0 : requestRange.startByte,
+      kind: HttpStreamCacheDownloadKind.playbackFill,
+      remoteUri: _effectiveRemoteUriFromResponse(
+        remote,
+        fallback: entry.remoteUri,
+      ),
+      startByte: cacheStartByte,
+      requestedBytes:
+          expectedBytes == null || expectedBytes <= 0 ? null : expectedBytes,
+      totalBytes: totalBytes,
       contentTypeMime: _contentTypeMimeFromHeaders(remote.headers),
-      totalBytes:
-          _inferTotalBytesFromHeaders(status, remote.headers, cacheStartByte),
-      acceptRanges: _acceptsByteRanges(remote.headers) ||
-          status == HttpStatus.partialContent,
     );
-    return _RemoteRelayResult(
-      bytesRelayed: relay.bytesRelayed,
-      cached: relay.cached,
-      reason: relay.cached ? 'remote-cached' : 'remote-empty',
-    );
+    try {
+      final relay = await _relayRemoteToResponse(
+        entry: entry,
+        response: response,
+        remote: remote,
+        cacheStartByte: cacheStartByte,
+        skipBytes: requestRange.hasRange ? 0 : requestRange.startByte,
+        contentTypeMime: _contentTypeMimeFromHeaders(remote.headers),
+        totalBytes: totalBytes,
+        acceptRanges: _acceptsByteRanges(remote.headers) ||
+            status == HttpStatus.partialContent,
+        progressId: progressId,
+      );
+      return _RemoteRelayResult(
+        bytesRelayed: relay.bytesRelayed,
+        cached: relay.cached,
+        reason: relay.cached ? 'remote-cached' : 'remote-empty',
+      );
+    } finally {
+      _finishDownloadProgress(progressId);
+    }
   }
 
   Future<_RemoteCacheResult> _relayRemoteToResponse({
@@ -1355,6 +1525,7 @@ class HttpStreamProxyServer {
     required String? contentTypeMime,
     required int? totalBytes,
     required bool acceptRanges,
+    String? progressId,
   }) async {
     final pendingFile = await entry.createPendingRangeFile(cacheStartByte);
     final sink = pendingFile.openWrite();
@@ -1375,6 +1546,7 @@ class HttpStreamProxyServer {
         sink.add(data);
         response.add(data);
         bytesRelayed += data.length;
+        _incrementDownloadProgress(progressId ?? '', data.length);
       }
       await sink.flush();
       await sink.close();
@@ -1418,6 +1590,7 @@ class HttpStreamProxyServer {
     required String? contentTypeMime,
     required int? totalBytes,
     required bool acceptRanges,
+    String? progressId,
   }) async {
     final pendingFile = await entry.createPendingRangeFile(cacheStartByte);
     final sink = pendingFile.openWrite();
@@ -1445,6 +1618,7 @@ class HttpStreamProxyServer {
         if (data.isEmpty) continue;
         sink.add(data);
         bytesRelayed += data.length;
+        _incrementDownloadProgress(progressId ?? '', data.length);
         if (remainingMax != null) {
           remainingMax -= data.length;
           if (remainingMax <= 0) break;
@@ -2540,6 +2714,65 @@ class _RegisteredProxyEntry {
 
   final Uri baseUri;
   final _HttpStreamProxyEntry entry;
+}
+
+class _HttpStreamProxyDownloadProgress {
+  _HttpStreamProxyDownloadProgress({
+    required this.id,
+    required this.key,
+    required this.kind,
+    required this.remoteUrl,
+    required this.startByte,
+    required this.requestedBytes,
+    required this.totalBytes,
+    required this.contentTypeMime,
+  })  : startedAt = DateTime.now(),
+        updatedAt = DateTime.now();
+
+  final String id;
+  final HttpStreamCacheKey key;
+  final HttpStreamCacheDownloadKind kind;
+  String remoteUrl;
+  final int startByte;
+  int bytesWritten = 0;
+  int? requestedBytes;
+  int? totalBytes;
+  String? contentTypeMime;
+  final DateTime startedAt;
+  DateTime updatedAt;
+
+  void update({
+    int? bytesWritten,
+    int? requestedBytes,
+    int? totalBytes,
+    String? contentTypeMime,
+    String? remoteUrl,
+  }) {
+    if (bytesWritten != null) this.bytesWritten = bytesWritten;
+    if (requestedBytes != null) this.requestedBytes = requestedBytes;
+    if (totalBytes != null) this.totalBytes = totalBytes;
+    if (contentTypeMime != null) this.contentTypeMime = contentTypeMime;
+    if (remoteUrl != null && remoteUrl.trim().isNotEmpty) {
+      this.remoteUrl = remoteUrl;
+    }
+    updatedAt = DateTime.now();
+  }
+
+  HttpStreamCacheDownloadProgressSnapshot snapshot() {
+    return HttpStreamCacheDownloadProgressSnapshot(
+      id: id,
+      key: key,
+      kind: kind,
+      remoteUrl: remoteUrl,
+      startByte: startByte,
+      bytesWritten: bytesWritten,
+      requestedBytes: requestedBytes,
+      totalBytes: totalBytes,
+      contentTypeMime: contentTypeMime,
+      startedAt: startedAt,
+      updatedAt: updatedAt,
+    );
+  }
 }
 
 class _CacheableRangeRequest {
