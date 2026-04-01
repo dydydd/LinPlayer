@@ -474,8 +474,9 @@ jobs:
             esac
           done
           
-          max_attempts="${CURL_WRAPPER_ATTEMPTS:-6}"
-          retry_delay="${CURL_WRAPPER_DELAY_SECS:-1}"
+          max_attempts="${CURL_WRAPPER_ATTEMPTS:-10}"
+          retry_delay="${CURL_WRAPPER_INITIAL_DELAY_SECS:-2}"
+          max_retry_delay="${CURL_WRAPPER_MAX_DELAY_SECS:-30}"
           
           status=0
           for ((attempt=1; attempt<=max_attempts; attempt++)); do
@@ -490,6 +491,13 @@ jobs:
               exit 0
             fi
             status=$?
+
+            if (( retry_delay < max_retry_delay )); then
+              retry_delay=$((retry_delay * 2))
+              if (( retry_delay > max_retry_delay )); then
+                retry_delay="$max_retry_delay"
+              fi
+            fi
           done
           
           exit "$status"
@@ -502,6 +510,28 @@ jobs:
         with:
           channel: stable
           cache: true
+
+      - name: Cache Flutter pub packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.PUB_CACHE }}
+            .dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - name: Cache CocoaPods metadata (iOS)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/CocoaPods
+            ~/.cocoapods/repos/trunk
+            ios/Pods
+          key: ${{ runner.os }}-ios-cocoapods-${{ hashFiles('pubspec.lock', 'ios/Runner.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            ${{ runner.os }}-ios-cocoapods-
+            ${{ runner.os }}-cocoapods-
 
       - name: Get Flutter dependencies
         run: flutter pub get
@@ -517,6 +547,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source .github/scripts/retry.sh
+          RETRY_ATTEMPTS="${RETRY_ATTEMPTS:-3}"
+          RETRY_INITIAL_DELAY_SECONDS="${RETRY_INITIAL_DELAY_SECONDS:-15}"
+          RETRY_MAX_DELAY_SECONDS="${RETRY_MAX_DELAY_SECONDS:-60}"
+
           DART_DEFINE_ARGS=()
           if [[ -n "${DANDANPLAY_PROXY_URL:-}" ]]; then
             DART_DEFINE_ARGS+=(--dart-define=LINPLAYER_DANDANPLAY_PROXY_URL="${DANDANPLAY_PROXY_URL}")
@@ -525,33 +560,47 @@ jobs:
             DART_DEFINE_ARGS+=(--dart-define=TMDB_API_KEY="${TMDB_API_KEY}")
           fi
 
-          # flutter build ios --no-codesign can return a non-zero exit code on CI
-          # with the generic "select a Development Team" message, even though the
-          # Xcode build already produced a usable .app. Treat it as a soft-fail
-          # when build output exists, so we can still package an unsigned IPA.
-          set +e
-          flutter build ios --release --no-codesign --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" "${DART_DEFINE_ARGS[@]}"
-          status=$?
-          set -e
-
-          if [[ "$status" -ne 0 ]]; then
-            echo "flutter build ios exited with $status; checking for built app output..."
-
-            APP_PATH="$(find build/ios -maxdepth 6 -type d -name '*.app' 2>/dev/null | grep -v RunnerTests | head -n 1 || true)"
-            if [[ -z "${APP_PATH:-}" ]]; then
-              ARCHIVE_PATH="$(find build/ios -maxdepth 6 -type d -name '*.xcarchive' 2>/dev/null | head -n 1 || true)"
-              if [[ -n "${ARCHIVE_PATH:-}" ]]; then
-                APP_PATH="$(find "$ARCHIVE_PATH/Products/Applications" -maxdepth 1 -type d -name '*.app' 2>/dev/null | head -n 1 || true)"
+          find_built_ios_app() {
+            local app_path=""
+            app_path="$(find build/ios -maxdepth 6 -type d -name '*.app' 2>/dev/null | grep -v RunnerTests | head -n 1 || true)"
+            if [[ -z "${app_path:-}" ]]; then
+              local archive_path=""
+              archive_path="$(find build/ios -maxdepth 6 -type d -name '*.xcarchive' 2>/dev/null | head -n 1 || true)"
+              if [[ -n "${archive_path:-}" ]]; then
+                app_path="$(find "$archive_path/Products/Applications" -maxdepth 1 -type d -name '*.app' 2>/dev/null | head -n 1 || true)"
               fi
             fi
 
-            if [[ -z "${APP_PATH:-}" || ! -d "$APP_PATH" ]]; then
-              echo "No built .app found under build/ios; failing."
-              exit "$status"
-            fi
+            printf '%s\n' "$app_path"
+          }
 
-            echo "Found built app despite non-zero exit: $APP_PATH"
-          fi
+          build_ios_once() {
+            local status=0
+
+            # flutter build ios --no-codesign can return a non-zero exit code on CI
+            # with the generic "select a Development Team" message, even though the
+            # Xcode build already produced a usable .app. Treat it as a soft-fail
+            # when build output exists, so we can still package an unsigned IPA.
+            set +e
+            flutter build ios --release --no-codesign --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" "${DART_DEFINE_ARGS[@]}"
+            status=$?
+            set -e
+
+            if [[ "$status" -ne 0 ]]; then
+              local app_path=""
+              echo "flutter build ios exited with $status; checking for built app output..."
+              app_path="$(find_built_ios_app)"
+
+              if [[ -z "${app_path:-}" || ! -d "$app_path" ]]; then
+                echo "No built .app found under build/ios; allowing retry."
+                return "$status"
+              fi
+
+              echo "Found built app despite non-zero exit: $app_path"
+            fi
+          }
+
+          retry build_ios_once
 
       - name: Package unsigned IPA
         shell: bash
@@ -658,8 +707,9 @@ jobs:
             esac
           done
           
-          max_attempts="${CURL_WRAPPER_ATTEMPTS:-6}"
-          retry_delay="${CURL_WRAPPER_DELAY_SECS:-1}"
+          max_attempts="${CURL_WRAPPER_ATTEMPTS:-10}"
+          retry_delay="${CURL_WRAPPER_INITIAL_DELAY_SECS:-2}"
+          max_retry_delay="${CURL_WRAPPER_MAX_DELAY_SECS:-30}"
           
           status=0
           for ((attempt=1; attempt<=max_attempts; attempt++)); do
@@ -674,6 +724,13 @@ jobs:
               exit 0
             fi
             status=$?
+
+            if (( retry_delay < max_retry_delay )); then
+              retry_delay=$((retry_delay * 2))
+              if (( retry_delay > max_retry_delay )); then
+                retry_delay="$max_retry_delay"
+              fi
+            fi
           done
           
           exit "$status"
@@ -686,6 +743,28 @@ jobs:
         with:
           channel: stable
           cache: true
+
+      - name: Cache Flutter pub packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.PUB_CACHE }}
+            .dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - name: Cache CocoaPods metadata (macOS)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/CocoaPods
+            ~/.cocoapods/repos/trunk
+            macos/Pods
+          key: ${{ runner.os }}-${{ matrix.arch }}-macos-cocoapods-${{ hashFiles('pubspec.lock', 'macos/Runner.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.arch }}-macos-cocoapods-
+            ${{ runner.os }}-cocoapods-
 
       - name: Enable macOS desktop support
         run: flutter config --enable-macos-desktop
@@ -704,6 +783,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source .github/scripts/retry.sh
+          RETRY_ATTEMPTS="${RETRY_ATTEMPTS:-3}"
+          RETRY_INITIAL_DELAY_SECONDS="${RETRY_INITIAL_DELAY_SECONDS:-15}"
+          RETRY_MAX_DELAY_SECONDS="${RETRY_MAX_DELAY_SECONDS:-60}"
+
           DART_DEFINE_ARGS=()
           if [[ -n "${DANDANPLAY_PROXY_URL:-}" ]]; then
             DART_DEFINE_ARGS+=(--dart-define=LINPLAYER_DANDANPLAY_PROXY_URL="${DANDANPLAY_PROXY_URL}")
@@ -711,7 +795,7 @@ jobs:
           if [[ -n "${TMDB_API_KEY:-}" ]]; then
             DART_DEFINE_ARGS+=(--dart-define=TMDB_API_KEY="${TMDB_API_KEY}")
           fi
-          flutter build macos --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" "${DART_DEFINE_ARGS[@]}"
+          retry flutter build macos --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" "${DART_DEFINE_ARGS[@]}"
 
       - name: Create DMG installer
         shell: bash
