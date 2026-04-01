@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
+import 'package:lin_player_server_api/services/http_stream_proxy.dart';
 
 import '../source/playback_source_builder.dart';
 import '../source/resolved_playback_source.dart';
@@ -69,6 +70,7 @@ class StreamPreloadService {
 
   static const int _minBytes = 256 * 1024;
   static const int _maxBytes = 24 * 1024 * 1024;
+  static const int _maxLoopbackSeedBytes = 16 * 1024 * 1024;
   static const Duration _failureWindow = Duration(minutes: 2);
   static const Duration _recoverableDisableDuration = Duration(minutes: 2);
   static const Duration _nonRecoverableDisableDuration =
@@ -437,6 +439,7 @@ class StreamPreloadService {
         final outcome = await _prefetch(
           url: source.url,
           headers: headers,
+          cacheHeaders: source.httpHeaders,
           bytesToFetch: bytesToFetch,
           startPosition: safeStartPosition,
           preloadDuration: normalizedRequest.preloadDuration,
@@ -549,6 +552,7 @@ class StreamPreloadService {
   Future<_PreloadAttemptResult> _prefetch({
     required String url,
     required Map<String, String> headers,
+    required Map<String, String> cacheHeaders,
     required int bytesToFetch,
     required Duration startPosition,
     required Duration preloadDuration,
@@ -584,6 +588,7 @@ class StreamPreloadService {
         client: client,
         uri: uri,
         headers: headers,
+        cacheHeaders: cacheHeaders,
         bytesToFetch: bytesToFetch,
         startPosition: startPosition,
         preloadDuration: preloadDuration,
@@ -630,6 +635,7 @@ class StreamPreloadService {
     required HttpClient client,
     required Uri uri,
     required Map<String, String> headers,
+    required Map<String, String> cacheHeaders,
     required int bytesToFetch,
     required Duration startPosition,
     required Duration preloadDuration,
@@ -638,13 +644,17 @@ class StreamPreloadService {
   }) async {
     final useOffset = startPosition > Duration.zero;
     final sniffBytes = useOffset ? 512 * 1024 : bytesToFetch;
+    final firstCaptureLimit =
+        useOffset
+            ? sniffBytes
+            : sniffBytes.clamp(0, _maxLoopbackSeedBytes).toInt();
     final first = await _get(
       client: client,
       uri: uri,
       headers: headers,
       rangeStartBytes: 0,
       rangeBytes: sniffBytes,
-      captureLimitBytes: 512 * 1024,
+      captureLimitBytes: firstCaptureLimit,
     );
     if (!first.ok) {
       return _failureFromGetResult(
@@ -657,6 +667,12 @@ class StreamPreloadService {
     final playlistText = _asHlsPlaylistText(first);
     if (playlistText == null) {
       if (!useOffset) {
+        await _seedLoopbackProxyCache(
+          uri: uri,
+          headers: cacheHeaders,
+          startByte: 0,
+          result: first,
+        );
         return first.bytesRead > 0
             ? const _PreloadAttemptResult.success()
             : _PreloadAttemptResult.failure(
@@ -675,6 +691,12 @@ class StreamPreloadService {
         sizeBytes: sizeBytes,
       );
       if (startByte <= 0) {
+        await _seedLoopbackProxyCache(
+          uri: uri,
+          headers: cacheHeaders,
+          startByte: 0,
+          result: first,
+        );
         return first.bytesRead > 0
             ? const _PreloadAttemptResult.success()
             : _PreloadAttemptResult.failure(
@@ -692,7 +714,8 @@ class StreamPreloadService {
         headers: headers,
         rangeStartBytes: startByte,
         rangeBytes: bytesToFetch,
-        captureLimitBytes: 0,
+        captureLimitBytes:
+            bytesToFetch.clamp(0, _maxLoopbackSeedBytes).toInt(),
       );
       if (!second.ok || second.bytesRead <= 0) {
         return _failureFromGetResult(
@@ -701,6 +724,18 @@ class StreamPreloadService {
           message: second.bytesRead <= 0 ? 'empty-offset-response' : 'offset-fetch-failed',
         );
       }
+      await _seedLoopbackProxyCache(
+        uri: uri,
+        headers: cacheHeaders,
+        startByte: 0,
+        result: first,
+      );
+      await _seedLoopbackProxyCache(
+        uri: uri,
+        headers: cacheHeaders,
+        startByte: startByte,
+        result: second,
+      );
       return const _PreloadAttemptResult.success();
     }
 
@@ -739,6 +774,51 @@ class StreamPreloadService {
     }
 
     return start;
+  }
+
+  bool _shouldSeedLoopbackCache(Uri uri) {
+    final scheme = uri.scheme.toLowerCase();
+    if (scheme != 'http' && scheme != 'https') return false;
+    final host = uri.host.trim().toLowerCase();
+    if (host.isEmpty) return false;
+    if (host == 'localhost' || host == '127.0.0.1' || host == '::1') {
+      return false;
+    }
+    return true;
+  }
+
+  Future<void> _seedLoopbackProxyCache({
+    required Uri uri,
+    required Map<String, String> headers,
+    required int startByte,
+    required StreamPreloadGetResult result,
+  }) async {
+    if (kIsWeb) return;
+    if (!_shouldSeedLoopbackCache(uri)) return;
+    if (result.capturedBytes.isEmpty) return;
+
+    try {
+      await HttpStreamProxyServer.instance.seedStreamCache(
+        remoteUri: uri,
+        httpHeaders: headers,
+        fileName: _suggestProxyFileName(uri),
+        startByte: startByte,
+        bytes: result.capturedBytes,
+        contentTypeMime: result.contentTypeMime,
+        totalBytes: result.totalBytes,
+        acceptRanges: result.acceptsByteRanges,
+      );
+    } catch (_) {
+      // Best-effort warmup only.
+    }
+  }
+
+  String _suggestProxyFileName(Uri uri) {
+    if (uri.pathSegments.isNotEmpty) {
+      final last = uri.pathSegments.last.trim();
+      if (last.isNotEmpty) return last;
+    }
+    return 'stream.bin';
   }
 
   Future<_PreloadAttemptResult> _prefetchHls({
@@ -910,6 +990,14 @@ class StreamPreloadService {
     final status = response.statusCode;
     final ok = status == 200 || status == 206;
     final mime = response.headers.contentType?.mimeType;
+    final acceptsByteRanges =
+        (response.headers.value(HttpHeaders.acceptRangesHeader) ?? '')
+            .toLowerCase()
+            .contains('bytes');
+    final totalBytes = _inferTotalBytes(
+      response: response,
+      rangeStartBytes: rangeStartBytes,
+    );
 
     var bytesRead = 0;
     final captured = <int>[];
@@ -949,7 +1037,39 @@ class StreamPreloadService {
       capturedBytes: captured,
       contentTypeMime: mime,
       effectiveUri: effective,
+      totalBytes: totalBytes,
+      acceptsByteRanges: acceptsByteRanges,
     );
+  }
+
+  int? _inferTotalBytes({
+    required HttpClientResponse response,
+    required int? rangeStartBytes,
+  }) {
+    final contentRange = response.headers.value(HttpHeaders.contentRangeHeader);
+    if (contentRange != null) {
+      final match = RegExp(r'^bytes\s+\d+-\d+/(\d+|\*)$').firstMatch(
+        contentRange.trim(),
+      );
+      if (match != null) {
+        final totalText = match.group(1) ?? '';
+        if (totalText != '*') {
+          final total = int.tryParse(totalText);
+          if (total != null && total >= 0) return total;
+        }
+      }
+    }
+
+    final contentLength = response.contentLength;
+    if (contentLength < 0) return null;
+    if (response.statusCode == HttpStatus.partialContent) {
+      final start = rangeStartBytes ?? 0;
+      return start + contentLength;
+    }
+    if (response.statusCode == HttpStatus.ok) {
+      return contentLength;
+    }
+    return null;
   }
 
   _PreloadAttemptResult _failureFromGetResult(
@@ -1138,6 +1258,8 @@ class StreamPreloadGetResult {
     required this.capturedBytes,
     required this.contentTypeMime,
     required this.effectiveUri,
+    required this.totalBytes,
+    required this.acceptsByteRanges,
   });
 
   final bool ok;
@@ -1146,6 +1268,8 @@ class StreamPreloadGetResult {
   final List<int> capturedBytes;
   final String? contentTypeMime;
   final Uri effectiveUri;
+  final int? totalBytes;
+  final bool acceptsByteRanges;
 }
 
 @immutable

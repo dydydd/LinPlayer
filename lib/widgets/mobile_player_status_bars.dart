@@ -547,6 +547,256 @@ class MobilePlayerBottomStatusBar extends StatelessWidget {
   }
 }
 
+class MobilePlayerSpeedOverlay extends StatelessWidget {
+  const MobilePlayerSpeedOverlay({
+    super.key,
+    required this.visible,
+    required this.currentRate,
+    required this.enabled,
+    required this.onDismiss,
+    required this.onIncrease,
+    required this.onDecrease,
+    required this.onIncreaseHoldStart,
+    required this.onIncreaseHoldEnd,
+    required this.onDecreaseHoldStart,
+    required this.onDecreaseHoldEnd,
+  });
+
+  final bool visible;
+  final double currentRate;
+  final bool enabled;
+  final VoidCallback onDismiss;
+  final VoidCallback onIncrease;
+  final VoidCallback onDecrease;
+  final VoidCallback onIncreaseHoldStart;
+  final VoidCallback onIncreaseHoldEnd;
+  final VoidCallback onDecreaseHoldStart;
+  final VoidCallback onDecreaseHoldEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final segmentWidth = math.min(94.0, size.width * 0.24).toDouble();
+    final bodyHeight = math.min(
+      math.max(152.0, size.height * 0.26),
+      220.0,
+    ).toDouble();
+
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          IgnorePointer(
+            ignoring: !visible,
+            child: AnimatedOpacity(
+              opacity: visible ? 1 : 0,
+              duration: const Duration(milliseconds: 180),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onDismiss,
+                child: ColoredBox(
+                  color: Colors.black.withValues(alpha: 0.18),
+                  child: const SizedBox.expand(),
+                ),
+              ),
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: IgnorePointer(
+              ignoring: !visible,
+              child: SafeArea(
+                left: false,
+                minimum: const EdgeInsets.fromLTRB(0, 12, 10, 12),
+                child: AnimatedSlide(
+                  offset: visible ? Offset.zero : const Offset(1.15, 0),
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  child: AnimatedOpacity(
+                    opacity: visible ? 1 : 0,
+                    duration: const Duration(milliseconds: 180),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _MobileSpeedSegmentButton(
+                          width: segmentWidth,
+                          icon: Icons.add_rounded,
+                          label: '+0.1',
+                          enabled: enabled,
+                          onTap: onIncrease,
+                          onHoldStart: onIncreaseHoldStart,
+                          onHoldEnd: onIncreaseHoldEnd,
+                        ),
+                        const SizedBox(height: 8),
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(22),
+                            color: Colors.black.withValues(alpha: 0.22),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.16),
+                            ),
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.white.withValues(alpha: 0.10),
+                                Colors.white.withValues(alpha: 0.03),
+                              ],
+                            ),
+                          ),
+                          child: SizedBox(
+                            width: segmentWidth,
+                            height: bodyHeight,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 18,
+                              ),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.speed_rounded,
+                                    size: 18,
+                                    color: Colors.white.withValues(alpha: 0.76),
+                                  ),
+                                  const SizedBox(height: 14),
+                                  Text(
+                                    _formatRate(currentRate),
+                                    textAlign: TextAlign.center,
+                                    style: _overlayLabelStyle(
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.w800,
+                                      color: Colors.white,
+                                      tabular: true,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    '播放速度',
+                                    textAlign: TextAlign.center,
+                                    style: _overlayLabelStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.white70,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    '单次 0.1x',
+                                    textAlign: TextAlign.center,
+                                    style: _overlayLabelStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white.withValues(
+                                        alpha: 0.62,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        _MobileSpeedSegmentButton(
+                          width: segmentWidth,
+                          icon: Icons.remove_rounded,
+                          label: '-0.1',
+                          enabled: enabled,
+                          onTap: onDecrease,
+                          onHoldStart: onDecreaseHoldStart,
+                          onHoldEnd: onDecreaseHoldEnd,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _formatRate(double rate) {
+    final value = rate.clamp(0.1, 10.0).toDouble();
+    final digits = value == value.roundToDouble() ? 0 : 1;
+    return '${value.toStringAsFixed(digits)}x';
+  }
+}
+
+class _MobileSpeedSegmentButton extends StatelessWidget {
+  const _MobileSpeedSegmentButton({
+    required this.width,
+    required this.icon,
+    required this.label,
+    required this.enabled,
+    required this.onTap,
+    required this.onHoldStart,
+    required this.onHoldEnd,
+  });
+
+  final double width;
+  final IconData icon;
+  final String label;
+  final bool enabled;
+  final VoidCallback onTap;
+  final VoidCallback onHoldStart;
+  final VoidCallback onHoldEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      onLongPressStart: enabled ? (_) => onHoldStart() : null,
+      onLongPressEnd: enabled ? (_) => onHoldEnd() : null,
+      onLongPressCancel: enabled ? onHoldEnd : null,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: Colors.black.withValues(alpha: enabled ? 0.20 : 0.12),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: enabled ? 0.16 : 0.08),
+          ),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Colors.white.withValues(alpha: enabled ? 0.09 : 0.05),
+              Colors.white.withValues(alpha: enabled ? 0.03 : 0.01),
+            ],
+          ),
+        ),
+        child: SizedBox(
+          width: width,
+          height: 42,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 18,
+                color: enabled ? Colors.white : Colors.white38,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: _overlayLabelStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: enabled ? Colors.white : Colors.white38,
+                  tabular: true,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 TextStyle _overlayLabelStyle({
   required double fontSize,
   required FontWeight fontWeight,

@@ -20,6 +20,7 @@ import 'package:video_player_platform_interface/video_player_platform_interface.
 import 'play_network_page.dart';
 import 'server_adapters/server_access.dart';
 import 'services/app_route_observer.dart';
+import 'services/playback/video_display_hint.dart';
 import 'services/preload/playback_preload_coordinator.dart';
 import 'services/stream_proxy/local_http_stream_proxy.dart';
 import 'services/stream_resolver/stream_models.dart';
@@ -63,6 +64,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     with WidgetsBindingObserver, RouteAware {
   static const String _kLocalPlaybackProgressPrefix =
       'networkPlaybackProgress_v1:';
+  static const Duration _currentItemPreloadWarmupMaxWait =
+      Duration(milliseconds: 900);
 
   ServerAccess? _serverAccess;
   VideoPlayerController? _controller;
@@ -88,6 +91,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   final _OrientationMode _orientationMode = _OrientationMode.auto;
   String? _lastOrientationKey;
   DateTime? _lastAutoOrientationApplyAt;
+  DateTime? _suppressLifecyclePauseUntil;
   Duration? _resumeHintPosition;
   bool _showResumeHint = false;
   Timer? _resumeHintTimer;
@@ -370,6 +374,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       return;
     }
     if (widget.appState.returnHomeBehavior != ReturnHomeBehavior.pause) return;
+    if (_shouldIgnoreLifecyclePause) return;
 
     final controller = _controller;
     if (controller == null) return;
@@ -1449,21 +1454,23 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     await controller.seekTo(target);
   }
 
-  Future<void> _preloadFromHistoryPositionBestEffort({
+  Future<void> _preloadCurrentItemBestEffort({
     required Duration startPosition,
+    required String triggerSource,
   }) async {
     if (!widget.appState.preloadEnabled) return;
-    if (startPosition <= Duration.zero) return;
     final resolvedSource = _resolvedPlaybackSource;
     if (resolvedSource == null) return;
+    final effectiveStart =
+        startPosition < Duration.zero ? Duration.zero : startPosition;
 
     final result = await PlaybackPreloadCoordinator.preloadPrepared(
       PlaybackPreloadCoordinator.prepareResolved(
         appState: widget.appState,
         targetKind: PlaybackPreloadTargetKind.currentItem,
-        triggerSource: 'playback_resume',
+        triggerSource: triggerSource,
         resolvedSource: resolvedSource,
-        startPosition: startPosition,
+        startPosition: effectiveStart,
         httpProxyUrl: _preloadHttpProxyUrl,
       ),
     );
@@ -1474,6 +1481,17 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         const SnackBar(content: Text('预加载失败，当前源将暂时跳过')),
       );
     }
+  }
+
+  Future<void>? _startCurrentItemPreloadWarmup({
+    required Duration startPosition,
+    required String triggerSource,
+  }) {
+    if (!widget.appState.preloadEnabled) return null;
+    return _preloadCurrentItemBestEffort(
+      startPosition: startPosition,
+      triggerSource: triggerSource,
+    );
   }
 
   void _maybePreloadNextEpisode(Duration pos) {
@@ -1930,7 +1948,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     }
 
     if (wasPlaying) {
-      await controller.play();
+      await _ensurePlaybackAutoStarts(controller);
     } else {
       await controller.pause();
     }
@@ -2380,114 +2398,20 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   }
 
   Widget _buildMobileSpeedOverlay({required bool controlsEnabled}) {
-    final size = MediaQuery.sizeOf(context);
-    final panelWidth = math.min(108.0, size.width * 0.32);
     final currentRate =
         (_controller?.value.playbackSpeed ?? 1.0).clamp(0.1, 10.0).toDouble();
     final visible = _mobilePanel == _MobilePlayerPanel.speed;
-
-    return Positioned.fill(
-      child: Stack(
-        children: [
-          IgnorePointer(
-            ignoring: !visible,
-            child: AnimatedOpacity(
-              opacity: visible ? 1 : 0,
-              duration: const Duration(milliseconds: 180),
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _closeMobilePanels,
-                child: ColoredBox(
-                  color: Colors.black.withValues(alpha: 0.18),
-                  child: const SizedBox.expand(),
-                ),
-              ),
-            ),
-          ),
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
-            top: 96,
-            bottom: 96,
-            right: visible ? 6 : -panelWidth - 20,
-            width: panelWidth,
-            child: IgnorePointer(
-              ignoring: !visible,
-              child: SafeArea(
-                left: false,
-                minimum: const EdgeInsets.fromLTRB(0, 8, 6, 8),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(24),
-                    color: Colors.black.withValues(alpha: 0.20),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.14),
-                    ),
-                    gradient: LinearGradient(
-                      begin: Alignment.topRight,
-                      end: Alignment.bottomLeft,
-                      colors: [
-                        Colors.white.withValues(alpha: 0.10),
-                        Colors.white.withValues(alpha: 0.03),
-                      ],
-                    ),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(24),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        _MobileSpeedAdjustButton(
-                          icon: Icons.add_rounded,
-                          enabled: controlsEnabled,
-                          onTap: () => _stepMobilePlaybackRate(0.1),
-                          onLongPressStart: () =>
-                              _startMobilePlaybackRateAdjust(0.1),
-                          onLongPressEnd: _stopMobilePlaybackRateAdjust,
-                        ),
-                        const SizedBox(height: 18),
-                        const Icon(
-                          Icons.speed_rounded,
-                          color: Colors.white70,
-                          size: 18,
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          '${currentRate.toStringAsFixed(currentRate == currentRate.roundToDouble() ? 0 : 1)}x',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '倍速',
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.72),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        _MobileSpeedAdjustButton(
-                          icon: Icons.remove_rounded,
-                          enabled: controlsEnabled,
-                          onTap: () => _stepMobilePlaybackRate(-0.1),
-                          onLongPressStart: () =>
-                              _startMobilePlaybackRateAdjust(-0.1),
-                          onLongPressEnd: _stopMobilePlaybackRateAdjust,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+    return MobilePlayerSpeedOverlay(
+      visible: visible,
+      currentRate: currentRate,
+      enabled: controlsEnabled,
+      onDismiss: _closeMobilePanels,
+      onIncrease: () => _stepMobilePlaybackRate(0.1),
+      onDecrease: () => _stepMobilePlaybackRate(-0.1),
+      onIncreaseHoldStart: () => _startMobilePlaybackRateAdjust(0.1),
+      onIncreaseHoldEnd: _stopMobilePlaybackRateAdjust,
+      onDecreaseHoldStart: () => _startMobilePlaybackRateAdjust(-0.1),
+      onDecreaseHoldEnd: _stopMobilePlaybackRateAdjust,
     );
   }
 
@@ -4323,6 +4247,32 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       _resolvedPlaybackSource = resolvedSource.copyWith(
         proxyUrl: _preloadHttpProxyUrl,
       );
+      final cloudStart = _overrideStartPosition ?? widget.startPosition;
+      final remoteStart = await remoteStartFuture;
+      final localStart = await localStartFuture;
+      Duration? start = cloudStart;
+      if (remoteStart != null && (start == null || remoteStart > start)) {
+        start = remoteStart;
+      }
+      if (localStart != null && (start == null || localStart > start)) {
+        start = localStart;
+      }
+      await _applyOrientationForMode(
+        mediaSource: resolvedPlayback.selectedMediaSource,
+      );
+      final preloadStart = start ?? Duration.zero;
+      final preloadWarmup = _startCurrentItemPreloadWarmup(
+        startPosition: preloadStart,
+        triggerSource: preloadStart > Duration.zero
+            ? 'playback_resume'
+            : 'playback_start',
+      );
+      if (preloadWarmup != null) {
+        await Future.any<void>(<Future<void>>[
+          preloadWarmup,
+          Future<void>.delayed(_currentItemPreloadWarmupMaxWait),
+        ]);
+      }
       final playbackSource = await _buildPlaybackSource(resolvedSource);
       _resolvedStream = playbackSource.url;
       _resolvedStreamHeaders = playbackSource.httpHeaders;
@@ -4338,28 +4288,12 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       await _applyOrientationForMode();
       await _applyExoSubtitleOptions();
       await _maybeAutoSelectSubtitleTrack(controller);
-      final cloudStart = _overrideStartPosition ?? widget.startPosition;
-      final remoteStart = await remoteStartFuture;
-      final localStart = await localStartFuture;
-      Duration? start = cloudStart;
-      if (remoteStart != null && (start == null || remoteStart > start)) {
-        start = remoteStart;
-      }
-      if (localStart != null && (start == null || localStart > start)) {
-        start = localStart;
-      }
       final resumeImmediately =
           _overrideResumeImmediately || widget.resumeImmediately;
       _overrideStartPosition = null;
       _overrideResumeImmediately = false;
       Duration? resumeTarget;
       if (start != null && start > Duration.zero) {
-        unawaited(
-          _preloadFromHistoryPositionBestEffort(
-            startPosition: start,
-          ),
-        );
-
         final target = _safeSeekTarget(start, controller.value.duration);
         _deferProgressReporting = true;
         if (resumeImmediately) {
@@ -4369,7 +4303,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           _showResumeHint = true;
         }
       }
-      await controller.play();
+      await _ensurePlaybackAutoStarts(controller);
       if (resumeTarget != null) {
         // Avoid blocking startup on long/unsupported seeks; seek after playback starts.
         // ignore: unawaited_futures
@@ -4489,6 +4423,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       // ignore: unawaited_futures
       _loadIntroTimestampsBestEffort();
 
+      await _ensurePlaybackAutoStarts(controller);
       if (!_deferProgressReporting) {
         // ignore: unawaited_futures
         _reportPlaybackStartBestEffort();
@@ -5070,6 +5005,17 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     return Platform.isAndroid || Platform.isIOS;
   }
 
+  bool get _shouldIgnoreLifecyclePause {
+    final until = _suppressLifecyclePauseUntil;
+    return until != null && DateTime.now().isBefore(until);
+  }
+
+  void _suppressLifecyclePauseTemporarily() {
+    _suppressLifecyclePauseUntil = DateTime.now().add(
+      const Duration(milliseconds: 1200),
+    );
+  }
+
   Future<void> _enterImmersiveMode() async {
     if (!_shouldControlSystemUi) return;
     try {
@@ -5092,7 +5038,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     } catch (_) {}
   }
 
-  Future<void> _applyOrientationForMode() async {
+  Future<void> _applyOrientationForMode({
+    Map<String, dynamic>? mediaSource,
+  }) async {
     if (!_shouldControlSystemUi) return;
 
     List<DeviceOrientation>? orientations;
@@ -5107,37 +5055,55 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         orientations = const [DeviceOrientation.portraitUp];
         break;
       case _OrientationMode.auto:
-        final controller = _controller;
-        if (controller == null || !controller.value.isInitialized) return;
-        var aspect = controller.value.aspectRatio;
-        if (aspect <= 0) {
-          final size = controller.value.size;
-          if (size.width > 0 && size.height > 0) {
-            aspect = size.width / size.height;
+        var aspect = playbackDisplayAspectForMediaSource(mediaSource);
+        if (aspect == null) {
+          final controller = _controller;
+          if (controller == null || !controller.value.isInitialized) return;
+          aspect = controller.value.aspectRatio;
+          if (aspect <= 0) {
+            final size = controller.value.size;
+            if (size.width > 0 && size.height > 0) {
+              aspect = size.width / size.height;
+            }
+          }
+          if (aspect <= 0) return;
+
+          final rotation = controller.value.rotationCorrection;
+          if (rotation == 90 || rotation == 270) {
+            aspect = 1.0 / aspect;
           }
         }
-        if (aspect <= 0) return;
-
-        final rotation = controller.value.rotationCorrection;
-        if (rotation == 90 || rotation == 270) {
-          aspect = 1.0 / aspect;
-        }
-
-        orientations = aspect < 1.0
-            ? const [DeviceOrientation.portraitUp]
-            : const [
-                DeviceOrientation.landscapeLeft,
-                DeviceOrientation.landscapeRight,
-              ];
+        orientations = preferredOrientationsForDisplayAspect(aspect);
         break;
     }
 
     final key = orientations.map((o) => o.name).join(',');
     if (_lastOrientationKey == key) return;
     _lastOrientationKey = key;
+    _suppressLifecyclePauseTemporarily();
     try {
       await SystemChrome.setPreferredOrientations(orientations);
     } catch (_) {}
+  }
+
+  Future<void> _ensurePlaybackAutoStarts(
+    VideoPlayerController controller,
+  ) async {
+    if (_controller != controller) return;
+    if (!controller.value.isInitialized) return;
+    if (controller.value.isPlaying) return;
+
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        await controller.play();
+      } catch (_) {}
+      await Future<void>.delayed(
+        Duration(milliseconds: attempt == 0 ? 120 : 220),
+      );
+      if (!mounted || _controller != controller) return;
+      if (!controller.value.isInitialized) return;
+      if (controller.value.isPlaying) return;
+    }
   }
 
   String _audioTrackTitle(vp_platform.VideoAudioTrack t) {
@@ -6168,46 +6134,5 @@ enum _MobilePlayerPanel {
 }
 
 enum _OrientationMode { auto, landscape, portrait }
-
-class _MobileSpeedAdjustButton extends StatelessWidget {
-  const _MobileSpeedAdjustButton({
-    required this.icon,
-    required this.enabled,
-    required this.onTap,
-    required this.onLongPressStart,
-    required this.onLongPressEnd,
-  });
-
-  final IconData icon;
-  final bool enabled;
-  final VoidCallback onTap;
-  final VoidCallback onLongPressStart;
-  final VoidCallback onLongPressEnd;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: enabled ? onTap : null,
-      onLongPressStart: enabled ? (_) => onLongPressStart() : null,
-      onLongPressEnd: enabled ? (_) => onLongPressEnd() : null,
-      child: Container(
-        width: 52,
-        height: 52,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: enabled ? 0.10 : 0.05),
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: Colors.white.withValues(alpha: enabled ? 0.18 : 0.08),
-          ),
-        ),
-        child: Icon(
-          icon,
-          color: enabled ? Colors.white : Colors.white38,
-          size: 24,
-        ),
-      ),
-    );
-  }
-}
 
 enum _GestureMode { none, brightness, volume, seek, speed }

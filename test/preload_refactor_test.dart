@@ -8,6 +8,7 @@ import 'package:lin_player_core/state/media_server_type.dart';
 import 'package:lin_player_player/lin_player_player.dart';
 import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
+import 'package:lin_player_server_api/services/http_stream_proxy.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 
 void main() {
@@ -19,8 +20,9 @@ void main() {
     preferredScheme: 'https',
   );
 
-  setUp(() {
+  setUp(() async {
     StreamPreloadService.instance.debugResetForTest();
+    await HttpStreamProxyServer.instance.debugResetForTest();
   });
 
   test('PlaybackPreloadCoordinator keeps proxy metadata on prepared requests', () {
@@ -669,6 +671,75 @@ void main() {
       StreamPreloadService.instance.buildDiagnosticsText(),
       contains('proxy=true'),
     );
+  });
+
+  test('StreamPreloadService seeds loopback proxy cache for later playback reuse', () async {
+    final preloadProxy = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await preloadProxy.close(force: true);
+    });
+
+    var preloadProxyRequests = 0;
+    preloadProxy.listen((HttpRequest request) async {
+      preloadProxyRequests++;
+      request.response.statusCode = 206;
+      request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+      request.response.headers.set(
+        HttpHeaders.contentRangeHeader,
+        'bytes 0-7/8',
+      );
+      request.response.headers.contentType = ContentType('video', 'mp4');
+      request.response.contentLength = 8;
+      request.response.add(const <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+      await request.response.close();
+    });
+
+    const remoteUrl = 'http://media.example.invalid/reused.mp4';
+    final preloadResult =
+        await StreamPreloadService.instance.preloadResolvedSource(
+      PreloadRequest(
+        resolvedSource: const ResolvedPlaybackSource(
+          itemId: 'episode-cache-reuse',
+          playSessionId: 'ps-cache-reuse',
+          mediaSourceId: 'ms-cache-reuse',
+          url: remoteUrl,
+          httpHeaders: <String, String>{},
+          isExternal: true,
+          mediaTypeHint: ResolvedPlaybackMediaType.file,
+          fromStrm: false,
+          redirectChain: <String>[remoteUrl],
+          bitrate: 8000000,
+          sizeBytes: 8,
+        ),
+        triggerSource: 'detail_current',
+        httpProxyUrl: 'http://127.0.0.1:${preloadProxy.port}',
+      ),
+    );
+
+    expect(preloadResult.status, StreamPreloadStatus.success);
+    expect(preloadProxyRequests, 1);
+
+    final proxyUri = await HttpStreamProxyServer.instance.registerStream(
+      remoteUri: Uri.parse(remoteUrl),
+      httpHeaders: const <String, String>{},
+      fileName: 'reused.mp4',
+    );
+
+    final client = HttpClient();
+    addTearDown(() {
+      client.close(force: true);
+    });
+
+    final response = await (await client.getUrl(proxyUri)).close();
+    final body = await response.fold<List<int>>(
+      <int>[],
+      (acc, chunk) => <int>[...acc, ...chunk],
+    );
+
+    expect(response.statusCode, HttpStatus.ok);
+    expect(response.headers.contentLength, 8);
+    expect(body, <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(preloadProxyRequests, 1);
   });
 
   test('StreamPreloadService merges concurrent in-flight requests', () async {
