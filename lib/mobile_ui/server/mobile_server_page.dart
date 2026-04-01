@@ -9,9 +9,11 @@ import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../home_page.dart';
 import '../../player_screen.dart';
 import '../../player_screen_exo.dart';
 import '../../server_text_import_sheet.dart';
+import '../../webdav_home_page.dart';
 
 class MobileServerPage extends StatefulWidget {
   const MobileServerPage({
@@ -28,6 +30,24 @@ class MobileServerPage extends StatefulWidget {
 }
 
 class _MobileServerPageState extends State<MobileServerPage> {
+  Future<void> _openActiveWorkspace() async {
+    final active = widget.appState.activeServer;
+    if (!mounted || active == null) return;
+
+    if (Navigator.of(context).canPop()) {
+      await Navigator.of(context).maybePop();
+      return;
+    }
+
+    final target = active.serverType == MediaServerType.webdav
+        ? WebDavHomePage(appState: widget.appState)
+        : HomePage(appState: widget.appState);
+
+    await Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => target),
+    );
+  }
+
   Future<void> _openLocalPlayer() async {
     final useExoCore = !kIsWeb &&
         defaultTargetPlatform == TargetPlatform.android &&
@@ -57,7 +77,7 @@ class _MobileServerPageState extends State<MobileServerPage> {
       ),
     );
     if (!mounted || entered != true) return;
-    await Navigator.of(context).maybePop();
+    await _openActiveWorkspace();
   }
 
   Future<void> _showBulkImportSheet() async {
@@ -68,7 +88,7 @@ class _MobileServerPageState extends State<MobileServerPage> {
       builder: (ctx) => ServerTextImportSheet(appState: widget.appState),
     );
     if (!mounted || entered != true) return;
-    await Navigator.of(context).maybePop();
+    await _openActiveWorkspace();
   }
 
   Future<void> _showEditServerSheet(ServerProfile server) async {
@@ -82,23 +102,6 @@ class _MobileServerPageState extends State<MobileServerPage> {
   }
 
   Future<void> _enterServer(ServerProfile server) async {
-    final hasError = server.lastErrorCode != null ||
-        (server.lastErrorMessage ?? '').trim().isNotEmpty;
-    if (hasError) {
-      final message = (server.lastErrorMessage ?? '').trim();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            message.isNotEmpty
-                ? message
-                : '服务器不可用${server.lastErrorCode == null ? '' : '：${server.lastErrorCode}'}',
-          ),
-        ),
-      );
-      return;
-    }
-
     if (server.serverType == MediaServerType.plex) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -112,14 +115,19 @@ class _MobileServerPageState extends State<MobileServerPage> {
     }
 
     if (server.id == widget.appState.activeServerId) {
-      await Navigator.of(context).maybePop();
-      return;
+      final canOpenDirectly = server.serverType == MediaServerType.webdav ||
+          widget.appState.hasActiveServer;
+      if (canOpenDirectly) {
+        await _openActiveWorkspace();
+        return;
+      }
+      await widget.appState.leaveServer();
     }
 
     final ok = await widget.appState.enterServer(server.id);
     if (!mounted) return;
     if (ok) {
-      await Navigator.of(context).maybePop();
+      await _openActiveWorkspace();
       return;
     }
 
@@ -174,119 +182,48 @@ class _MobileServerPageState extends State<MobileServerPage> {
                 slivers: [
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                      child: Container(
-                        padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(26),
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              colorScheme.surfaceContainerHighest
-                                  .withValues(alpha: 0.96),
-                              colorScheme.surfaceContainerHigh
-                                  .withValues(alpha: 0.84),
-                            ],
-                          ),
-                          border: Border.all(
-                            color: colorScheme.outlineVariant,
-                          ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        '连接服务器',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .headlineSmall
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.w800,
-                                            ),
-                                      ),
-                                      const SizedBox(height: 6),
-                                      Text(
-                                        '长按服务器卡片可编辑图标、备注和自定义线路。',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodyMedium
-                                            ?.copyWith(
-                                              color: colorScheme
-                                                  .onSurfaceVariant,
-                                            ),
-                                      ),
-                                    ],
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: SegmentedButton<ServerListLayout>(
+                                segments: const [
+                                  ButtonSegment(
+                                    value: ServerListLayout.grid,
+                                    icon: Icon(Icons.grid_view_rounded),
+                                    label: Text('矩形'),
                                   ),
-                                ),
-                                FilledButton.tonalIcon(
-                                  onPressed: loading ? null : _showAddServerSheet,
-                                  icon: const Icon(Icons.add),
-                                  label: const Text('添加'),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 14),
-                            Wrap(
-                              spacing: 10,
-                              runSpacing: 10,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: [
-                                SegmentedButton<ServerListLayout>(
-                                  segments: const [
-                                    ButtonSegment(
-                                      value: ServerListLayout.grid,
-                                      icon: Icon(Icons.grid_view_rounded),
-                                      label: Text('矩形'),
-                                    ),
-                                    ButtonSegment(
-                                      value: ServerListLayout.list,
-                                      icon: Icon(Icons.view_stream_rounded),
-                                      label: Text('条形'),
-                                    ),
-                                  ],
-                                  selected: {
-                                    isList
-                                        ? ServerListLayout.list
-                                        : ServerListLayout.grid,
-                                  },
-                                  showSelectedIcon: false,
-                                  onSelectionChanged: loading
-                                      ? null
-                                      : (selected) async {
-                                          await widget.appState
-                                              .setServerListLayout(
-                                            selected.first,
-                                          );
-                                        },
-                                ),
-                                OutlinedButton.icon(
-                                  onPressed: () => showThemeSheet(
-                                    context,
-                                    listenable: widget.appState,
-                                    themeMode: () => widget.appState.themeMode,
-                                    setThemeMode: widget.appState.setThemeMode,
-                                    useDynamicColor: () =>
-                                        widget.appState.useDynamicColor,
-                                    setUseDynamicColor:
-                                        widget.appState.setUseDynamicColor,
-                                    uiTemplate: () => widget.appState.uiTemplate,
-                                    setUiTemplate:
-                                        widget.appState.setUiTemplate,
+                                  ButtonSegment(
+                                    value: ServerListLayout.list,
+                                    icon: Icon(Icons.view_stream_rounded),
+                                    label: Text('条形'),
                                   ),
-                                  icon: const Icon(Icons.palette_outlined),
-                                  label: const Text('主题'),
-                                ),
-                              ],
+                                ],
+                                selected: {
+                                  isList
+                                      ? ServerListLayout.list
+                                      : ServerListLayout.grid,
+                                },
+                                showSelectedIcon: false,
+                                onSelectionChanged: loading
+                                    ? null
+                                    : (selected) async {
+                                        await widget.appState.setServerListLayout(
+                                          selected.first,
+                                        );
+                                      },
+                              ),
                             ),
-                          ],
-                        ),
+                          ),
+                          const SizedBox(width: 12),
+                          FilledButton.tonalIcon(
+                            onPressed: loading ? null : _showAddServerSheet,
+                            icon: const Icon(Icons.add),
+                            label: const Text('添加'),
+                          ),
+                        ],
                       ),
                     ),
                   ),

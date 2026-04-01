@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_state/lin_player_state.dart';
@@ -7,6 +8,7 @@ import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
+import 'mobile_ui/search/mobile_search_page.dart';
 import 'server_adapters/server_access.dart';
 import 'show_detail_page.dart';
 
@@ -14,7 +16,7 @@ const _kSearchHistoryPrefsKey = 'search_history_v1';
 const _kSearchHistoryMaxEntries = 50;
 const _kSearchHistoryCollapsedCount = 6;
 
-class SearchPage extends StatefulWidget {
+class SearchPage extends StatelessWidget {
   const SearchPage({
     super.key,
     required this.appState,
@@ -25,10 +27,39 @@ class SearchPage extends StatefulWidget {
   final String initialQuery;
 
   @override
-  State<SearchPage> createState() => _SearchPageState();
+  Widget build(BuildContext context) {
+    final useMobileSearch = !DeviceType.isTv &&
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS);
+    if (useMobileSearch) {
+      return MobileSearchPage(
+        appState: appState,
+        initialQuery: initialQuery,
+      );
+    }
+
+    return _FallbackSearchPage(
+      appState: appState,
+      initialQuery: initialQuery,
+    );
+  }
 }
 
-class _SearchPageState extends State<SearchPage> {
+class _FallbackSearchPage extends StatefulWidget {
+  const _FallbackSearchPage({
+    required this.appState,
+    this.initialQuery = '',
+  });
+
+  final AppState appState;
+  final String initialQuery;
+
+  @override
+  State<_FallbackSearchPage> createState() => _FallbackSearchPageState();
+}
+
+class _FallbackSearchPageState extends State<_FallbackSearchPage> {
   late final TextEditingController _controller;
   Timer? _debounce;
   int _searchSeq = 0;
