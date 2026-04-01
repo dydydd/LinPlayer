@@ -17,7 +17,7 @@ import 'mobile_ui/show_detail/mobile_text_widgets.dart';
 import 'mobile_ui/show_detail/show_detail_mobile_view.dart';
 import 'plugins/plugin_slot_area.dart';
 import 'server_adapters/server_access.dart';
-import 'services/playback_proxy/playback_proxy.dart';
+import 'services/preload/playback_preload_coordinator.dart';
 import 'person_page.dart';
 import 'play_network_page.dart';
 import 'play_network_page_exo.dart';
@@ -307,35 +307,36 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     int? subtitleStreamIndex,
   }) async {
     if (!widget.appState.preloadEnabled) return;
-    if (StreamPreloadService.instance.permanentlyDisabled) return;
 
     final useExoCore = !kIsWeb &&
         defaultTargetPlatform == TargetPlatform.android &&
         widget.appState.playerCore == PlayerCore.exo;
-
-    String? httpProxyUrl;
-    final baseUri = Uri.tryParse(access.auth.baseUrl);
-    if (baseUri != null) {
-      httpProxyUrl = resolvePlaybackHttpProxyForUri(
-          appState: widget.appState, uri: baseUri);
+    StreamPreloadResult result;
+    try {
+      result = await PlaybackPreloadCoordinator.preloadItem(
+        PlaybackPreloadBuildRequest(
+          access: access,
+          appState: widget.appState,
+          itemId: itemId,
+          playerCore: useExoCore
+              ? PlaybackSourcePlayerCoreKind.exo
+              : PlaybackSourcePlayerCoreKind.mpv,
+          targetKind: PlaybackPreloadTargetKind.currentItem,
+          triggerSource: 'detail_current',
+          selectedMediaSourceId: selectedMediaSourceId,
+          audioStreamIndex: audioStreamIndex,
+          subtitleStreamIndex: subtitleStreamIndex,
+          preferredVideoVersion: widget.appState.preferredVideoVersion,
+        ),
+      );
+    } catch (_) {
+      return;
     }
-
-    final result = await StreamPreloadService.instance.preloadFirst3Seconds(
-      adapter: access.adapter,
-      auth: access.auth,
-      itemId: itemId,
-      exoPlayer: useExoCore,
-      selectedMediaSourceId: selectedMediaSourceId,
-      audioStreamIndex: audioStreamIndex,
-      subtitleStreamIndex: subtitleStreamIndex,
-      preferredVideoVersion: widget.appState.preferredVideoVersion,
-      httpProxyUrl: httpProxyUrl,
-    );
 
     if (!mounted) return;
     if (result.disabledNow) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('预加载失败，后续将不再尝试')),
+        const SnackBar(content: Text('预加载失败，当前源将暂时跳过')),
       );
     }
   }
@@ -5612,27 +5613,53 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     int? subtitleStreamIndex,
   }) async {
     if (!widget.appState.preloadEnabled) return;
-    if (StreamPreloadService.instance.permanentlyDisabled) return;
 
     final useExoCore = !kIsWeb &&
         defaultTargetPlatform == TargetPlatform.android &&
         widget.appState.playerCore == PlayerCore.exo;
-
-    final result = await StreamPreloadService.instance.preloadFirst3Seconds(
-      adapter: access.adapter,
-      auth: access.auth,
-      itemId: itemId,
-      exoPlayer: useExoCore,
-      selectedMediaSourceId: selectedMediaSourceId,
-      audioStreamIndex: audioStreamIndex,
-      subtitleStreamIndex: subtitleStreamIndex,
-      preferredVideoVersion: widget.appState.preferredVideoVersion,
-    );
+    StreamPreloadResult result;
+    try {
+      final serverId = widget.server?.id ?? widget.appState.activeServerId;
+      final seriesId = (_seriesId ?? _episode.seriesId ?? '').trim();
+      final preferredMediaSourceIndex = serverId == null ||
+              serverId.trim().isEmpty ||
+              seriesId.isEmpty
+          ? null
+          : widget.appState.seriesMediaSourceIndex(
+              serverId: serverId.trim(),
+              seriesId: seriesId,
+            );
+      final triggerSource = itemId.trim() == _episode.id.trim()
+          ? 'detail_current'
+          : 'detail_next';
+      final targetKind = itemId.trim() == _episode.id.trim()
+          ? PlaybackPreloadTargetKind.currentItem
+          : PlaybackPreloadTargetKind.nextItem;
+      result = await PlaybackPreloadCoordinator.preloadItem(
+        PlaybackPreloadBuildRequest(
+          access: access,
+          appState: widget.appState,
+          itemId: itemId,
+          playerCore: useExoCore
+              ? PlaybackSourcePlayerCoreKind.exo
+              : PlaybackSourcePlayerCoreKind.mpv,
+          targetKind: targetKind,
+          triggerSource: triggerSource,
+          selectedMediaSourceId: selectedMediaSourceId,
+          preferredMediaSourceIndex: preferredMediaSourceIndex,
+          audioStreamIndex: audioStreamIndex,
+          subtitleStreamIndex: subtitleStreamIndex,
+          preferredVideoVersion: widget.appState.preferredVideoVersion,
+        ),
+      );
+    } catch (_) {
+      return;
+    }
 
     if (!mounted || loadSeq != _loadSeq) return;
     if (result.disabledNow) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('预加载失败，后续将不再尝试')),
+        const SnackBar(content: Text('预加载失败，当前源将暂时跳过')),
       );
     }
   }
@@ -7848,8 +7875,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         episodesCacheForUi[selectedSeasonId] = items;
       }
 
-      final shouldPreload = widget.appState.preloadEnabled &&
-          !StreamPreloadService.instance.permanentlyDisabled;
+      final shouldPreload = widget.appState.preloadEnabled;
       if (shouldPreload &&
           selectedSeasonId != null &&
           selectedSeasonId.isNotEmpty) {

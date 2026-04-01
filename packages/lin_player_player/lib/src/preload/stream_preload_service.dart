@@ -2,14 +2,20 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
+
+import '../source/playback_source_builder.dart';
+import '../source/resolved_playback_source.dart';
+import 'preload_request.dart';
 
 enum StreamPreloadStatus {
   skippedDisabled,
   skippedAlreadyDone,
   success,
+  failed,
   failedDisabled,
 }
 
@@ -23,6 +29,35 @@ class StreamPreloadResult {
   bool get disabledNow => status == StreamPreloadStatus.failedDisabled;
 }
 
+@immutable
+class StreamPreloadDiagnosticEntry {
+  const StreamPreloadDiagnosticEntry({
+    required this.timestamp,
+    required this.triggerSource,
+    required this.itemId,
+    required this.mediaSourceId,
+    required this.startPosition,
+    required this.mediaType,
+    required this.isExternal,
+    required this.usesProxy,
+    required this.url,
+    required this.status,
+    this.error,
+  });
+
+  final DateTime timestamp;
+  final String triggerSource;
+  final String itemId;
+  final String mediaSourceId;
+  final Duration startPosition;
+  final ResolvedPlaybackMediaType mediaType;
+  final bool isExternal;
+  final bool usesProxy;
+  final String url;
+  final StreamPreloadStatus status;
+  final Object? error;
+}
+
 class StreamPreloadService {
   StreamPreloadService._();
 
@@ -34,23 +69,240 @@ class StreamPreloadService {
 
   static const int _minBytes = 256 * 1024;
   static const int _maxBytes = 24 * 1024 * 1024;
+  static const Duration _failureWindow = Duration(minutes: 2);
+  static const Duration _recoverableDisableDuration = Duration(minutes: 2);
+  static const Duration _nonRecoverableDisableDuration =
+      Duration(minutes: 10);
+  static const int _recoverableFailuresBeforeOpen = 2;
+  static const int _nonRecoverableFailuresBeforeOpen = 1;
 
-  bool _permanentlyDisabled = false;
-  bool get permanentlyDisabled => _permanentlyDisabled;
+  bool get permanentlyDisabled {
+    final now = _clock();
+    _pruneCircuitStates(now: now);
+    return _circuitStates.values.any((state) => state.isOpen(now));
+  }
 
   final Set<String> _doneKeys = <String>{};
   final Map<String, Future<StreamPreloadResult>> _inFlight =
       <String, Future<StreamPreloadResult>>{};
+  final List<StreamPreloadDiagnosticEntry> _recentEntries =
+      <StreamPreloadDiagnosticEntry>[];
+  final Map<String, _PreloadCircuitState> _circuitStates =
+      <String, _PreloadCircuitState>{};
 
-  String _keyFor(
-    ServerAuthSession auth,
-    String itemId, {
-    required Duration startPosition,
+  static const int _maxRecentEntries = 48;
+  DateTime Function() _clock = DateTime.now;
+
+  String _keyFor(PreloadRequest request) {
+    final source = request.resolvedSource;
+    final sourceUri = Uri.tryParse(source.url);
+    final startSec = request.startPosition <= Duration.zero
+        ? 0
+        : request.startPosition.inSeconds;
+    final audioStreamIndex =
+        sourceUri?.queryParameters['AudioStreamIndex']?.trim() ?? '';
+    final subtitleStreamIndex =
+        sourceUri?.queryParameters['SubtitleStreamIndex']?.trim() ?? '';
+    final urlFingerprint = (request.dedupeFingerprint ?? '').trim().isNotEmpty
+        ? request.dedupeFingerprint!.trim()
+        : sha1.convert(utf8.encode(source.url.trim())).toString();
+    final headersFingerprint = _headersFingerprint(source.httpHeaders);
+    final proxyFingerprint = _fingerprintText(request.httpProxyUrl);
+    return [
+      source.itemId.trim(),
+      source.mediaSourceId.trim(),
+      '$startSec',
+      audioStreamIndex,
+      subtitleStreamIndex,
+      urlFingerprint,
+      headersFingerprint,
+      proxyFingerprint,
+    ].join('|');
+  }
+
+  String _headersFingerprint(Map<String, String> headers) {
+    if (headers.isEmpty) return '';
+    final normalized = headers.entries
+        .where(
+          (entry) =>
+              entry.key.trim().isNotEmpty &&
+              entry.key.toLowerCase() != HttpHeaders.userAgentHeader,
+        )
+        .map((entry) => '${entry.key.toLowerCase()}:${entry.value.trim()}')
+        .toList(growable: false)
+      ..sort();
+    if (normalized.isEmpty) return '';
+    return sha1.convert(utf8.encode(normalized.join('|'))).toString();
+  }
+
+  String _fingerprintText(String? raw) {
+    final value = (raw ?? '').trim();
+    if (value.isEmpty) return '';
+    return sha1.convert(utf8.encode(value)).toString();
+  }
+
+  String _scopeKeyFor(PreloadRequest request) {
+    final source = request.resolvedSource;
+    final uri = Uri.tryParse(source.url);
+    final scope = _originScopeForUri(uri, raw: source.url);
+    final proxyFingerprint = _fingerprintText(request.httpProxyUrl);
+    final kind = source.isExternal ? 'external' : 'server';
+    return '$kind|$scope|proxy=$proxyFingerprint';
+  }
+
+  String _originScopeForUri(Uri? uri, {required String raw}) {
+    if (uri == null) {
+      return 'inline:${_fingerprintText(raw)}';
+    }
+    final scheme = uri.scheme.trim().toLowerCase();
+    if (scheme.isEmpty) {
+      return 'inline:${_fingerprintText(raw)}';
+    }
+    if (uri.host.trim().isNotEmpty) {
+      final port =
+          uri.hasPort ? uri.port : (scheme == 'https' ? 443 : 80);
+      return '$scheme://${uri.host.toLowerCase()}:$port';
+    }
+    final path = uri.path.trim();
+    if (path.isNotEmpty) return '$scheme:$path';
+    return '$scheme:unknown';
+  }
+
+  String buildDiagnosticsText({int maxEntries = 20}) {
+    final now = _clock();
+    _pruneCircuitStates(now: now);
+    final openCircuits = _circuitStates.values
+        .where((state) => state.isOpen(now))
+        .toList(growable: false)
+      ..sort((a, b) => a.scopeKey.compareTo(b.scopeKey));
+    final buffer = StringBuffer()
+      ..writeln('permanentlyDisabled: ${openCircuits.isNotEmpty}')
+      ..writeln('activeCircuits: ${openCircuits.length}')
+      ..writeln('doneKeys: ${_doneKeys.length}')
+      ..writeln('inFlight: ${_inFlight.length}');
+    if (openCircuits.isNotEmpty) {
+      buffer.writeln('circuits:');
+      for (final state in openCircuits.take(6)) {
+        final remaining = state.openUntil == null
+            ? 0
+            : state.openUntil!.difference(now).inSeconds.clamp(0, 1 << 30);
+        final reason =
+            state.lastFailure?.category.name ?? _PreloadFailureCategory.unknown.name;
+        buffer.writeln(
+          'scope=${state.scopeKey} '
+          'failures=${state.consecutiveFailures} '
+          'reason=$reason '
+          'retryIn=${remaining}s',
+        );
+      }
+    }
+    final count = maxEntries < 1 ? 1 : maxEntries;
+    final startIndex = _recentEntries.length > count
+        ? _recentEntries.length - count
+        : 0;
+    if (_recentEntries.isEmpty) {
+      buffer.writeln('recent: (empty)');
+      return buffer.toString().trim();
+    }
+    buffer.writeln('recent:');
+    for (final entry in _recentEntries.skip(startIndex)) {
+      final errorText = entry.error == null ? '' : ' error=${_summarizeInline(entry.error)}';
+      buffer.writeln(
+        '${entry.timestamp.toIso8601String()} '
+        'trigger=${entry.triggerSource} '
+        'status=${entry.status.name} '
+        'item=${entry.itemId} '
+        'mediaSource=${entry.mediaSourceId} '
+        'start=${entry.startPosition.inSeconds}s '
+        'media=${entry.mediaType.name} '
+        'external=${entry.isExternal} '
+        'proxy=${entry.usesProxy} '
+        'url=${_summarizeUrl(entry.url)}'
+        '$errorText',
+      );
+    }
+    return buffer.toString().trim();
+  }
+
+  Map<String, String> _buildRequestHeaders(Map<String, String> upstream) {
+    final headers = <String, String>{...upstream};
+    if (!_hasHeader(headers, HttpHeaders.userAgentHeader)) {
+      headers['User-Agent'] = preloadUserAgent;
+    }
+    return headers;
+  }
+
+  bool _hasHeader(Map<String, String> headers, String name) {
+    final lower = name.toLowerCase();
+    for (final key in headers.keys) {
+      if (key.toLowerCase() == lower) return true;
+    }
+    return false;
+  }
+
+  void _recordResult({
+    required PreloadRequest request,
+    required StreamPreloadResult result,
   }) {
-    final base = auth.baseUrl.trim().toLowerCase();
-    final id = itemId.trim();
-    final startSec = startPosition <= Duration.zero ? 0 : startPosition.inSeconds;
-    return '$base|$id|$startSec';
+    _recentEntries.add(
+      StreamPreloadDiagnosticEntry(
+        timestamp: _clock(),
+        triggerSource: request.triggerSource.trim().isEmpty
+            ? 'unknown'
+            : request.triggerSource.trim(),
+        itemId: request.resolvedSource.itemId,
+        mediaSourceId: request.resolvedSource.mediaSourceId,
+        startPosition: request.startPosition,
+        mediaType: request.resolvedSource.mediaTypeHint,
+        isExternal: request.resolvedSource.isExternal,
+        usesProxy: (request.httpProxyUrl ?? '').trim().isNotEmpty,
+        url: request.resolvedSource.url,
+        status: result.status,
+        error: result.error,
+      ),
+    );
+    if (_recentEntries.length > _maxRecentEntries) {
+      _recentEntries.removeRange(0, _recentEntries.length - _maxRecentEntries);
+    }
+  }
+
+  String _summarizeUrl(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty) return '';
+    final uri = Uri.tryParse(value);
+    if (uri == null || uri.scheme.isEmpty || uri.host.trim().isEmpty) {
+      return _summarizeInline(value);
+    }
+    final buffer = StringBuffer()
+      ..write(uri.scheme)
+      ..write('://')
+      ..write(uri.host);
+    if (uri.hasPort &&
+        !((uri.scheme == 'http' && uri.port == 80) ||
+            (uri.scheme == 'https' && uri.port == 443))) {
+      buffer
+        ..write(':')
+        ..write(uri.port);
+    }
+    buffer.write(uri.path.trim().isEmpty ? '/' : uri.path.trim());
+    if (uri.hasQuery) buffer.write('?...');
+    return _summarizeInline(buffer.toString());
+  }
+
+  String _summarizeInline(Object? value, {int limit = 180}) {
+    final text =
+        (value ?? '').toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (text.length <= limit) return text;
+    return '${text.substring(0, limit - 3)}...';
+  }
+
+  @visibleForTesting
+  void debugResetForTest({DateTime Function()? nowProvider}) {
+    _doneKeys.clear();
+    _inFlight.clear();
+    _recentEntries.clear();
+    _circuitStates.clear();
+    _clock = nowProvider ?? DateTime.now;
   }
 
   Future<StreamPreloadResult> preloadFirst3Seconds({
@@ -66,103 +318,147 @@ class StreamPreloadService {
         VideoVersionPreference.defaultVersion,
     String? httpProxyUrl,
   }) async {
-    final safeStartPosition =
-        startPosition < Duration.zero ? Duration.zero : startPosition;
-    final key = _keyFor(
-      auth,
-      itemId,
-      startPosition: safeStartPosition,
-    );
-    if (_permanentlyDisabled) {
-      return const StreamPreloadResult(StreamPreloadStatus.skippedDisabled);
+    try {
+      final buildResult = await PlaybackSourceBuilder.build(
+        PlaybackSourceBuildRequest(
+          adapter: adapter,
+          auth: auth,
+          itemId: itemId,
+          playerCore: exoPlayer
+              ? PlaybackSourcePlayerCoreKind.exo
+              : PlaybackSourcePlayerCoreKind.mpv,
+          selectedMediaSourceId: selectedMediaSourceId,
+          audioStreamIndex: audioStreamIndex,
+          subtitleStreamIndex: subtitleStreamIndex,
+          preferredVideoVersion: preferredVideoVersion,
+        ),
+      );
+      return preloadResolvedSource(
+        PreloadRequest(
+          resolvedSource: buildResult.resolvedSource,
+          triggerSource: 'legacy',
+          startPosition: startPosition,
+          httpProxyUrl: httpProxyUrl,
+        ),
+      );
+    } catch (error) {
+      final result = StreamPreloadResult(
+        StreamPreloadStatus.failed,
+        error: error,
+      );
+      _recordResult(
+        request: PreloadRequest(
+          resolvedSource: ResolvedPlaybackSource(
+            itemId: itemId,
+            playSessionId: '',
+            mediaSourceId: selectedMediaSourceId ?? '',
+            url: auth.baseUrl,
+            httpHeaders: const <String, String>{},
+            isExternal: false,
+            mediaTypeHint: ResolvedPlaybackMediaType.unknown,
+            fromStrm: false,
+            redirectChain: const <String>[],
+          ),
+          triggerSource: 'legacy',
+          startPosition: startPosition,
+          httpProxyUrl: httpProxyUrl,
+        ),
+        result: result,
+      );
+      return result;
     }
+  }
+
+  Future<StreamPreloadResult> preloadResolvedSource(PreloadRequest request) async {
+    final safeStartPosition = request.startPosition < Duration.zero
+        ? Duration.zero
+        : request.startPosition;
+    final normalizedRequest = PreloadRequest(
+      resolvedSource: request.resolvedSource,
+      triggerSource: request.triggerSource,
+      startPosition: safeStartPosition,
+      dedupeFingerprint: request.dedupeFingerprint,
+      httpProxyUrl: request.httpProxyUrl,
+    );
+    final scopeKey = _scopeKeyFor(normalizedRequest);
+    final now = _clock();
+    _pruneCircuitStates(now: now);
+    final key = _keyFor(normalizedRequest);
     if (_doneKeys.contains(key)) {
-      return const StreamPreloadResult(StreamPreloadStatus.skippedAlreadyDone);
+      final result =
+          const StreamPreloadResult(StreamPreloadStatus.skippedAlreadyDone);
+      _recordResult(request: normalizedRequest, result: result);
+      return result;
+    }
+    final openCircuit = _circuitStates[scopeKey];
+    if (openCircuit != null && openCircuit.isOpen(now)) {
+      final result = StreamPreloadResult(
+        StreamPreloadStatus.skippedDisabled,
+        error: _PreloadFailureInfo(
+          category:
+              openCircuit.lastFailure?.category ?? _PreloadFailureCategory.unknown,
+          statusCode: openCircuit.lastFailure?.statusCode,
+          url: normalizedRequest.resolvedSource.url,
+          message:
+              'circuit-open:${openCircuit.openUntil!.difference(now).inSeconds}s',
+        ),
+      );
+      _recordResult(request: normalizedRequest, result: result);
+      return result;
     }
 
     final inFlight = _inFlight[key];
     if (inFlight != null) return inFlight;
 
     final run = () async {
-      Object? lastError;
+      _PreloadFailureInfo? lastFailure;
 
       for (var attempt = 0; attempt < maxAttempts; attempt++) {
-        try {
-          final info = await adapter.fetchPlaybackInfo(
-            auth,
-            itemId: itemId,
-            exoPlayer: exoPlayer,
-          );
-          final sources = info.mediaSources.cast<Map<String, dynamic>>();
-          final chosenMediaSourceId = _resolveMediaSourceId(
-            sources: sources,
-            selectedMediaSourceId: selectedMediaSourceId,
-            preferred: preferredVideoVersion,
-          );
-          final ms = _findMediaSource(
-            sources,
-            chosenMediaSourceId,
-          );
-          final streamUrl = _buildStreamUrl(
-            auth: auth,
-            adapterDeviceId: adapter.deviceId,
-            itemId: itemId,
-            info: info,
-            mediaSource: ms,
-            exoPlayer: exoPlayer,
-            audioStreamIndex: audioStreamIndex,
-            subtitleStreamIndex: subtitleStreamIndex,
-          );
-          final bitrate = _estimateBitrateBitsPerSecond(ms);
-          final bytesToFetch = _estimateBytesToFetch(bitrate);
-          final sizeBytes = _asInt(ms?['Size']);
-
-          bool sameOrigin(Uri a, Uri b) {
-            int portOf(Uri u) => u.hasPort ? u.port : (u.scheme == 'https' ? 443 : 80);
-            return a.scheme == b.scheme && a.host == b.host && portOf(a) == portOf(b);
-          }
-
-          final streamUri = Uri.tryParse(streamUrl);
-          final baseUri = Uri.tryParse(auth.baseUrl);
-          final needsAuthHeaders = streamUri != null &&
-              baseUri != null &&
-              streamUri.host.isNotEmpty &&
-              baseUri.host.isNotEmpty &&
-              sameOrigin(streamUri, baseUri);
-
-          final headers = <String, String>{
-            if (needsAuthHeaders) ...adapter.buildStreamHeaders(auth),
-            'User-Agent': preloadUserAgent,
-          };
-          final ok = await _prefetch(
-            url: streamUrl,
-            headers: headers,
-            bytesToFetch: bytesToFetch,
-            startPosition: safeStartPosition,
-            bitrateBitsPerSecond: bitrate,
-            sizeBytes: needsAuthHeaders ? sizeBytes : null,
-            httpProxyUrl: httpProxyUrl,
-          );
-          if (ok) {
-            _doneKeys.add(key);
-            return const StreamPreloadResult(StreamPreloadStatus.success);
-          }
-        } catch (e) {
-          lastError = e;
+        final source = normalizedRequest.resolvedSource;
+        final headers = _buildRequestHeaders(source.httpHeaders);
+        final bytesToFetch = _estimateBytesToFetch(source.bitrate);
+        final outcome = await _prefetch(
+          url: source.url,
+          headers: headers,
+          bytesToFetch: bytesToFetch,
+          startPosition: safeStartPosition,
+          bitrateBitsPerSecond: source.bitrate,
+          sizeBytes: source.sizeBytes,
+          httpProxyUrl: normalizedRequest.httpProxyUrl,
+        );
+        if (outcome.success) {
+          _doneKeys.add(key);
+          _circuitStates.remove(scopeKey);
+          final result = const StreamPreloadResult(StreamPreloadStatus.success);
+          _recordResult(request: normalizedRequest, result: result);
+          return result;
         }
+        lastFailure = outcome.failure;
 
-        if (attempt < maxAttempts - 1) {
+        if (attempt < maxAttempts - 1 &&
+            lastFailure != null &&
+            lastFailure.isRecoverable) {
           await Future<void>.delayed(
             Duration(milliseconds: attempt == 0 ? 180 : 320),
           );
         }
       }
 
-      _permanentlyDisabled = true;
-      return StreamPreloadResult(
-        StreamPreloadStatus.failedDisabled,
-        error: lastError,
+      final failure = lastFailure ??
+          _PreloadFailureInfo(
+            category: _PreloadFailureCategory.unknown,
+            url: normalizedRequest.resolvedSource.url,
+            message: 'prefetch-failed',
+          );
+      final disabledNow = _recordFailure(scopeKey, failure);
+      final result = StreamPreloadResult(
+        disabledNow
+            ? StreamPreloadStatus.failedDisabled
+            : StreamPreloadStatus.failed,
+        error: failure,
       );
+      _recordResult(request: normalizedRequest, result: result);
+      return result;
     }();
 
     _inFlight[key] = run;
@@ -181,26 +477,54 @@ class StreamPreloadService {
     return estimated.clamp(_minBytes, _maxBytes);
   }
 
-  int? _estimateBitrateBitsPerSecond(Map<String, dynamic>? mediaSource) {
-    final bps = _asInt(mediaSource?['Bitrate']);
-    if (bps != null && bps > 0) return bps;
-
-    final sizeBytes = _asInt(mediaSource?['Size']);
-    final runTimeTicks = _asInt(mediaSource?['RunTimeTicks']);
-    if (sizeBytes == null ||
-        sizeBytes <= 0 ||
-        runTimeTicks == null ||
-        runTimeTicks <= 0) {
-      return bps;
+  bool _recordFailure(String scopeKey, _PreloadFailureInfo failure) {
+    final now = _clock();
+    final state = _circuitStates.putIfAbsent(
+      scopeKey,
+      () => _PreloadCircuitState(scopeKey: scopeKey),
+    );
+    if (state.lastFailureAt == null ||
+        now.difference(state.lastFailureAt!) > _failureWindow ||
+        state.lastFailure?.category != failure.category) {
+      state.consecutiveFailures = 0;
     }
+    state.consecutiveFailures += 1;
+    state.lastFailureAt = now;
+    state.lastFailure = failure;
 
-    final seconds = runTimeTicks / 10000000.0;
-    if (seconds <= 0.5) return bps;
-    final estimatedBps = ((sizeBytes * 8) / seconds).round();
-    return estimatedBps > 0 ? estimatedBps : bps;
+    final threshold = failure.isRecoverable
+        ? _recoverableFailuresBeforeOpen
+        : _nonRecoverableFailuresBeforeOpen;
+    if (state.consecutiveFailures < threshold) return false;
+
+    state.openUntil = now.add(
+      failure.isRecoverable
+          ? _recoverableDisableDuration
+          : _nonRecoverableDisableDuration,
+    );
+    return true;
   }
 
-  Future<bool> _prefetch({
+  void _pruneCircuitStates({required DateTime now}) {
+    final staleKeys = <String>[];
+    for (final entry in _circuitStates.entries) {
+      final state = entry.value;
+      if (state.isOpen(now)) continue;
+      if (state.openUntil != null && !state.isOpen(now)) {
+        staleKeys.add(entry.key);
+        continue;
+      }
+      final lastFailureAt = state.lastFailureAt;
+      if (lastFailureAt == null || now.difference(lastFailureAt) > _failureWindow) {
+        staleKeys.add(entry.key);
+      }
+    }
+    for (final key in staleKeys) {
+      _circuitStates.remove(key);
+    }
+  }
+
+  Future<_PreloadAttemptResult> _prefetch({
     required String url,
     required Map<String, String> headers,
     required int bytesToFetch,
@@ -209,9 +533,25 @@ class StreamPreloadService {
     required int? sizeBytes,
     String? httpProxyUrl,
   }) async {
-    if (kIsWeb) return false;
+    if (kIsWeb) {
+      return _PreloadAttemptResult.failure(
+        _PreloadFailureInfo(
+          category: _PreloadFailureCategory.unsupported,
+          url: url,
+          message: 'web-not-supported',
+        ),
+      );
+    }
     final uri = Uri.tryParse(url);
-    if (uri == null) return false;
+    if (uri == null) {
+      return _PreloadAttemptResult.failure(
+        _PreloadFailureInfo(
+          category: _PreloadFailureCategory.unsupported,
+          url: url,
+          message: 'invalid-url',
+        ),
+      );
+    }
 
     final client = LinHttpClientFactory.createHttpClient(
       _overrideConfig(httpProxyUrl),
@@ -225,6 +565,10 @@ class StreamPreloadService {
         startPosition: startPosition,
         bitrateBitsPerSecond: bitrateBitsPerSecond,
         sizeBytes: sizeBytes,
+      );
+    } catch (error) {
+      return _PreloadAttemptResult.failure(
+        _classifyException(error, url: url),
       );
     } finally {
       try {
@@ -258,7 +602,7 @@ class StreamPreloadService {
     );
   }
 
-  Future<bool> _prefetchUri({
+  Future<_PreloadAttemptResult> _prefetchUri({
     required HttpClient client,
     required Uri uri,
     required Map<String, String> headers,
@@ -277,11 +621,27 @@ class StreamPreloadService {
       rangeBytes: sniffBytes,
       captureLimitBytes: 512 * 1024,
     );
-    if (!first.ok) return false;
+    if (!first.ok) {
+      return _failureFromGetResult(
+        first,
+        fallbackUri: uri,
+        message: 'initial-fetch-failed',
+      );
+    }
 
     final playlistText = _asHlsPlaylistText(first);
     if (playlistText == null) {
-      if (!useOffset) return first.bytesRead > 0;
+      if (!useOffset) {
+        return first.bytesRead > 0
+            ? const _PreloadAttemptResult.success()
+            : _PreloadAttemptResult.failure(
+                _PreloadFailureInfo(
+                  category: _PreloadFailureCategory.emptyResponse,
+                  url: first.effectiveUri.toString(),
+                  message: 'empty-initial-response',
+                ),
+              );
+      }
 
       final startByte = _estimateRangeStartBytes(
         startPosition: startPosition,
@@ -289,7 +649,17 @@ class StreamPreloadService {
         bitrateBitsPerSecond: bitrateBitsPerSecond,
         sizeBytes: sizeBytes,
       );
-      if (startByte <= 0) return first.bytesRead > 0;
+      if (startByte <= 0) {
+        return first.bytesRead > 0
+            ? const _PreloadAttemptResult.success()
+            : _PreloadAttemptResult.failure(
+                _PreloadFailureInfo(
+                  category: _PreloadFailureCategory.emptyResponse,
+                  url: first.effectiveUri.toString(),
+                  message: 'empty-sniff-response',
+                ),
+              );
+      }
 
       final second = await _get(
         client: client,
@@ -299,7 +669,14 @@ class StreamPreloadService {
         rangeBytes: bytesToFetch,
         captureLimitBytes: 0,
       );
-      return second.ok && second.bytesRead > 0;
+      if (!second.ok || second.bytesRead <= 0) {
+        return _failureFromGetResult(
+          second,
+          fallbackUri: first.effectiveUri,
+          message: second.bytesRead <= 0 ? 'empty-offset-response' : 'offset-fetch-failed',
+        );
+      }
+      return const _PreloadAttemptResult.success();
     }
 
     final playlistUri = first.effectiveUri;
@@ -338,7 +715,7 @@ class StreamPreloadService {
     return start;
   }
 
-  Future<bool> _prefetchHls({
+  Future<_PreloadAttemptResult> _prefetchHls({
     required HttpClient client,
     required Uri playlistUri,
     required String playlistText,
@@ -346,7 +723,15 @@ class StreamPreloadService {
     required Duration startPosition,
   }) async {
     var parsed = _parseHls(playlistText, base: playlistUri);
-    if (parsed == null) return false;
+    if (parsed == null) {
+      return _PreloadAttemptResult.failure(
+        _PreloadFailureInfo(
+          category: _PreloadFailureCategory.unsupported,
+          url: playlistUri.toString(),
+          message: 'invalid-hls-playlist',
+        ),
+      );
+    }
 
     if (parsed.variantPlaylistUri != null) {
       final variant = await _get(
@@ -357,11 +742,33 @@ class StreamPreloadService {
         rangeBytes: 512 * 1024,
         captureLimitBytes: 1024 * 1024,
       );
-      if (!variant.ok) return false;
+      if (!variant.ok) {
+        return _failureFromGetResult(
+          variant,
+          fallbackUri: parsed.variantPlaylistUri!,
+          message: 'variant-fetch-failed',
+        );
+      }
       final text = _asHlsPlaylistText(variant);
-      if (text == null) return false;
+      if (text == null) {
+        return _PreloadAttemptResult.failure(
+          _PreloadFailureInfo(
+            category: _PreloadFailureCategory.unsupported,
+            url: variant.effectiveUri.toString(),
+            message: 'variant-not-playlist',
+          ),
+        );
+      }
       parsed = _parseHls(text, base: variant.effectiveUri);
-      if (parsed == null) return false;
+      if (parsed == null) {
+        return _PreloadAttemptResult.failure(
+          _PreloadFailureInfo(
+            category: _PreloadFailureCategory.unsupported,
+            url: variant.effectiveUri.toString(),
+            message: 'invalid-variant-playlist',
+          ),
+        );
+      }
     }
 
     if (parsed.initSegmentUri != null) {
@@ -373,7 +780,13 @@ class StreamPreloadService {
         rangeBytes: null,
         captureLimitBytes: 0,
       );
-      if (!init.ok) return false;
+      if (!init.ok) {
+        return _failureFromGetResult(
+          init,
+          fallbackUri: parsed.initSegmentUri!,
+          message: 'init-segment-failed',
+        );
+      }
     }
 
     var remainingMs = preloadDuration.inMilliseconds;
@@ -409,7 +822,13 @@ class StreamPreloadService {
         rangeBytes: null,
         captureLimitBytes: 0,
       );
-      if (!r.ok) return false;
+      if (!r.ok) {
+        return _failureFromGetResult(
+          r,
+          fallbackUri: seg.uri,
+          message: 'segment-fetch-failed',
+        );
+      }
       fetchedAny = true;
       segmentCount++;
 
@@ -417,7 +836,16 @@ class StreamPreloadService {
       remainingMs -= durMs;
     }
 
-    return fetchedAny;
+    if (!fetchedAny) {
+      return _PreloadAttemptResult.failure(
+        _PreloadFailureInfo(
+          category: _PreloadFailureCategory.emptyResponse,
+          url: playlistUri.toString(),
+          message: 'no-hls-segments-fetched',
+        ),
+      );
+    }
+    return const _PreloadAttemptResult.success();
   }
 
   String? _asHlsPlaylistText(StreamPreloadGetResult result) {
@@ -497,281 +925,181 @@ class StreamPreloadService {
     );
   }
 
-  static int? _asInt(dynamic value) {
-    if (value is int) return value;
-    if (value is num) return value.toInt();
-    if (value is String) return int.tryParse(value);
-    return null;
-  }
-
-  static List<Map<String, dynamic>> _streamsOfType(
-    Map<String, dynamic> ms,
-    String type,
-  ) {
-    final streams = (ms['MediaStreams'] as List?) ?? const [];
-    return streams
-        .where((e) => (e as Map)['Type'] == type)
-        .map((e) => e as Map<String, dynamic>)
-        .toList();
-  }
-
-  static String? _resolveMediaSourceId({
-    required List<Map<String, dynamic>> sources,
-    required String? selectedMediaSourceId,
-    required VideoVersionPreference preferred,
+  _PreloadAttemptResult _failureFromGetResult(
+    StreamPreloadGetResult result, {
+    required Uri fallbackUri,
+    required String message,
   }) {
-    final selected = (selectedMediaSourceId ?? '').trim();
-    if (selected.isNotEmpty) return selected;
-    if (sources.isEmpty) return null;
-
-    int heightOf(Map<String, dynamic> ms) {
-      final videos = _streamsOfType(ms, 'Video');
-      final video = videos.isNotEmpty ? videos.first : null;
-      return _asInt(video?['Height']) ?? 0;
+    final statusCode = result.statusCode;
+    final url = result.effectiveUri.toString().trim().isEmpty
+        ? fallbackUri.toString()
+        : result.effectiveUri.toString();
+    if (statusCode == 401 || statusCode == 403) {
+      return _PreloadAttemptResult.failure(
+        _PreloadFailureInfo(
+          category: _PreloadFailureCategory.client,
+          statusCode: statusCode,
+          url: url,
+          message: message,
+        ),
+      );
     }
-
-    int bitrateOf(Map<String, dynamic> ms) => _asInt(ms['Bitrate']) ?? 0;
-
-    int sizeOf(Map<String, dynamic> ms) {
-      final v = ms['Size'];
-      if (v is int) return v;
-      if (v is num) return v.toInt();
-      if (v is String) return int.tryParse(v) ?? 0;
-      return 0;
+    if (statusCode == 404 || statusCode == 410) {
+      return _PreloadAttemptResult.failure(
+        _PreloadFailureInfo(
+          category: _PreloadFailureCategory.client,
+          statusCode: statusCode,
+          url: url,
+          message: message,
+        ),
+      );
     }
-
-    int compareByQuality(Map<String, dynamic> a, Map<String, dynamic> b) {
-      final h = heightOf(b) - heightOf(a);
-      if (h != 0) return h;
-      final br = bitrateOf(b) - bitrateOf(a);
-      if (br != 0) return br;
-      return sizeOf(b) - sizeOf(a);
+    if (statusCode == 408 || statusCode == 425 || statusCode == 429) {
+      return _PreloadAttemptResult.failure(
+        _PreloadFailureInfo(
+          category: _PreloadFailureCategory.rateLimited,
+          statusCode: statusCode,
+          url: url,
+          message: message,
+        ),
+      );
     }
-
-    String videoCodecOf(Map<String, dynamic> ms) {
-      final msCodec = (ms['VideoCodec'] as String?)?.trim();
-      if (msCodec != null && msCodec.isNotEmpty) return msCodec.toLowerCase();
-      final videos = _streamsOfType(ms, 'Video');
-      final v = videos.isNotEmpty ? videos.first : null;
-      final codec = (v?['Codec'] as String?)?.trim() ?? '';
-      return codec.toLowerCase();
+    if (statusCode >= 500) {
+      return _PreloadAttemptResult.failure(
+        _PreloadFailureInfo(
+          category: _PreloadFailureCategory.server,
+          statusCode: statusCode,
+          url: url,
+          message: message,
+        ),
+      );
     }
-
-    bool isHevc(Map<String, dynamic> ms) {
-      final c = videoCodecOf(ms);
-      return c.contains('hevc') ||
-          c.contains('h265') ||
-          c.contains('h.265') ||
-          c.contains('x265');
+    if (result.bytesRead <= 0) {
+      return _PreloadAttemptResult.failure(
+        _PreloadFailureInfo(
+          category: _PreloadFailureCategory.emptyResponse,
+          statusCode: statusCode == 0 ? null : statusCode,
+          url: url,
+          message: message,
+        ),
+      );
     }
-
-    bool isAvc(Map<String, dynamic> ms) {
-      final c = videoCodecOf(ms);
-      return c.contains('avc') ||
-          c.contains('h264') ||
-          c.contains('h.264') ||
-          c.contains('x264');
-    }
-
-    Map<String, dynamic>? pickBest(
-      List<Map<String, dynamic>> list, {
-      required int Function(Map<String, dynamic> ms) primary,
-      required int Function(Map<String, dynamic> ms) secondary,
-      required bool higherIsBetter,
-    }) {
-      if (list.isEmpty) return null;
-      Map<String, dynamic> chosen = list.first;
-      var bestPrimary = primary(chosen);
-      var bestSecondary = secondary(chosen);
-      for (final ms in list.skip(1)) {
-        final p = primary(ms);
-        final s = secondary(ms);
-        final better = higherIsBetter
-            ? (p > bestPrimary || (p == bestPrimary && s > bestSecondary))
-            : (p < bestPrimary || (p == bestPrimary && s < bestSecondary));
-        if (better) {
-          chosen = ms;
-          bestPrimary = p;
-          bestSecondary = s;
-        }
-      }
-      return chosen;
-    }
-
-    Map<String, dynamic>? chosen;
-    switch (preferred) {
-      case VideoVersionPreference.highestResolution:
-        chosen = pickBest(
-          sources,
-          primary: heightOf,
-          secondary: bitrateOf,
-          higherIsBetter: true,
-        );
-        break;
-      case VideoVersionPreference.lowestBitrate:
-        chosen = pickBest(
-          sources,
-          primary: (ms) => bitrateOf(ms) == 0 ? 1 << 30 : bitrateOf(ms),
-          secondary: heightOf,
-          higherIsBetter: false,
-        );
-        break;
-      case VideoVersionPreference.preferHevc:
-        final hevc = sources.where(isHevc).toList();
-        chosen = pickBest(
-          hevc.isNotEmpty ? hevc : sources,
-          primary: heightOf,
-          secondary: bitrateOf,
-          higherIsBetter: true,
-        );
-        break;
-      case VideoVersionPreference.preferAvc:
-        final avc = sources.where(isAvc).toList();
-        chosen = pickBest(
-          avc.isNotEmpty ? avc : sources,
-          primary: heightOf,
-          secondary: bitrateOf,
-          higherIsBetter: true,
-        );
-        break;
-      case VideoVersionPreference.defaultVersion:
-        chosen = (List<Map<String, dynamic>>.from(sources)..sort(compareByQuality))
-            .first;
-        break;
-    }
-
-    final id = chosen?['Id']?.toString().trim();
-    return (id == null || id.isEmpty) ? null : id;
-  }
-
-  static Map<String, dynamic>? _findMediaSource(
-    List<Map<String, dynamic>> sources,
-    String? mediaSourceId,
-  ) {
-    if (sources.isEmpty) return null;
-    final id = (mediaSourceId ?? '').trim();
-    if (id.isEmpty) return sources.first;
-    return sources.firstWhere(
-      (s) => (s['Id']?.toString() ?? '').trim() == id,
-      orElse: () => sources.first,
+    return _PreloadAttemptResult.failure(
+      _PreloadFailureInfo(
+        category: _PreloadFailureCategory.unknown,
+        statusCode: statusCode == 0 ? null : statusCode,
+        url: url,
+        message: message,
+      ),
     );
   }
 
-  static String _normalizeApiPrefix(String raw) {
-    var v = raw.trim();
-    while (v.startsWith('/')) {
-      v = v.substring(1);
+  _PreloadFailureInfo _classifyException(Object error, {required String url}) {
+    if (error is TimeoutException) {
+      return _PreloadFailureInfo(
+        category: _PreloadFailureCategory.network,
+        url: url,
+        message: 'timeout',
+      );
     }
-    while (v.endsWith('/')) {
-      v = v.substring(0, v.length - 1);
+    if (error is SocketException || error is HandshakeException) {
+      return _PreloadFailureInfo(
+        category: _PreloadFailureCategory.network,
+        url: url,
+        message: error.runtimeType.toString(),
+      );
     }
-    return v;
+    if (error is HttpException) {
+      return _PreloadFailureInfo(
+        category: _PreloadFailureCategory.network,
+        url: url,
+        message: error.message,
+      );
+    }
+    return _PreloadFailureInfo(
+      category: _PreloadFailureCategory.unknown,
+      url: url,
+      message: error.toString(),
+    );
   }
 
-  static String _apiUrlWithPrefix(String baseUrl, String apiPrefix, String path) {
-    var base = baseUrl.trim();
-    while (base.endsWith('/')) {
-      base = base.substring(0, base.length - 1);
+}
+
+enum _PreloadFailureCategory {
+  network,
+  server,
+  rateLimited,
+  client,
+  unsupported,
+  emptyResponse,
+  unknown,
+}
+
+@immutable
+class _PreloadFailureInfo {
+  const _PreloadFailureInfo({
+    required this.category,
+    this.statusCode,
+    this.url,
+    this.message,
+  });
+
+  final _PreloadFailureCategory category;
+  final int? statusCode;
+  final String? url;
+  final String? message;
+
+  bool get isRecoverable {
+    switch (category) {
+      case _PreloadFailureCategory.network:
+      case _PreloadFailureCategory.server:
+      case _PreloadFailureCategory.rateLimited:
+      case _PreloadFailureCategory.emptyResponse:
+      case _PreloadFailureCategory.unknown:
+        return true;
+      case _PreloadFailureCategory.client:
+      case _PreloadFailureCategory.unsupported:
+        return false;
     }
-
-    final fixedPrefix = _normalizeApiPrefix(apiPrefix);
-    final prefixPart = fixedPrefix.isEmpty ? '' : '/$fixedPrefix';
-
-    final fixedPath =
-        path.trim().startsWith('/') ? path.trim() : '/${path.trim()}';
-    return '$base$prefixPart$fixedPath';
   }
 
-  static String _buildStreamUrl({
-    required ServerAuthSession auth,
-    required String adapterDeviceId,
-    required String itemId,
-    required PlaybackInfoResult info,
-    required Map<String, dynamic>? mediaSource,
-    required bool exoPlayer,
-    required int? audioStreamIndex,
-    required int? subtitleStreamIndex,
-  }) {
-    final base = auth.baseUrl;
-    final token = auth.token;
-    final userId = auth.userId;
-
-    final baseUri = Uri.tryParse(base);
-
-    int effectivePort(Uri uri) {
-      if (uri.hasPort) return uri.port;
-      return uri.scheme.toLowerCase() == 'https' ? 443 : 80;
-    }
-
-    bool isSameOrigin(Uri a, Uri b) {
-      return a.scheme.toLowerCase() == b.scheme.toLowerCase() &&
-          a.host.toLowerCase() == b.host.toLowerCase() &&
-          effectivePort(a) == effectivePort(b);
-    }
-
-    bool shouldApplyServerParams(Uri uri) {
-      if (baseUri == null || baseUri.host.isEmpty) return true;
-      if (uri.host.isEmpty) return true;
-      return isSameOrigin(uri, baseUri);
-    }
-
-    String applyQueryPrefs(String url) {
-      final uri = Uri.parse(url);
-      if (!shouldApplyServerParams(uri)) return uri.toString();
-      final params = Map<String, String>.from(uri.queryParameters);
-      if (!params.containsKey('api_key') && token.trim().isNotEmpty) {
-        params['api_key'] = token.trim();
-      }
-      if (audioStreamIndex != null) {
-        params['AudioStreamIndex'] = audioStreamIndex.toString();
-      }
-      if (subtitleStreamIndex != null && subtitleStreamIndex >= 0) {
-        params['SubtitleStreamIndex'] = subtitleStreamIndex.toString();
-      }
-      return uri.replace(queryParameters: params).toString();
-    }
-
-    String resolve(String candidate) {
-      final resolved = Uri.parse(base).resolve(candidate).toString();
-      return applyQueryPrefs(resolved);
-    }
-
-    final directStreamUrl = (mediaSource?['DirectStreamUrl'] as String?)?.trim();
-    final transcodingUrl = (mediaSource?['TranscodingUrl'] as String?)?.trim();
-    final sourcePath = (mediaSource?['Path'] as String?)?.trim();
-    if (directStreamUrl != null && directStreamUrl.isNotEmpty) {
-      return resolve(directStreamUrl);
-    }
-    if (exoPlayer && transcodingUrl != null && transcodingUrl.isNotEmpty) {
-      return resolve(transcodingUrl);
-    }
-
-    // STRM or other URL-based sources may expose an absolute playable URL via `Path`.
-    final pathUri =
-        (sourcePath == null || sourcePath.isEmpty) ? null : Uri.tryParse(sourcePath);
-    if (pathUri != null && pathUri.scheme.isNotEmpty && pathUri.host.isNotEmpty) {
-      final isHttp = (pathUri.scheme == 'http' || pathUri.scheme == 'https') &&
-          pathUri.host.isNotEmpty;
-      if (isHttp) {
-        return shouldApplyServerParams(pathUri)
-            ? applyQueryPrefs(pathUri.toString())
-            : pathUri.toString();
-      }
-      return pathUri.toString();
-    }
-
-    final mediaSourceId =
-        (mediaSource?['Id'] as String?)?.trim().isNotEmpty == true
-            ? (mediaSource!['Id'] as String).trim()
-            : info.mediaSourceId.trim();
-    final path =
-        'Videos/$itemId/stream?static=true&MediaSourceId=$mediaSourceId'
-        '&PlaySessionId=${Uri.encodeQueryComponent(info.playSessionId)}'
-        '&UserId=${Uri.encodeQueryComponent(userId)}'
-        '&DeviceId=${Uri.encodeQueryComponent(adapterDeviceId)}'
-        '${token.trim().isEmpty ? '' : '&api_key=${Uri.encodeQueryComponent(token.trim())}'}';
-    return applyQueryPrefs(_apiUrlWithPrefix(base, auth.apiPrefix, path));
+  @override
+  String toString() {
+    final pieces = <String>[category.name];
+    if (statusCode != null) pieces.add('status=$statusCode');
+    final msg = (message ?? '').trim();
+    if (msg.isNotEmpty) pieces.add(msg);
+    final target = (url ?? '').trim();
+    if (target.isNotEmpty) pieces.add(target);
+    return pieces.join(' ');
   }
+}
+
+class _PreloadCircuitState {
+  _PreloadCircuitState({required this.scopeKey});
+
+  final String scopeKey;
+  int consecutiveFailures = 0;
+  DateTime? lastFailureAt;
+  DateTime? openUntil;
+  _PreloadFailureInfo? lastFailure;
+
+  bool isOpen(DateTime now) {
+    final until = openUntil;
+    return until != null && now.isBefore(until);
+  }
+}
+
+@immutable
+class _PreloadAttemptResult {
+  const _PreloadAttemptResult.success()
+      : success = true,
+        failure = null;
+
+  const _PreloadAttemptResult.failure(this.failure) : success = false;
+
+  final bool success;
+  final _PreloadFailureInfo? failure;
 }
 
 @immutable

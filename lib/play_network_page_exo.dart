@@ -20,6 +20,7 @@ import 'package:video_player_platform_interface/video_player_platform_interface.
 import 'play_network_page.dart';
 import 'server_adapters/server_access.dart';
 import 'services/app_route_observer.dart';
+import 'services/preload/playback_preload_coordinator.dart';
 import 'services/stream_proxy/local_http_stream_proxy.dart';
 import 'services/stream_resolver/stream_models.dart';
 import 'tv/tv_focusable.dart';
@@ -72,7 +73,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   String? _playError;
   String? _resolvedStream;
   Map<String, String> _resolvedStreamHeaders = const <String, String>{};
-  bool _resolvedStreamIsExternal = false;
   bool _buffering = false;
   Duration _lastBufferedEnd = Duration.zero;
   DateTime? _lastBufferedAt;
@@ -101,6 +101,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   bool _skipIntroPromptVisible = false;
   bool _skipIntroHandled = false;
   bool _nextEpisodePreloadTriggered = false;
+  ResolvedPlaybackSource? _resolvedPlaybackSource;
+  String? _preloadHttpProxyUrl;
 
   static const Duration _gestureOverlayAutoHideDelay =
       Duration(milliseconds: 800);
@@ -1448,29 +1450,28 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   }
 
   Future<void> _preloadFromHistoryPositionBestEffort({
-    required ServerAccess access,
     required Duration startPosition,
   }) async {
     if (!widget.appState.preloadEnabled) return;
-    if (StreamPreloadService.instance.permanentlyDisabled) return;
     if (startPosition <= Duration.zero) return;
+    final resolvedSource = _resolvedPlaybackSource;
+    if (resolvedSource == null) return;
 
-    final result = await StreamPreloadService.instance.preloadFirst3Seconds(
-      adapter: access.adapter,
-      auth: access.auth,
-      itemId: widget.itemId,
-      startPosition: startPosition,
-      exoPlayer: true,
-      selectedMediaSourceId: _selectedMediaSourceId,
-      audioStreamIndex: _selectedAudioStreamIndex,
-      subtitleStreamIndex: _selectedSubtitleStreamIndex,
-      preferredVideoVersion: widget.appState.preferredVideoVersion,
+    final result = await PlaybackPreloadCoordinator.preloadPrepared(
+      PlaybackPreloadCoordinator.prepareResolved(
+        appState: widget.appState,
+        targetKind: PlaybackPreloadTargetKind.currentItem,
+        triggerSource: 'playback_resume',
+        resolvedSource: resolvedSource,
+        startPosition: startPosition,
+        httpProxyUrl: _preloadHttpProxyUrl,
+      ),
     );
 
     if (!mounted) return;
     if (result.disabledNow) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('预加载失败，后续将不再尝试')),
+        const SnackBar(content: Text('预加载失败，当前源将暂时跳过')),
       );
     }
   }
@@ -1478,7 +1479,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   void _maybePreloadNextEpisode(Duration pos) {
     if (_nextEpisodePreloadTriggered) return;
     if (!widget.appState.preloadEnabled) return;
-    if (StreamPreloadService.instance.permanentlyDisabled) return;
 
     final total = _duration;
     if (total <= Duration.zero) return;
@@ -1494,21 +1494,31 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   Future<void> _preloadNextEpisodeBestEffort(ServerAccess access) async {
     final nextId = await _resolveNextEpisodeIdBestEffort(access);
     if (nextId == null || nextId.trim().isEmpty) return;
-
-    final result = await StreamPreloadService.instance.preloadFirst3Seconds(
-      adapter: access.adapter,
-      auth: access.auth,
-      itemId: nextId.trim(),
-      exoPlayer: true,
-      audioStreamIndex: _selectedAudioStreamIndex,
-      subtitleStreamIndex: _selectedSubtitleStreamIndex,
-      preferredVideoVersion: widget.appState.preferredVideoVersion,
-    );
+    StreamPreloadResult result;
+    try {
+      result = await PlaybackPreloadCoordinator.preloadItem(
+        PlaybackPreloadBuildRequest(
+          access: access,
+          appState: widget.appState,
+          itemId: nextId.trim(),
+          playerCore: PlaybackSourcePlayerCoreKind.exo,
+          targetKind: PlaybackPreloadTargetKind.nextItem,
+          triggerSource: 'playback_next',
+          selectedMediaSourceId: _selectedMediaSourceId,
+          preferredMediaSourceIndex: _preferredMediaSourceIndex(),
+          audioStreamIndex: _selectedAudioStreamIndex,
+          subtitleStreamIndex: _selectedSubtitleStreamIndex,
+          preferredVideoVersion: widget.appState.preferredVideoVersion,
+        ),
+      );
+    } catch (_) {
+      return;
+    }
 
     if (!mounted) return;
     if (result.disabledNow) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('预加载失败，后续将不再尝试')),
+        const SnackBar(content: Text('预加载失败，当前源将暂时跳过')),
       );
     }
   }
@@ -1843,13 +1853,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
   Map<String, String> _embyHeaders() {
     return _resolvedStreamHeaders;
-  }
-
-  Map<String, String> _upstreamStreamHeaders() {
-    final access = _serverAccess;
-    if (access == null) return const <String, String>{};
-    if (_resolvedStreamIsExternal) return const <String, String>{};
-    return access.adapter.buildStreamHeaders(access.auth);
   }
 
   Future<void> _ensureDanmakuVisible() async {
@@ -4275,6 +4278,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _skipIntroPromptVisible = false;
     _skipIntroHandled = false;
     _nextEpisodePreloadTriggered = false;
+    _resolvedPlaybackSource = null;
+    _preloadHttpProxyUrl = null;
     _controlsVisible = true;
     _isScrubbing = false;
     _subtitleText = '';
@@ -4304,8 +4309,19 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       if (!_isAndroid) {
         throw Exception('Exo 内核仅支持 Android');
       }
-      final streamUrl = await _buildStreamUrl();
-      final playbackSource = await _buildPlaybackSource(streamUrl);
+      final resolvedPlayback = await _buildResolvedPlaybackSource();
+      _resolvedPlaybackSource = resolvedPlayback.resolvedSource;
+      _playSessionId = resolvedPlayback.playbackInfo.playSessionId;
+      _mediaSourceId = resolvedPlayback.resolvedSource.mediaSourceId;
+      _availableMediaSources = resolvedPlayback.mediaSources;
+      _selectedMediaSourceId = resolvedPlayback.selectedMediaSourceId;
+      _preloadHttpProxyUrl = PlaybackPreloadCoordinator.resolveHttpProxyUrl(
+        appState: widget.appState,
+        sourceUrl: resolvedPlayback.resolvedSource.url,
+        preferBuiltInProxy: false,
+      );
+      final playbackSource =
+          await _buildPlaybackSource(resolvedPlayback.resolvedSource);
       _resolvedStream = playbackSource.url;
       _resolvedStreamHeaders = playbackSource.httpHeaders;
       final controller = VideoPlayerController.networkUrl(
@@ -4336,15 +4352,11 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       _overrideResumeImmediately = false;
       Duration? resumeTarget;
       if (start != null && start > Duration.zero) {
-        final access = _serverAccess;
-        if (access != null) {
-          unawaited(
-            _preloadFromHistoryPositionBestEffort(
-              access: access,
-              startPosition: start,
-            ),
-          );
-        }
+        unawaited(
+          _preloadFromHistoryPositionBestEffort(
+            startPosition: start,
+          ),
+        );
 
         final target = _safeSeekTarget(start, controller.value.duration);
         _deferProgressReporting = true;
@@ -4500,162 +4512,50 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     }
   }
 
-  Future<String> _buildStreamUrl() async {
-    final base = _baseUrl!;
-    final token = _token!;
-    final userId = _userId!;
-    _playSessionId = null;
-    _mediaSourceId = null;
-    _resolvedStreamIsExternal = false;
-
-    final baseUri = Uri.tryParse(base);
-
-    int effectivePort(Uri uri) {
-      if (uri.hasPort) return uri.port;
-      return uri.scheme.toLowerCase() == 'https' ? 443 : 80;
-    }
-
-    bool isSameOrigin(Uri a, Uri b) {
-      return a.scheme.toLowerCase() == b.scheme.toLowerCase() &&
-          a.host.toLowerCase() == b.host.toLowerCase() &&
-          effectivePort(a) == effectivePort(b);
-    }
-
-    bool shouldApplyServerParams(Uri uri) {
-      if (baseUri == null || baseUri.host.isEmpty) return true;
-      if (uri.host.isEmpty) return true;
-      return isSameOrigin(uri, baseUri);
-    }
-
-    String applyQueryPrefs(String url) {
-      final uri = Uri.parse(url);
-      if (!shouldApplyServerParams(uri)) return uri.toString();
-      final params = Map<String, String>.from(uri.queryParameters);
-      if (!params.containsKey('api_key')) params['api_key'] = token;
-      if (_selectedAudioStreamIndex != null) {
-        params['AudioStreamIndex'] = _selectedAudioStreamIndex.toString();
-      }
-      if (_selectedSubtitleStreamIndex != null &&
-          _selectedSubtitleStreamIndex! >= 0) {
-        params['SubtitleStreamIndex'] = _selectedSubtitleStreamIndex.toString();
-      }
-      return uri.replace(queryParameters: params).toString();
-    }
-
-    String resolve(String candidate) {
-      final resolved = Uri.parse(base).resolve(candidate).toString();
-      return applyQueryPrefs(resolved);
-    }
-
-    try {
-      final access = _serverAccess;
-      if (access == null) throw StateError('No server access');
-      final info = await access.adapter.fetchPlaybackInfo(
-        access.auth,
-        itemId: widget.itemId,
-        exoPlayer: true,
-      );
-      final sources = info.mediaSources.cast<Map<String, dynamic>>();
-      _availableMediaSources = List<Map<String, dynamic>>.from(sources);
-      Map<String, dynamic>? ms;
-      if (sources.isNotEmpty) {
-        var selectedId = (_selectedMediaSourceId ?? '').trim();
-        if (selectedId.isEmpty) {
-          final sid = (widget.seriesId ?? '').trim();
-          final serverId = widget.server?.id ?? widget.appState.activeServerId;
-          if (serverId != null && serverId.isNotEmpty && sid.isNotEmpty) {
-            final idx = widget.appState
-                .seriesMediaSourceIndex(serverId: serverId, seriesId: sid);
-            if (idx != null && idx >= 0 && idx < sources.length) {
-              selectedId = (sources[idx]['Id'] as String? ?? '').trim();
-            }
-          }
-        }
-        if (selectedId.isEmpty) {
-          final preferredId = _pickPreferredMediaSourceId(
-            sources,
-            widget.appState.preferredVideoVersion,
-          );
-          if (preferredId != null && preferredId.trim().isNotEmpty) {
-            selectedId = preferredId.trim();
-          }
-        }
-        if (selectedId.isNotEmpty) {
-          ms = sources.firstWhere(
-            (s) => (s['Id'] as String? ?? '') == selectedId,
-            orElse: () => sources.first,
-          );
-        } else {
-          ms = sources.first;
-        }
-        final resolvedSelectedId = (ms['Id'] as String? ?? '').trim();
-        _selectedMediaSourceId =
-            resolvedSelectedId.isEmpty ? null : resolvedSelectedId;
-      }
-      _playSessionId = info.playSessionId;
-      _mediaSourceId = (ms?['Id'] as String?) ?? info.mediaSourceId;
-      final directStreamUrl = (ms?['DirectStreamUrl'] as String?)?.trim();
-      final transcodingUrl = (ms?['TranscodingUrl'] as String?)?.trim();
-      final sourcePath = (ms?['Path'] as String?)?.trim();
-
-      bool isExternalFromUrl(String url) {
-        final uri = Uri.tryParse(url);
-        if (uri == null) return false;
-        return !shouldApplyServerParams(uri);
-      }
-
-      if (directStreamUrl != null && directStreamUrl.isNotEmpty) {
-        final url = resolve(directStreamUrl);
-        _resolvedStreamIsExternal = isExternalFromUrl(url);
-        return url;
-      }
-      if (transcodingUrl != null && transcodingUrl.isNotEmpty) {
-        final url = resolve(transcodingUrl);
-        _resolvedStreamIsExternal = isExternalFromUrl(url);
-        return url;
-      }
-
-      // STRM or other URL-based sources may expose an absolute playable URL via `Path`.
-      final pathUri = (sourcePath == null || sourcePath.isEmpty)
-          ? null
-          : Uri.tryParse(sourcePath);
-      if (pathUri != null &&
-          pathUri.scheme.isNotEmpty &&
-          pathUri.host.isNotEmpty) {
-        final isHttp =
-            (pathUri.scheme == 'http' || pathUri.scheme == 'https') &&
-                pathUri.host.isNotEmpty;
-        if (isHttp) {
-          final url = shouldApplyServerParams(pathUri)
-              ? applyQueryPrefs(pathUri.toString())
-              : pathUri.toString();
-          _resolvedStreamIsExternal = !shouldApplyServerParams(pathUri);
-          return url;
-        }
-        _resolvedStreamIsExternal = true;
-        return pathUri.toString();
-      }
-      final mediaSourceId = (ms?['Id'] as String?) ?? info.mediaSourceId;
-      final url = applyQueryPrefs(
-        '$base/emby/Videos/${widget.itemId}/stream?static=true&MediaSourceId=$mediaSourceId'
-        '&PlaySessionId=${info.playSessionId}&UserId=$userId&DeviceId=${widget.appState.deviceId}'
-        '&api_key=$token',
-      );
-      _resolvedStreamIsExternal = false;
-      return url;
-    } catch (_) {
-      _resolvedStreamIsExternal = false;
-      return applyQueryPrefs(
-        '$base/emby/Videos/${widget.itemId}/stream?static=true&UserId=$userId'
-        '&DeviceId=${widget.appState.deviceId}&api_key=$token',
-      );
-    }
+  int? _preferredMediaSourceIndex() {
+    final sid = (widget.seriesId ?? '').trim();
+    final serverId = widget.server?.id ?? widget.appState.activeServerId;
+    if (serverId == null || serverId.isEmpty || sid.isEmpty) return null;
+    return widget.appState
+        .seriesMediaSourceIndex(serverId: serverId, seriesId: sid);
   }
 
-  Future<PlayableSource> _buildPlaybackSource(String streamUrl) async {
+  Future<PlaybackSourceBuildResult> _buildResolvedPlaybackSource() async {
+    final access = _serverAccess;
+    if (access == null) throw StateError('No server access');
+    return PlaybackSourceBuilder.build(
+      PlaybackSourceBuildRequest(
+        adapter: access.adapter,
+        auth: access.auth,
+        itemId: widget.itemId,
+        playerCore: PlaybackSourcePlayerCoreKind.exo,
+        selectedMediaSourceId: _selectedMediaSourceId,
+        preferredMediaSourceIndex: _preferredMediaSourceIndex(),
+        audioStreamIndex: _selectedAudioStreamIndex,
+        subtitleStreamIndex: _selectedSubtitleStreamIndex,
+        preferredVideoVersion: widget.appState.preferredVideoVersion,
+      ),
+    );
+  }
+
+  Future<PlayableSource> _buildPlaybackSource(
+    ResolvedPlaybackSource resolvedSource,
+  ) async {
+    final mediaType = switch (resolvedSource.mediaTypeHint) {
+      ResolvedPlaybackMediaType.hls => StreamMediaType.hls,
+      ResolvedPlaybackMediaType.dash => StreamMediaType.dash,
+      ResolvedPlaybackMediaType.file => StreamMediaType.file,
+      ResolvedPlaybackMediaType.unknown => StreamMediaType.unknown,
+    };
     final candidate = PlayableSource(
-      url: streamUrl,
-      httpHeaders: _upstreamStreamHeaders(),
+      url: resolvedSource.url,
+      httpHeaders: resolvedSource.httpHeaders,
+      mediaTypeHint: mediaType,
+      fromStrm: resolvedSource.fromStrm,
+      redirectChain: resolvedSource.redirectChain,
+      contentTypeHint: resolvedSource.contentTypeHint,
+      supportsByteRange: resolvedSource.supportsByteRange,
+      httpStatusHint: resolvedSource.httpStatusHint,
     );
     if (widget.isTv) return candidate;
     final proxied = await LocalHttpStreamProxy.wrapPlaybackSource(candidate);
@@ -4855,117 +4755,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     final br = bitrateOf(b) - bitrateOf(a);
     if (br != 0) return br;
     return sizeOf(b) - sizeOf(a);
-  }
-
-  static String? _pickPreferredMediaSourceId(
-    List<Map<String, dynamic>> sources,
-    VideoVersionPreference pref,
-  ) {
-    if (sources.isEmpty) return null;
-
-    int heightOf(Map<String, dynamic> ms) {
-      final videos = _streamsOfType(ms, 'Video');
-      final video = videos.isNotEmpty ? videos.first : null;
-      return _asInt(video?['Height']) ?? 0;
-    }
-
-    int bitrateOf(Map<String, dynamic> ms) => _asInt(ms['Bitrate']) ?? 0;
-
-    String videoCodecOf(Map<String, dynamic> ms) {
-      final msCodec = (ms['VideoCodec'] as String?)?.trim();
-      if (msCodec != null && msCodec.isNotEmpty) return msCodec.toLowerCase();
-      final videos = _streamsOfType(ms, 'Video');
-      final v = videos.isNotEmpty ? videos.first : null;
-      final codec = (v?['Codec'] as String?)?.trim() ?? '';
-      return codec.toLowerCase();
-    }
-
-    bool isHevc(Map<String, dynamic> ms) {
-      final c = videoCodecOf(ms);
-      return c.contains('hevc') ||
-          c.contains('h265') ||
-          c.contains('h.265') ||
-          c.contains('x265');
-    }
-
-    bool isAvc(Map<String, dynamic> ms) {
-      final c = videoCodecOf(ms);
-      return c.contains('avc') ||
-          c.contains('h264') ||
-          c.contains('h.264') ||
-          c.contains('x264');
-    }
-
-    Map<String, dynamic>? pickBest(
-      List<Map<String, dynamic>> list, {
-      required int Function(Map<String, dynamic> ms) primary,
-      required int Function(Map<String, dynamic> ms) secondary,
-      required bool higherIsBetter,
-    }) {
-      if (list.isEmpty) return null;
-      Map<String, dynamic> chosen = list.first;
-      var bestPrimary = primary(chosen);
-      var bestSecondary = secondary(chosen);
-      for (final ms in list.skip(1)) {
-        final p = primary(ms);
-        final s = secondary(ms);
-        final better = higherIsBetter
-            ? (p > bestPrimary || (p == bestPrimary && s > bestSecondary))
-            : (p < bestPrimary || (p == bestPrimary && s < bestSecondary));
-        if (better) {
-          chosen = ms;
-          bestPrimary = p;
-          bestSecondary = s;
-        }
-      }
-      return chosen;
-    }
-
-    Map<String, dynamic>? chosen;
-    switch (pref) {
-      case VideoVersionPreference.highestResolution:
-        chosen = pickBest(
-          sources,
-          primary: heightOf,
-          secondary: bitrateOf,
-          higherIsBetter: true,
-        );
-        break;
-      case VideoVersionPreference.lowestBitrate:
-        chosen = pickBest(
-          sources,
-          primary: (ms) => bitrateOf(ms) == 0 ? 1 << 30 : bitrateOf(ms),
-          secondary: heightOf,
-          higherIsBetter: false,
-        );
-        break;
-      case VideoVersionPreference.preferHevc:
-        final hevc = sources.where(isHevc).toList();
-        chosen = pickBest(
-          hevc.isNotEmpty ? hevc : sources,
-          primary: heightOf,
-          secondary: bitrateOf,
-          higherIsBetter: true,
-        );
-        break;
-      case VideoVersionPreference.preferAvc:
-        final avc = sources.where(isAvc).toList();
-        chosen = pickBest(
-          avc.isNotEmpty ? avc : sources,
-          primary: heightOf,
-          secondary: bitrateOf,
-          higherIsBetter: true,
-        );
-        break;
-      case VideoVersionPreference.defaultVersion:
-        chosen = (List<Map<String, dynamic>>.from(sources)
-              ..sort(_compareMediaSourcesByQuality))
-            .first;
-        break;
-    }
-
-    final id = chosen?['Id']?.toString();
-    return (id == null || id.trim().isEmpty) ? null : id.trim();
   }
 
   static String _mediaSourceSubtitle(Map<String, dynamic> ms) {

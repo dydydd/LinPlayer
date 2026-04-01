@@ -152,7 +152,10 @@ Legacy TV Activity(XML/View)
 
 开关：`AppState.preloadEnabled`（设置 → 预加载，默认关闭）
 
-实现：`StreamPreloadService`（`packages/lin_player_player/lib/src/preload/stream_preload_service.dart`）
+实现：
+- `PlaybackSourceBuilder`：统一构建真实播放与预加载共享的 `ResolvedPlaybackSource`
+- `PlaybackPreloadCoordinator`：收口详情页 / 播放页的 current / next / resume 预加载入口
+- `StreamPreloadService`（`packages/lin_player_player/lib/src/preload/stream_preload_service.dart`）：执行实际预热请求与去重 / 熔断
 
 行为：
 - 集详情页（`EpisodeDetailPage`）加载完成后，使用 UA `preload-linplayer` 预取：
@@ -161,7 +164,7 @@ Legacy TV Activity(XML/View)
 - 播放过程中，当剩余时长 ≤ 5 秒时，预取下一集前 3 秒（兜底：非从详情页进入的场景）。
 
 失败策略：
-- 单次预取最多尝试 3 次；连续失败后本次运行内停止后续预取，并在 UI 侧 Toast 提示「预加载失败」。
+- 单次预取最多尝试 3 次；若同一 source / proxy scope 在短时间内连续失败，会进入带 TTL 的短时熔断，并在恢复窗口后重新允许尝试。
 - 预取实现为 best-effort：优先使用直链流的 Range 拉取；若为 HLS（`.m3u8`）则解析并请求初始化段与前若干分片。
 
 ### 4.6 UI 基建层（`packages/lin_player_ui`）

@@ -104,26 +104,26 @@
 
 ### 6.2 任务项
 
-- [ ] 为 `StreamPreloadService` 增加统一日志入口
-- [ ] 记录每次预加载的触发来源
+- [x] 为 `StreamPreloadService` 增加统一日志入口
+- [x] 记录每次预加载的触发来源
   - 详情页当前项
   - 详情页下一集
   - 续看恢复点
   - 播放结束前下一集
-- [ ] 记录每次预加载的目标信息
+- [x] 记录每次预加载的目标信息
   - `itemId`
   - `startPosition`
   - `mediaSourceId`
   - 是否 HLS
   - 是否外链
   - 是否走代理
-- [ ] 记录执行结果
+- [x] 记录执行结果
   - success
   - skippedDisabled
   - skippedAlreadyDone
   - failedDisabled
   - 非致命失败原因
-- [ ] 在 `app_diagnostics_report` 中加入预加载最近状态摘要
+- [x] 在 `app_diagnostics_report` 中加入预加载最近状态摘要
 
 ### 6.3 建议涉及文件
 
@@ -165,8 +165,8 @@
 
 ### 7.3 任务项
 
-- [ ] 设计一个共享的“已解析播放源”模型
-- [ ] 抽一个统一 builder / resolver 服务，负责生成“播放器最终候选 source”
+- [x] 设计一个共享的“已解析播放源”模型
+- [x] 抽一个统一 builder / resolver 服务，负责生成“播放器最终候选 source”
 - [ ] 模型中至少包含以下字段
   - 原始 `itemId`
   - `playSessionId`
@@ -178,9 +178,9 @@
   - 码率 / size 等可选元数据
   - 是否来自 STRM
   - redirect / body-link / 代理相关信息
-- [ ] 统一“同源判定 + query 参数附加”逻辑
-- [ ] 统一“系列级媒体源偏好 + 手动选源 + 全局偏好”的决策逻辑
-- [ ] 让 MPV 与 Exo 共同依赖这个共享 builder，而不是各自维护 `_buildStreamUrl`
+- [x] 统一“同源判定 + query 参数附加”逻辑
+- [x] 统一“系列级媒体源偏好 + 手动选源 + 全局偏好”的决策逻辑
+- [x] 让 MPV 与 Exo 共同依赖这个共享 builder，而不是各自维护 `_buildStreamUrl`
 - [ ] 尽量保留兼容层，避免一次性改动过大
 
 ### 7.4 推荐落点
@@ -217,13 +217,13 @@
 
 ### 8.2 任务项
 
-- [ ] 重新设计 `StreamPreloadService` 输入模型
-- [ ] 新接口优先接收共享 source 描述，而不是只接收 `itemId + auth`
-- [ ] 保留旧接口作为过渡 wrapper
-- [ ] 旧接口内部也改为先走共享 source builder
-- [ ] 让预加载逻辑优先基于“最终可播放 source”做请求
-- [ ] 如果 source 已经经过 `LocalHttpStreamProxy` 包装，需要明确预加载应对“远端源”还是“本地回环源”生效
-- [ ] 对 STRM / 外链 / redirect resolved source 做统一处理
+- [x] 重新设计 `StreamPreloadService` 输入模型
+- [x] 新接口优先接收共享 source 描述，而不是只接收 `itemId + auth`
+- [x] 保留旧接口作为过渡 wrapper
+- [x] 旧接口内部也改为先走共享 source builder
+- [x] 让预加载逻辑优先基于“最终可播放 source”做请求
+- [x] 如果 source 已经经过 `LocalHttpStreamProxy` 包装，需要明确预加载应对“远端源”还是“本地回环源”生效
+- [x] 对 STRM / 外链 / redirect resolved source 做统一处理
 
 ### 8.3 设计建议
 
@@ -258,13 +258,13 @@
 
 ### 9.2 任务项
 
-- [ ] 统一详情页电影预加载入口
-- [ ] 统一详情页剧集预加载入口
-- [ ] 统一续看恢复点预加载入口
-- [ ] 统一播放结束前下一集预加载入口
-- [ ] 给所有入口提供统一的 `triggerSource` 标识
-- [ ] 明确“当前项预加载”和“下一项预加载”所需元数据最小集合
-- [ ] 统一代理传递逻辑，不再让某些入口自己猜代理、某些入口直接透传
+- [x] 统一详情页电影预加载入口
+- [x] 统一详情页剧集预加载入口
+- [x] 统一续看恢复点预加载入口
+- [x] 统一播放结束前下一集预加载入口
+- [x] 给所有入口提供统一的 `triggerSource` 标识
+- [x] 明确“当前项预加载”和“下一项预加载”所需元数据最小集合
+- [x] 统一代理传递逻辑，不再让某些入口自己猜代理、某些入口直接透传
 
 ### 9.3 重点问题
 
@@ -297,8 +297,8 @@
 
 ### 10.2 去重改造任务
 
-- [ ] 扩展去重 key
-- [ ] 至少纳入以下字段
+- [x] 扩展去重 key
+- [x] 至少纳入以下字段
   - `itemId`
   - `startPositionSec`
   - `mediaSourceId`
@@ -311,12 +311,12 @@
 
 ### 10.3 熔断改造任务
 
-- [ ] 把全局 `_permanentlyDisabled` 改为更细粒度状态
-- [ ] 候选策略一：按 server/baseUrl 熔断
-- [ ] 候选策略二：按错误类型熔断
-- [ ] 候选策略三：按时间窗口 + 连续失败次数熔断
-- [ ] 对不可恢复错误与临时网络错误做区分
-- [ ] 为熔断恢复设计 TTL 或重试窗口
+- [x] 把全局 `_permanentlyDisabled` 改为更细粒度状态
+- [x] 候选策略一：按 server/baseUrl 熔断
+- [x] 候选策略二：按错误类型熔断
+- [x] 候选策略三：按时间窗口 + 连续失败次数熔断
+- [x] 对不可恢复错误与临时网络错误做区分
+- [x] 为熔断恢复设计 TTL 或重试窗口
 
 ### 10.4 建议涉及文件
 
@@ -400,18 +400,18 @@
 
 如果后面某些逻辑经常改、又容易回归，再补下面这些自动化测试；这部分不是当前推进的阻塞条件。
 
-- [ ] 直链预加载成功
+- [x] 直链预加载成功
 - [ ] 直链续看 offset 预加载成功
 - [ ] HLS media playlist 预加载成功
-- [ ] HLS master playlist 解析与 variant 选择
-- [ ] 初始化段存在时能正确请求 init segment
+- [x] HLS master playlist 解析与 variant 选择
+- [x] 初始化段存在时能正确请求 init segment
 - [ ] in-flight 合并正确
-- [ ] 去重 key 区分不同 mediaSource
-- [ ] 熔断策略按新规则工作
+- [x] 去重 key 区分不同 mediaSource
+- [x] 熔断策略按新规则工作
 - [ ] 代理配置能正确传入
-- [ ] 外链 / 同源 header 策略正确
+- [x] 外链 / 同源 header 策略正确
 - [ ] STRM -> redirect -> final media 测试链
-- [ ] body-link 返回直链测试链
+- [x] body-link 返回直链测试链
 - [ ] 播放页与预加载共享 source builder 的一致性测试
 
 ### 12.5 建议涉及文件

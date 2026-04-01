@@ -1604,6 +1604,10 @@ class _SettingsPageState extends State<SettingsPage> {
         context,
         () async {
           final extraSections = <String, String>{};
+          extraSections['Preload Diagnostics'] =
+              StreamPreloadService.instance.buildDiagnosticsText(
+            maxEntries: 24,
+          );
           if (DeviceType.isTv) {
             try {
               extraSections['Built-in Proxy Diagnostics'] =
