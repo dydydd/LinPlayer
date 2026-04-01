@@ -514,11 +514,10 @@ jobs:
       - name: Cache Flutter pub packages
         uses: actions/cache@v4
         with:
-          path: |
-            ${{ env.PUB_CACHE }}
-            .dart_tool
-          key: ${{ runner.os }}-pub-${{ hashFiles('pubspec.lock') }}
+          path: ${{ env.PUB_CACHE }}
+          key: ${{ runner.os }}-ios-pub-${{ hashFiles('pubspec.lock') }}
           restore-keys: |
+            ${{ runner.os }}-ios-pub-
             ${{ runner.os }}-pub-
 
       - name: Cache CocoaPods metadata (iOS)
@@ -747,11 +746,10 @@ jobs:
       - name: Cache Flutter pub packages
         uses: actions/cache@v4
         with:
-          path: |
-            ${{ env.PUB_CACHE }}
-            .dart_tool
-          key: ${{ runner.os }}-pub-${{ hashFiles('pubspec.lock') }}
+          path: ${{ env.PUB_CACHE }}
+          key: ${{ runner.os }}-${{ matrix.arch }}-pub-${{ hashFiles('pubspec.lock') }}
           restore-keys: |
+            ${{ runner.os }}-${{ matrix.arch }}-pub-
             ${{ runner.os }}-pub-
 
       - name: Cache CocoaPods metadata (macOS)
@@ -795,7 +793,25 @@ jobs:
           if [[ -n "${TMDB_API_KEY:-}" ]]; then
             DART_DEFINE_ARGS+=(--dart-define=TMDB_API_KEY="${TMDB_API_KEY}")
           fi
-          retry flutter build macos --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" "${DART_DEFINE_ARGS[@]}"
+
+          build_macos_once() {
+            rm -rf build/macos build/native_assets/macos
+            flutter build macos --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" "${DART_DEFINE_ARGS[@]}"
+          }
+
+          retry build_macos_once
+
+      - name: Debug macOS build outputs on failure
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          echo "--- build/native_assets ---"
+          find build/native_assets -maxdepth 5 -print || true
+          echo "--- NativeAssetsManifest.json ---"
+          find build -name NativeAssetsManifest.json -print -exec cat {} \; || true
+          echo "--- build/macos ---"
+          find build/macos -maxdepth 6 -print || true
 
       - name: Create DMG installer
         shell: bash
