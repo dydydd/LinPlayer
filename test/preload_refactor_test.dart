@@ -51,7 +51,83 @@ void main() {
     final request = prepared.toPreloadRequest();
     expect(request.httpProxyUrl, proxyUrl);
     expect(request.resolvedSource.proxyUrl, proxyUrl);
+    expect(request.dedupeFingerprint, 'target:current');
   });
+
+  test(
+    'PlaybackPreloadCoordinator separates current and next dedupe space but shares hits across trigger sources',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() async {
+        await server.close(force: true);
+      });
+
+      var requestCount = 0;
+      server.listen((HttpRequest request) async {
+        requestCount++;
+        request.response.statusCode = 206;
+        request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+        request.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes 0-7/8',
+        );
+        request.response.headers.contentType = ContentType('video', 'mp4');
+        request.response.contentLength = 8;
+        request.response.add(const <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+        await request.response.close();
+      });
+
+      final url = 'http://127.0.0.1:${server.port}/shared-target.mp4';
+      final appState = AppState();
+      final resolvedSource = ResolvedPlaybackSource(
+        itemId: 'episode-dedupe',
+        playSessionId: 'ps-dedupe',
+        mediaSourceId: 'ms-dedupe',
+        url: url,
+        httpHeaders: const <String, String>{'User-Agent': 'SourceUA/1.0'},
+        isExternal: false,
+        mediaTypeHint: ResolvedPlaybackMediaType.file,
+        fromStrm: false,
+        redirectChain: <String>[url],
+        bitrate: 8000000,
+        sizeBytes: 8000000,
+      );
+
+      final detailCurrent = PlaybackPreloadCoordinator.prepareResolved(
+        appState: appState,
+        targetKind: PlaybackPreloadTargetKind.currentItem,
+        triggerSource: 'detail_current',
+        resolvedSource: resolvedSource,
+      );
+      final playbackCurrent = PlaybackPreloadCoordinator.prepareResolved(
+        appState: appState,
+        targetKind: PlaybackPreloadTargetKind.currentItem,
+        triggerSource: 'playback_resume',
+        resolvedSource: resolvedSource,
+      );
+      final playbackNext = PlaybackPreloadCoordinator.prepareResolved(
+        appState: appState,
+        targetKind: PlaybackPreloadTargetKind.nextItem,
+        triggerSource: 'playback_next',
+        resolvedSource: resolvedSource,
+      );
+
+      final first = await PlaybackPreloadCoordinator.preloadPrepared(
+        detailCurrent,
+      );
+      final second = await PlaybackPreloadCoordinator.preloadPrepared(
+        playbackCurrent,
+      );
+      final third = await PlaybackPreloadCoordinator.preloadPrepared(
+        playbackNext,
+      );
+
+      expect(first.status, StreamPreloadStatus.success);
+      expect(second.status, StreamPreloadStatus.skippedAlreadyDone);
+      expect(third.status, StreamPreloadStatus.success);
+      expect(requestCount, 2);
+    },
+  );
 
   group('PlaybackSourceBuilder', () {
     test(
@@ -546,6 +622,55 @@ void main() {
     expect(requestCount, 2);
   });
 
+  test('StreamPreloadService routes requests through the configured HTTP proxy', () async {
+    final proxyServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await proxyServer.close(force: true);
+    });
+
+    var requestCount = 0;
+    proxyServer.listen((HttpRequest request) async {
+      requestCount++;
+      request.response.statusCode = 206;
+      request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+      request.response.headers.set(
+        HttpHeaders.contentRangeHeader,
+        'bytes 0-7/8',
+      );
+      request.response.headers.contentType = ContentType('video', 'mp4');
+      request.response.contentLength = 8;
+      request.response.add(const <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+      await request.response.close();
+    });
+
+    final result = await StreamPreloadService.instance.preloadResolvedSource(
+      PreloadRequest(
+        resolvedSource: const ResolvedPlaybackSource(
+          itemId: 'episode-proxy',
+          playSessionId: 'ps-proxy',
+          mediaSourceId: 'ms-proxy',
+          url: 'http://example.invalid/media.mp4',
+          httpHeaders: <String, String>{'User-Agent': 'SourceUA/1.0'},
+          isExternal: true,
+          mediaTypeHint: ResolvedPlaybackMediaType.file,
+          fromStrm: false,
+          redirectChain: <String>['http://example.invalid/media.mp4'],
+          bitrate: 8000000,
+          sizeBytes: 8000000,
+        ),
+        triggerSource: 'detail_current',
+        httpProxyUrl: 'http://127.0.0.1:${proxyServer.port}',
+      ),
+    );
+
+    expect(result.status, StreamPreloadStatus.success);
+    expect(requestCount, 1);
+    expect(
+      StreamPreloadService.instance.buildDiagnosticsText(),
+      contains('proxy=true'),
+    );
+  });
+
   test('StreamPreloadService merges concurrent in-flight requests', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() async {
@@ -682,6 +807,77 @@ void main() {
     expect(hits['/seg2.ts'], 1);
     expect(hits.containsKey('/seg3.ts'), isFalse);
   });
+
+  test(
+    'StreamPreloadService preloads HLS media playlist from the resume-aligned segment',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() async {
+        await server.close(force: true);
+      });
+
+      final hits = <String, int>{};
+      server.listen((HttpRequest request) async {
+        final path = request.uri.path;
+        hits[path] = (hits[path] ?? 0) + 1;
+
+        switch (path) {
+          case '/media.m3u8':
+            request.response.statusCode = 200;
+            request.response.headers.contentType =
+                ContentType('application', 'vnd.apple.mpegurl');
+            request.response.write(
+              '#EXTM3U\n'
+              '#EXTINF:2.0,\n'
+              'seg1.ts\n'
+              '#EXTINF:2.0,\n'
+              'seg2.ts\n'
+              '#EXTINF:2.0,\n'
+              'seg3.ts\n',
+            );
+            break;
+          case '/seg1.ts':
+          case '/seg2.ts':
+          case '/seg3.ts':
+            request.response.statusCode = 200;
+            request.response.headers.contentType = ContentType('video', 'mp2t');
+            request.response.add(const <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+            break;
+          default:
+            request.response.statusCode = 404;
+        }
+
+        await request.response.close();
+      });
+
+      final url = 'http://127.0.0.1:${server.port}/media.m3u8';
+      final result = await StreamPreloadService.instance.preloadResolvedSource(
+        PreloadRequest(
+          resolvedSource: ResolvedPlaybackSource(
+            itemId: 'episode-hls-media',
+            playSessionId: 'ps-hls-media',
+            mediaSourceId: 'ms-hls-media',
+            url: url,
+            httpHeaders: const <String, String>{'User-Agent': 'SourceUA/1.0'},
+            isExternal: false,
+            mediaTypeHint: ResolvedPlaybackMediaType.hls,
+            fromStrm: false,
+            redirectChain: <String>[url],
+            bitrate: 4000000,
+            sizeBytes: 4000000,
+          ),
+          triggerSource: 'playback_resume',
+          startPosition: const Duration(seconds: 3),
+        ),
+      );
+
+      expect(result.status, StreamPreloadStatus.success);
+      expect(hits['/media.m3u8'], 1);
+      expect(hits.containsKey('/seg1.ts'), isFalse);
+      expect(hits['/seg2.ts'], 1);
+      expect(hits['/seg3.ts'], 1);
+    },
+  );
 
   test('StreamPreloadService opens scoped circuit and recovers after TTL', () async {
     final service = StreamPreloadService.instance;

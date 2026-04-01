@@ -66,8 +66,18 @@ class PreparedPlaybackPreload {
       resolvedSource: resolvedSource,
       triggerSource: triggerSource,
       startPosition: startPosition,
+      dedupeFingerprint: _dedupeFingerprintForTargetKind(targetKind),
       httpProxyUrl: httpProxyUrl,
     );
+  }
+
+  static String _dedupeFingerprintForTargetKind(
+    PlaybackPreloadTargetKind kind,
+  ) {
+    return switch (kind) {
+      PlaybackPreloadTargetKind.currentItem => 'target:current',
+      PlaybackPreloadTargetKind.nextItem => 'target:next',
+    };
   }
 }
 

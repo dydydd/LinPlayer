@@ -306,8 +306,13 @@
   - `subtitleStreamIndex`
   - source URL 指纹
   - 代理标识
-- [ ] 明确“当前项”和“下一项”是否共享去重空间
-- [ ] 明确“详情页预热”和“播放页兜底预热”是否应该共用命中记录
+- [x] 明确“当前项”和“下一项”不共享去重空间
+- [x] 明确“详情页预热”和“播放页兜底预热”对同一语义目标共用命中记录
+
+说明：
+- 去重 key 继续基于 resolved source 本身计算，但会额外叠加 `targetKind` 命名空间
+- `currentItem` 与 `nextItem` 分开判重
+- `triggerSource` 不进入 key，因此详情页预热与播放页兜底预热可共享同一命中记录
 
 ### 10.3 熔断改造任务
 
@@ -343,16 +348,20 @@
 
 ### 11.3 本地回环代理专项任务
 
-- [ ] 明确预加载应命中远端 URL，还是命中本地回环代理后的 URL
-- [ ] 若预加载远端 URL，需要保证与真实播放 source 的 header / redirect 语义一致
-- [ ] 若预加载本地回环代理 URL，需要验证本地代理不会吞掉预热收益
+- [x] 明确预加载固定命中远端 URL，而不是命中本地回环代理后的 URL
+- [x] 预加载远端 URL 时，通过共享 `ResolvedPlaybackSource` + `httpProxyUrl` 继承真实播放 source 的 header / redirect / 代理语义
+- [x] 设计结论：本轮不采用本地回环代理 URL 作为预加载目标，因此无需为该路径单独验证预热收益
 
 ### 11.4 HLS 专项任务
 
 - [ ] 检查共享 source builder 能否提供更准确的 HLS 元数据
-- [ ] 评估是否保留“最高带宽 variant”逻辑
+- [x] 评估并暂时保留“最高带宽 variant”逻辑
 - [ ] 评估是否应优先命中播放器最终预计使用的 rendition
-- [ ] 保留当前“最多 3 段”的安全上限，但把策略配置收拢到统一位置
+- [x] 保留当前“最多 3 段”的安全上限，并把策略配置收拢到统一位置
+
+当前结论：
+- 现阶段仍保留“最高带宽 variant + 最多 3 段”的保守 HLS 预热策略
+- 待后续拿到更接近播放器最终对象的 ABR / rendition 预测信息后，再继续往最终命中策略收敛
 
 ### 11.5 建议涉及文件
 
@@ -402,13 +411,13 @@
 
 - [x] 直链预加载成功
 - [x] 直链续看 offset 预加载成功
-- [ ] HLS media playlist 预加载成功
+- [x] HLS media playlist 预加载成功
 - [x] HLS master playlist 解析与 variant 选择
 - [x] 初始化段存在时能正确请求 init segment
 - [x] in-flight 合并正确
 - [x] 去重 key 区分不同 mediaSource
 - [x] 熔断策略按新规则工作
-- [ ] 代理配置能正确传入
+- [x] 代理配置能正确传入
 - [x] 外链 / 同源 header 策略正确
 - [x] STRM -> redirect -> final media 测试链
 - [x] body-link 返回直链测试链
@@ -435,7 +444,7 @@
 
 - [ ] 确认新链路通过手工回归后，删除旧版 `_buildStreamUrl` 复制逻辑
 - [ ] 清理页面层散落的预加载参数拼装代码
-- [ ] 更新开发文档
+- [x] 更新开发文档
   - `ARCHITECTURE.md`
   - `PRELOAD_ASSESSMENT.md`
   - 本文档

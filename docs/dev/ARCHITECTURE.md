@@ -159,6 +159,8 @@ Legacy TV Activity(XML/View)
 
 补充说明：
 - 共享 source builder 内部已复用 STRM / redirect / body-link 解析逻辑，并把 `proxyUrl` 等元数据保留在 `ResolvedPlaybackSource` 中，供播放页与预加载共同消费。
+- `PlaybackPreloadCoordinator` 会把 `targetKind` 编进去重命名空间，因此 `currentItem` / `nextItem` 分开判重，但不会因为 `triggerSource` 不同而重复预热同一语义目标。
+- 预加载固定命中共享 `ResolvedPlaybackSource` 的远端 URL；若真实播放需要自定义 HTTP 代理，则通过 `httpProxyUrl` 继承代理语义，而不是改为命中本地回环代理 URL。
 
 行为：
 - 集详情页（`EpisodeDetailPage`）加载完成后，使用 UA `preload-linplayer` 预取：
@@ -169,6 +171,7 @@ Legacy TV Activity(XML/View)
 失败策略：
 - 单次预取最多尝试 3 次；若同一 source / proxy scope 在短时间内连续失败，会进入带 TTL 的短时熔断，并在恢复窗口后重新允许尝试。
 - 预取实现为 best-effort：优先使用直链流的 Range 拉取；若为 HLS（`.m3u8`）则解析并请求初始化段与前若干分片。
+- HLS 当前仍采用“最高带宽 variant + 最多 3 段”的保守预热策略，相关常量已收口在 preload service。
 
 ### 4.6 UI 基建层（`packages/lin_player_ui`）
 

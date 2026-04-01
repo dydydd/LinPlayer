@@ -19,6 +19,11 @@ class PreloadRequest {
   final String triggerSource;
   final Duration startPosition;
   final Duration preloadDuration;
+
+  /// Optional extra namespace for dedupe/hit records.
+  /// When present it is combined with the resolved source fingerprint instead
+  /// of replacing it, so callers can separate semantic targets like
+  /// "current item" vs "next item" without losing source-level identity.
   final String? dedupeFingerprint;
   final String? httpProxyUrl;
 }

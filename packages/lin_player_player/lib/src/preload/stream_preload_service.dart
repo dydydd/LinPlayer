@@ -103,9 +103,8 @@ class StreamPreloadService {
         sourceUri?.queryParameters['AudioStreamIndex']?.trim() ?? '';
     final subtitleStreamIndex =
         sourceUri?.queryParameters['SubtitleStreamIndex']?.trim() ?? '';
-    final urlFingerprint = (request.dedupeFingerprint ?? '').trim().isNotEmpty
-        ? request.dedupeFingerprint!.trim()
-        : sha1.convert(utf8.encode(source.url.trim())).toString();
+    final urlFingerprint = sha1.convert(utf8.encode(source.url.trim())).toString();
+    final requestFingerprint = _fingerprintText(request.dedupeFingerprint);
     final headersFingerprint = _headersFingerprint(source.httpHeaders);
     final proxyFingerprint = _fingerprintText(_effectiveProxyUrlFor(request));
     return [
@@ -115,6 +114,7 @@ class StreamPreloadService {
       audioStreamIndex,
       subtitleStreamIndex,
       urlFingerprint,
+      requestFingerprint,
       headersFingerprint,
       proxyFingerprint,
     ].join('|');
@@ -839,7 +839,7 @@ class StreamPreloadService {
 
     for (final seg in segs.skip(startIndex)) {
       if (remainingMs <= 0) break;
-      if (segmentCount >= 3) break;
+      if (segmentCount >= _kMaxHlsPreloadSegments) break;
 
       final r = await _get(
         client: client,
@@ -1172,7 +1172,12 @@ class _HlsParseResult {
   final List<_HlsSegment> segments;
 }
 
-_HlsParseResult? _parseHls(String text, {required Uri base}) {
+_HlsParseResult? _parseHls(
+  String text, {
+  required Uri base,
+  _HlsVariantSelectionStrategy variantSelectionStrategy =
+      _kHlsVariantSelectionStrategy,
+}) {
   final normalized = text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
   final lines = normalized.split('\n');
   if (lines.isEmpty) return null;
@@ -1234,11 +1239,10 @@ _HlsParseResult? _parseHls(String text, {required Uri base}) {
     pendingDurationSeconds = null;
   }
 
-  Uri? variantUri;
-  if (variants.isNotEmpty) {
-    variants.sort((a, b) => b.bandwidth.compareTo(a.bandwidth));
-    variantUri = variants.first.uri;
-  }
+  final variantUri = _pickVariantUri(
+    variants,
+    strategy: variantSelectionStrategy,
+  );
 
   return _HlsParseResult(
     variantPlaylistUri: variantUri,
@@ -1246,3 +1250,24 @@ _HlsParseResult? _parseHls(String text, {required Uri base}) {
     segments: segments,
   );
 }
+
+Uri? _pickVariantUri(
+  List<({Uri uri, int bandwidth})> variants, {
+  required _HlsVariantSelectionStrategy strategy,
+}) {
+  if (variants.isEmpty) return null;
+  switch (strategy) {
+    case _HlsVariantSelectionStrategy.highestBandwidth:
+      variants.sort((a, b) => b.bandwidth.compareTo(a.bandwidth));
+      return variants.first.uri;
+  }
+}
+
+const int _kMaxHlsPreloadSegments = 3;
+
+enum _HlsVariantSelectionStrategy {
+  highestBandwidth,
+}
+
+const _HlsVariantSelectionStrategy _kHlsVariantSelectionStrategy =
+    _HlsVariantSelectionStrategy.highestBandwidth;
