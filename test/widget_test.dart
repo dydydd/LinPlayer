@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:lin_player/main.dart';
+import 'package:lin_player/mobile_ui/server/mobile_server_page.dart';
 import 'package:lin_player_core/app_config/app_config.dart';
 import 'package:lin_player_core/state/media_server_type.dart';
 import 'package:lin_player_state/app_state.dart';
 import 'package:lin_player_state/server_profile.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
+
+const _emptyStateTitle = '\u8fd8\u6ca1\u6709\u670d\u52a1\u5668';
+const _addLabel = '\u6dfb\u52a0';
+const _connectAndEnterLabel = '\u8fde\u63a5\u5e76\u8fdb\u5165';
 
 void main() {
   testWidgets('Shows server screen by default', (WidgetTester tester) async {
@@ -17,7 +22,11 @@ void main() {
         child: LinPlayerApp(appState: appState),
       ),
     );
-    expect(find.text('还没有服务器，点右上角“+”添加。'), findsOneWidget);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(MobileServerPage), findsOneWidget);
+    expect(find.text(_emptyStateTitle), findsOneWidget);
+    expect(find.widgetWithIcon(FilledButton, Icons.add), findsOneWidget);
   });
 
   testWidgets('Allows passwordless server login', (WidgetTester tester) async {
@@ -28,23 +37,28 @@ void main() {
         child: LinPlayerApp(appState: appState),
       ),
     );
-    expect(find.byTooltip('添加服务器'), findsOneWidget);
-
-    await tester.tap(find.byTooltip('添加服务器'));
     await tester.pumpAndSettle();
-    expect(find.text('添加服务器'), findsOneWidget);
+
+    final addButton = find.widgetWithText(FilledButton, _addLabel);
+    expect(addButton, findsOneWidget);
+
+    await tester.tap(addButton);
+    await tester.pumpAndSettle();
 
     final fields = find.byType(TextFormField);
-    // Order in _AddServerSheet: name, remark, host, port, username, password.
+    expect(fields, findsNWidgets(6));
+
+    // Order in the mobile add-server sheet: name, remark, host, port,
+    // username, password.
     await tester.enterText(fields.at(2), 'emby.example.com');
     await tester.enterText(fields.at(4), 'demo');
 
-    await tester.tap(find.byType(FilledButton));
+    await tester.ensureVisible(find.text(_connectAndEnterLabel));
+    await tester.tap(find.text(_connectAndEnterLabel));
     await tester.pumpAndSettle();
 
-    expect(find.text('请输入密码'), findsNothing);
     expect(appState.addServerCalled, isTrue);
-    expect(appState.lastPassword, '');
+    expect(appState.lastPassword, isEmpty);
   });
 }
 

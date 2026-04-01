@@ -2252,7 +2252,24 @@ class _HttpStreamProxyEntry {
 
     File storedFile = pendingFile;
     try {
-      storedFile = await pendingFile.rename(finalPath);
+      if (Platform.isWindows) {
+        if (await pendingFile.exists()) {
+          // Windows can sporadically fail same-directory renames for freshly
+          // flushed temp files, so finalize via copy + delete instead.
+          await _ensureDirectory();
+          storedFile = await pendingFile.copy(finalPath);
+          try {
+            await pendingFile.delete();
+          } catch (_) {}
+        } else if (fallbackBytes != null && fallbackBytes.isNotEmpty) {
+          await finalFile.writeAsBytes(fallbackBytes, flush: true);
+          storedFile = finalFile;
+        } else {
+          storedFile = await pendingFile.rename(finalPath);
+        }
+      } else {
+        storedFile = await pendingFile.rename(finalPath);
+      }
     } catch (_) {
       await _ensureDirectory();
       if (await finalFile.exists()) {
