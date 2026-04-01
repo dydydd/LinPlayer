@@ -23,6 +23,7 @@ import 'services/stream_proxy/local_http_stream_proxy.dart';
 import 'services/stream_resolver/stream_resolver.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
 import 'widgets/list_picker_dialog.dart';
+import 'widgets/mobile_player_status_bars.dart';
 
 class ExoPlayerScreen extends StatefulWidget {
   const ExoPlayerScreen({
@@ -117,6 +118,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   Timer? _controlsHideTimer;
   bool _controlsVisible = true;
   bool _isScrubbing = false;
+  _MobilePlayerPanel? _mobilePanel;
+  Timer? _mobileSpeedAdjustTimer;
 
   static const Duration _gestureOverlayAutoHideDelay =
       Duration(milliseconds: 800);
@@ -255,6 +258,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     WidgetsBinding.instance.removeObserver(this);
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
+    _mobileSpeedAdjustTimer?.cancel();
+    _mobileSpeedAdjustTimer = null;
     _uiTimer?.cancel();
     _uiTimer = null;
     _gestureOverlayTimer?.cancel();
@@ -281,6 +286,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
 
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
+    _mobileSpeedAdjustTimer?.cancel();
+    _mobileSpeedAdjustTimer = null;
     _uiTimer?.cancel();
     _uiTimer = null;
     _gestureOverlayTimer?.cancel();
@@ -1877,6 +1884,718 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     );
   }
 
+  String _mobileTopTitleText() {
+    if (_currentIndex >= 0 && _currentIndex < _playlist.length) {
+      return _playlist[_currentIndex].name;
+    }
+    return '本地播放';
+  }
+
+  String _mobilePlaylistStatusLabel() {
+    if (_playlist.isNotEmpty) return '本地 · ${_playlist.length} 个视频';
+    return '本地媒体';
+  }
+
+  bool get _mobileSidePanelVisible =>
+      _mobilePanel != null && _mobilePanel != _MobilePlayerPanel.speed;
+
+  void _openMobilePanel(_MobilePlayerPanel panel) {
+    _showControls(scheduleHide: false);
+    setState(() => _mobilePanel = panel);
+  }
+
+  void _closeMobilePanels({bool scheduleHide = true}) {
+    _mobileSpeedAdjustTimer?.cancel();
+    _mobileSpeedAdjustTimer = null;
+    if (_mobilePanel == null) return;
+    setState(() => _mobilePanel = null);
+    _showControls(scheduleHide: scheduleHide);
+  }
+
+  Future<void> _setMobilePlaybackRate(double rate) async {
+    final controller = _controller;
+    if (controller == null) return;
+    final normalized =
+        ((rate.clamp(0.1, 10.0).toDouble() * 10).round() / 10).toDouble();
+    await controller.setPlaybackSpeed(normalized);
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  void _stepMobilePlaybackRate(double delta) {
+    final current = _controller?.value.playbackSpeed ?? 1.0;
+    unawaited(_setMobilePlaybackRate(current + delta));
+  }
+
+  void _startMobilePlaybackRateAdjust(double delta) {
+    _mobileSpeedAdjustTimer?.cancel();
+    _stepMobilePlaybackRate(delta);
+    _mobileSpeedAdjustTimer = Timer.periodic(
+      const Duration(milliseconds: 120),
+      (_) => _stepMobilePlaybackRate(delta),
+    );
+  }
+
+  void _stopMobilePlaybackRateAdjust() {
+    _mobileSpeedAdjustTimer?.cancel();
+    _mobileSpeedAdjustTimer = null;
+  }
+
+  List<Widget> _buildMobileTopActions({
+    required bool controlsEnabled,
+  }) {
+    final currentCore = widget.appState.playerCore;
+    return [
+      MobilePlayerActionButton(
+        icon: Icons.folder_open_rounded,
+        label: '本地',
+        compact: true,
+        onTap: () => _openMobilePanel(_MobilePlayerPanel.playlist),
+      ),
+      MobilePlayerActionButton(
+        icon: Icons.audiotrack_outlined,
+        label: '音频',
+        compact: true,
+        onTap: controlsEnabled
+            ? () => _openMobilePanel(_MobilePlayerPanel.audio)
+            : null,
+      ),
+      MobilePlayerActionButton(
+        icon: Icons.tune,
+        label: currentCore == PlayerCore.exo ? '内核 Exo' : '内核 mpv',
+        compact: true,
+        onTap: () => _openMobilePanel(_MobilePlayerPanel.core),
+      ),
+      MobilePlayerActionButton(
+        icon: Icons.auto_fix_high_outlined,
+        label: '超分 关',
+        compact: true,
+        onTap: () => _openMobilePanel(_MobilePlayerPanel.superResolution),
+      ),
+    ];
+  }
+
+  Widget _buildMobileTopStatusBar({
+    required bool controlsEnabled,
+  }) {
+    return MobilePlayerTopStatusBar(
+      title: _mobileTopTitleText(),
+      actions: _buildMobileTopActions(controlsEnabled: controlsEnabled),
+    );
+  }
+
+  Widget _buildMobileBottomStatusBar({
+    required bool controlsEnabled,
+    required VideoPlayerController controller,
+  }) {
+    return MobilePlayerBottomStatusBar(
+      position: _position,
+      buffered: _lastBufferedEnd,
+      duration: _duration,
+      positionLabel: _fmtClock(_position),
+      durationLabel: _fmtClock(_duration),
+      leftContent: Text(
+        _mobilePlaylistStatusLabel(),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      centerContent: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          MobilePlayerTransportButton(
+            icon: Icons.fast_rewind_rounded,
+            onTap: controlsEnabled
+                ? () {
+                    _showControls();
+                    unawaited(
+                      _seekRelative(
+                        Duration(seconds: -_seekBackSeconds),
+                        showOverlay: false,
+                      ),
+                    );
+                  }
+                : null,
+          ),
+          const SizedBox(width: 4),
+          MobilePlayerTransportButton(
+            icon: controller.value.isPlaying
+                ? Icons.pause_rounded
+                : Icons.play_arrow_rounded,
+            emphasized: true,
+            onTap: controlsEnabled
+                ? () => unawaited(_togglePlayPause(showOverlay: false))
+                : null,
+          ),
+          const SizedBox(width: 4),
+          MobilePlayerTransportButton(
+            icon: Icons.fast_forward_rounded,
+            onTap: controlsEnabled
+                ? () {
+                    _showControls();
+                    unawaited(
+                      _seekRelative(
+                        Duration(seconds: _seekForwardSeconds),
+                        showOverlay: false,
+                      ),
+                    );
+                  }
+                : null,
+          ),
+        ],
+      ),
+      rightContent: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            MobilePlayerActionButton(
+              icon: Icons.speed_rounded,
+              label: '倍速',
+              compact: true,
+              onTap: controlsEnabled
+                  ? () => _openMobilePanel(_MobilePlayerPanel.speed)
+                  : null,
+            ),
+            MobilePlayerActionButton(
+              icon: (_danmakuEnabled || _danmakuHeatmap.isNotEmpty)
+                  ? Icons.comment
+                  : Icons.comment_outlined,
+              label: '弹幕',
+              compact: true,
+              onTap: () => _openMobilePanel(_MobilePlayerPanel.danmaku),
+            ),
+            MobilePlayerActionButton(
+              icon: Icons.subtitles_outlined,
+              label: '字幕',
+              compact: true,
+              onTap: () => _openMobilePanel(_MobilePlayerPanel.subtitle),
+            ),
+            MobilePlayerActionButton(
+              icon: Icons.format_list_numbered,
+              label: '列表',
+              compact: true,
+              onTap: () => _openMobilePanel(_MobilePlayerPanel.playlist),
+            ),
+          ],
+        ),
+      ),
+      onScrubStart: controlsEnabled ? _onScrubStart : null,
+      onSeekPreview: controlsEnabled
+          ? (target) => setState(() => _position = target)
+          : null,
+      onSeekCommit: controlsEnabled
+          ? (target) async {
+              await controller.seekTo(target);
+              _position = target;
+              _syncDanmakuCursor(target);
+              _onScrubEnd();
+              if (mounted) setState(() {});
+            }
+          : null,
+    );
+  }
+
+  String _mobilePanelTitle(_MobilePlayerPanel panel) {
+    return switch (panel) {
+      _MobilePlayerPanel.playlist => '本地媒体',
+      _MobilePlayerPanel.audio => '音频',
+      _MobilePlayerPanel.core => '内核',
+      _MobilePlayerPanel.superResolution => '超分',
+      _MobilePlayerPanel.danmaku => '弹幕',
+      _MobilePlayerPanel.subtitle => '字幕',
+      _MobilePlayerPanel.speed => '倍速',
+    };
+  }
+
+  Future<List<vp_platform.VideoAudioTrack>> _loadMobileAudioTracks() async {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) {
+      return const <vp_platform.VideoAudioTrack>[];
+    }
+    final platform = vp_platform.VideoPlayerPlatform.instance;
+    if (!platform.isAudioTrackSupportAvailable()) {
+      return const <vp_platform.VideoAudioTrack>[];
+    }
+    return platform.getAudioTracks(_videoPlayerId(controller));
+  }
+
+  int _videoPlayerId(VideoPlayerController controller) {
+    // ignore: invalid_use_of_visible_for_testing_member
+    return controller.playerId;
+  }
+
+  Future<List<vp_android.ExoPlayerSubtitleTrackData>>
+      _loadMobileSubtitleTracks() async {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) {
+      return const <vp_android.ExoPlayerSubtitleTrackData>[];
+    }
+    final api = vp_android.VideoPlayerInstanceApi(
+      messageChannelSuffix: _videoPlayerId(controller).toString(),
+    );
+    final data = await api.getSubtitleTracks();
+    return data.exoPlayerTracks ??
+        const <vp_android.ExoPlayerSubtitleTrackData>[];
+  }
+
+  Widget _buildMobilePlaylistPanel({required bool controlsEnabled}) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+      children: [
+        MobilePlayerOptionTile(
+          title: '选择视频',
+          subtitle: '可一次选择多个文件加入播放列表',
+          leading: const Icon(Icons.video_file_outlined, color: Colors.white),
+          onTap: () {
+            _closeMobilePanels(scheduleHide: false);
+            unawaited(_pickFiles());
+          },
+        ),
+        const SizedBox(height: 12),
+        Text(
+          _playlist.isEmpty ? '还没有本地视频' : '播放列表',
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: Colors.white70,
+                fontWeight: FontWeight.w700,
+              ),
+        ),
+        const SizedBox(height: 8),
+        if (_playlist.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              '先选择本地视频开始播放。',
+              style: TextStyle(color: Colors.white70),
+            ),
+          )
+        else
+          for (final entry in _playlist.asMap().entries) ...[
+            MobilePlayerOptionTile(
+              title: entry.value.name,
+              subtitle: entry.key == _currentIndex ? '当前播放' : null,
+              selected: entry.key == _currentIndex,
+              trailing: entry.key == _currentIndex
+                  ? const Icon(Icons.play_circle_rounded, color: Colors.white)
+                  : null,
+              onTap: entry.key == _currentIndex
+                  ? null
+                  : () {
+                      _closeMobilePanels(scheduleHide: false);
+                      unawaited(_playFile(entry.value, entry.key));
+                    },
+            ),
+            const SizedBox(height: 8),
+          ],
+      ],
+    );
+  }
+
+  Widget _buildMobileAudioPanel({required bool controlsEnabled}) {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) {
+      return const Center(
+        child: Text('当前未开始播放', style: TextStyle(color: Colors.white70)),
+      );
+    }
+
+    return FutureBuilder<List<vp_platform.VideoAudioTrack>>(
+      future: _loadMobileAudioTracks(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final tracks = snapshot.data ?? const <vp_platform.VideoAudioTrack>[];
+        if (tracks.isEmpty) {
+          return const Center(
+            child: Text('暂无音轨', style: TextStyle(color: Colors.white70)),
+          );
+        }
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+          children: [
+            for (final track in tracks) ...[
+              MobilePlayerOptionTile(
+                title: _audioTrackTitle(track),
+                subtitle: _audioTrackSubtitle(track),
+                selected: track.isSelected,
+                trailing: track.isSelected
+                    ? const Icon(Icons.check_circle_rounded, color: Colors.white)
+                    : null,
+                onTap: !controlsEnabled || track.isSelected
+                    ? null
+                    : () {
+                        unawaited(() async {
+                          final platform =
+                              vp_platform.VideoPlayerPlatform.instance;
+                          await platform.selectAudioTrack(
+                            _videoPlayerId(controller),
+                            track.id,
+                          );
+                          if (!mounted) return;
+                          setState(() {});
+                        }());
+                      },
+              ),
+              const SizedBox(height: 8),
+            ],
+            MobilePlayerOptionTile(
+              title: '更多音轨设置',
+              leading: const Icon(Icons.tune, color: Colors.white),
+              onTap: controlsEnabled
+                  ? () {
+                      _closeMobilePanels(scheduleHide: false);
+                      unawaited(_showAudioTracks(context));
+                    }
+                  : null,
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildMobileSubtitlePanel({required bool controlsEnabled}) {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) {
+      return const Center(
+        child: Text('当前未开始播放', style: TextStyle(color: Colors.white70)),
+      );
+    }
+
+    return FutureBuilder<List<vp_android.ExoPlayerSubtitleTrackData>>(
+      future: _loadMobileSubtitleTracks(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final tracks =
+            snapshot.data ?? const <vp_android.ExoPlayerSubtitleTrackData>[];
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+          children: [
+            MobilePlayerOptionTile(
+              title: '关闭字幕',
+              selected: !tracks.any((track) => track.isSelected),
+              trailing: !tracks.any((track) => track.isSelected)
+                  ? const Icon(Icons.check_circle_rounded, color: Colors.white)
+                  : null,
+              onTap: !controlsEnabled
+                  ? null
+                  : () {
+                      unawaited(() async {
+                        final api = vp_android.VideoPlayerInstanceApi(
+                          messageChannelSuffix:
+                              _videoPlayerId(controller).toString(),
+                        );
+                        await api.deselectSubtitleTrack();
+                        if (!mounted) return;
+                        setState(() {});
+                      }());
+                    },
+            ),
+            if (tracks.isNotEmpty) const SizedBox(height: 8),
+            for (final track in tracks) ...[
+              MobilePlayerOptionTile(
+                title: _subtitleTrackTitle(track),
+                subtitle: _subtitleTrackSubtitle(track),
+                selected: track.isSelected,
+                trailing: track.isSelected
+                    ? const Icon(Icons.check_circle_rounded, color: Colors.white)
+                    : null,
+                onTap: !controlsEnabled || track.isSelected
+                    ? null
+                    : () {
+                        unawaited(() async {
+                          final api = vp_android.VideoPlayerInstanceApi(
+                            messageChannelSuffix:
+                                _videoPlayerId(controller).toString(),
+                          );
+                          await api.selectSubtitleTrack(
+                            track.groupIndex,
+                            track.trackIndex,
+                          );
+                          if (!mounted) return;
+                          setState(() {});
+                        }());
+                      },
+              ),
+              const SizedBox(height: 8),
+            ],
+            MobilePlayerOptionTile(
+              title: '更多字幕设置',
+              leading: const Icon(Icons.tune, color: Colors.white),
+              onTap: controlsEnabled
+                  ? () {
+                      _closeMobilePanels(scheduleHide: false);
+                      unawaited(_showSubtitleTracks(context));
+                    }
+                  : null,
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildMobileSuperResolutionPanel() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+      children: const [
+        MobilePlayerOptionTile(
+          title: 'Exo 内核暂不支持超分',
+          subtitle: '如需 Anime4K 或超分，可切换到 mpv 内核',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileDanmakuPanel({required bool controlsEnabled}) {
+    final hasSources = _danmakuSources.isNotEmpty;
+    final selectedName = (_danmakuSourceIndex >= 0 &&
+            _danmakuSourceIndex < _danmakuSources.length)
+        ? _danmakuSources[_danmakuSourceIndex].name
+        : '未选择';
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+      children: [
+        MobilePlayerOptionTile(
+          title: '启用弹幕',
+          subtitle: hasSources ? selectedName : '尚未加载弹幕',
+          trailing: Switch(
+            value: _danmakuEnabled,
+            onChanged: !controlsEnabled
+                ? null
+                : (value) {
+                    setState(() => _danmakuEnabled = value);
+                    if (!value) _danmakuKey.currentState?.clear();
+                  },
+          ),
+        ),
+        const SizedBox(height: 8),
+        MobilePlayerOptionTile(
+          title: '导入本地弹幕',
+          leading: const Icon(Icons.upload_file_outlined, color: Colors.white),
+          onTap: controlsEnabled ? () => unawaited(_pickDanmakuFile()) : null,
+        ),
+        const SizedBox(height: 8),
+        MobilePlayerOptionTile(
+          title: '加载在线弹幕',
+          leading:
+              const Icon(Icons.cloud_download_outlined, color: Colors.white),
+          onTap: controlsEnabled && _currentIndex >= 0 && _currentIndex < _playlist.length
+              ? () {
+                  unawaited(
+                    _loadOnlineDanmakuForFile(
+                      _playlist[_currentIndex],
+                      showToast: true,
+                    ),
+                  );
+                }
+              : null,
+        ),
+        const SizedBox(height: 8),
+        MobilePlayerOptionTile(
+          title: '手动匹配弹幕',
+          leading: const Icon(Icons.search, color: Colors.white),
+          onTap: controlsEnabled && _currentIndex >= 0 && _currentIndex < _playlist.length
+              ? () =>
+                  unawaited(_manualMatchOnlineDanmakuForCurrent(showToast: true))
+              : null,
+        ),
+        const SizedBox(height: 12),
+        Text(
+          '透明度 ${(_danmakuOpacity * 100).round()}%',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        Slider(
+          value: _danmakuOpacity.clamp(0.2, 1.0),
+          min: 0.2,
+          max: 1.0,
+          onChanged: !controlsEnabled
+              ? null
+              : (value) => setState(() => _danmakuOpacity = value),
+        ),
+        const SizedBox(height: 8),
+        MobilePlayerOptionTile(
+          title: '更多弹幕设置',
+          leading: const Icon(Icons.tune, color: Colors.white),
+          onTap: controlsEnabled
+              ? () {
+                  _closeMobilePanels(scheduleHide: false);
+                  unawaited(_showDanmakuSheet());
+                }
+              : null,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileCorePanel({required bool controlsEnabled}) {
+    final current = widget.appState.playerCore;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+      children: [
+        MobilePlayerOptionTile(
+          title: 'Exo',
+          subtitle: '当前使用 Android Exo 本地播放',
+          selected: current == PlayerCore.exo,
+          trailing: current == PlayerCore.exo
+              ? const Icon(Icons.check_circle, color: Colors.white)
+              : null,
+        ),
+        const SizedBox(height: 8),
+        MobilePlayerOptionTile(
+          title: 'mpv',
+          subtitle: '切换到 media_kit / mpv 本地播放',
+          selected: current == PlayerCore.mpv,
+          trailing: current == PlayerCore.mpv
+              ? const Icon(Icons.check_circle, color: Colors.white)
+              : null,
+          onTap: current == PlayerCore.mpv
+              ? null
+              : () {
+                  _closeMobilePanels(scheduleHide: false);
+                  unawaited(_switchCore());
+                },
+        ),
+        const SizedBox(height: 8),
+        MobilePlayerOptionTile(
+          title: '屏幕方向',
+          subtitle: _orientationTooltip,
+          leading: Icon(_orientationIcon, color: Colors.white),
+          onTap: _cycleOrientationMode,
+        ),
+        const SizedBox(height: 8),
+        const MobilePlayerOptionTile(
+          title: '软硬解切换',
+          subtitle: 'Exo 本地页暂不支持单独切换软硬解',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileSpeedOverlay({required bool controlsEnabled}) {
+    final currentRate =
+        (_controller?.value.playbackSpeed ?? 1.0).clamp(0.1, 10.0).toDouble();
+    return MobilePlayerSpeedOverlay(
+      visible: _mobilePanel == _MobilePlayerPanel.speed,
+      currentRate: currentRate,
+      enabled: controlsEnabled,
+      onDismiss: _closeMobilePanels,
+      onIncrease: () => _stepMobilePlaybackRate(0.1),
+      onDecrease: () => _stepMobilePlaybackRate(-0.1),
+      onIncreaseHoldStart: () => _startMobilePlaybackRateAdjust(0.1),
+      onIncreaseHoldEnd: _stopMobilePlaybackRateAdjust,
+      onDecreaseHoldStart: () => _startMobilePlaybackRateAdjust(-0.1),
+      onDecreaseHoldEnd: _stopMobilePlaybackRateAdjust,
+    );
+  }
+
+  Widget _buildMobileSidePanelOverlay({
+    required bool controlsEnabled,
+  }) {
+    final panel = _mobilePanel;
+    final visibleSidePanel = _mobileSidePanelVisible;
+    final effectivePanel =
+        visibleSidePanel ? panel! : _MobilePlayerPanel.playlist;
+
+    Widget child = const SizedBox.shrink();
+    if (visibleSidePanel) {
+      switch (effectivePanel) {
+        case _MobilePlayerPanel.playlist:
+          child = _buildMobilePlaylistPanel(controlsEnabled: controlsEnabled);
+          break;
+        case _MobilePlayerPanel.audio:
+          child = _buildMobileAudioPanel(controlsEnabled: controlsEnabled);
+          break;
+        case _MobilePlayerPanel.core:
+          child = _buildMobileCorePanel(controlsEnabled: controlsEnabled);
+          break;
+        case _MobilePlayerPanel.superResolution:
+          child = _buildMobileSuperResolutionPanel();
+          break;
+        case _MobilePlayerPanel.danmaku:
+          child = _buildMobileDanmakuPanel(controlsEnabled: controlsEnabled);
+          break;
+        case _MobilePlayerPanel.subtitle:
+          child = _buildMobileSubtitlePanel(controlsEnabled: controlsEnabled);
+          break;
+        case _MobilePlayerPanel.speed:
+          break;
+      }
+    }
+
+    return Stack(
+      children: [
+        _buildMobileSpeedOverlay(controlsEnabled: controlsEnabled),
+        MobilePlayerSidePanel(
+          title: _mobilePanelTitle(effectivePanel),
+          visible: visibleSidePanel,
+          onDismiss: _closeMobilePanels,
+          child: child,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMobileEmptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(28),
+              color: Colors.black.withValues(alpha: 0.30),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.video_library_outlined,
+                    size: 44,
+                    color: Colors.white,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    '开始本地播放',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '选择本地视频，移动端会沿用当前播放页的操作方式。',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white70, height: 1.4),
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    onPressed: _pickFiles,
+                    icon: const Icon(Icons.video_file_outlined),
+                    label: const Text('选择视频'),
+                  ),
+                  const SizedBox(height: 10),
+                  TextButton.icon(
+                    onPressed: () => _openMobilePanel(_MobilePlayerPanel.playlist),
+                    icon: const Icon(Icons.format_list_numbered),
+                    label: const Text('查看本地媒体面板'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   bool get _shouldControlSystemUi {
     if (kIsWeb) return false;
     if (DeviceType.isTv) return false;
@@ -2100,6 +2819,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
       _duration = Duration.zero;
       _controlsVisible = true;
       _isScrubbing = false;
+      _mobilePanel = null;
       _subtitleText = '';
       _subtitlePollInFlight = false;
       if (resetDanmaku) {
@@ -2373,6 +3093,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     final controller = _controller;
     final isReady = controller != null && controller.value.isInitialized;
     final controlsEnabled = isReady && _playError == null;
+    final useMobilePlaybackUi = !isTv;
 
     final remoteEnabled = isTv || widget.appState.forceRemoteControlKeys;
     _remoteEnabled = remoteEnabled;
@@ -2517,8 +3238,10 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
         },
         child: Scaffold(
           backgroundColor: Colors.black,
-          extendBodyBehindAppBar: _fullScreen,
-          appBar: PreferredSize(
+          extendBodyBehindAppBar: useMobilePlaybackUi || _fullScreen,
+          appBar: useMobilePlaybackUi
+              ? null
+              : PreferredSize(
             preferredSize: _fullScreen
                 ? (_controlsVisible
                     ? const Size.fromHeight(kToolbarHeight)
@@ -2610,7 +3333,342 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
               ),
             ),
           ),
-          body: Column(
+          body: useMobilePlaybackUi
+              ? Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Container(
+                      color: Colors.black,
+                      child: isReady
+                          ? Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                Center(
+                                  child: AspectRatio(
+                                    aspectRatio: controller.value.aspectRatio == 0
+                                        ? 16 / 9
+                                        : controller.value.aspectRatio,
+                                    child: VideoPlayer(controller),
+                                  ),
+                                ),
+                                Positioned.fill(
+                                  child: DanmakuStage(
+                                    key: _danmakuKey,
+                                    enabled: _danmakuEnabled,
+                                    opacity: _danmakuOpacity,
+                                    scale: _danmakuScale,
+                                    speed: _danmakuSpeed,
+                                    timeScale: controller.value.playbackSpeed,
+                                    bold: _danmakuBold,
+                                    scrollMaxLines: _danmakuMaxLines,
+                                    topMaxLines: _danmakuTopMaxLines,
+                                    bottomMaxLines: _danmakuBottomMaxLines,
+                                    preventOverlap: _danmakuPreventOverlap,
+                                  ),
+                                ),
+                                if ((!_isAndroid ||
+                                        _viewType == VideoViewType.textureView) &&
+                                    _subtitleText.trim().isNotEmpty)
+                                  Positioned.fill(
+                                    child: IgnorePointer(
+                                      child: Align(
+                                        alignment: Alignment.bottomCenter,
+                                        child: Padding(
+                                          padding: EdgeInsets.fromLTRB(
+                                            16,
+                                            0,
+                                            16,
+                                            _subtitleBottomPadding,
+                                          ),
+                                          child: DecoratedBox(
+                                            decoration: BoxDecoration(
+                                              color: Colors.black.withValues(
+                                                alpha: 0.55,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(6),
+                                            ),
+                                            child: Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 8,
+                                                vertical: 4,
+                                              ),
+                                              child: Text(
+                                                _subtitleText.trim(),
+                                                textAlign: TextAlign.center,
+                                                style: TextStyle(
+                                                  height: 1.4,
+                                                  fontSize: _subtitleFontSize
+                                                      .clamp(12.0, 60.0),
+                                                  fontWeight: _subtitleBold
+                                                      ? FontWeight.w600
+                                                      : FontWeight.normal,
+                                                  color: Colors.white,
+                                                  shadows: const [
+                                                    Shadow(
+                                                      blurRadius: 6,
+                                                      offset: Offset(2, 2),
+                                                      color: Colors.black,
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                if (_screenBrightness < 0.999)
+                                  Positioned.fill(
+                                    child: IgnorePointer(
+                                      child: ColoredBox(
+                                        color: Colors.black.withValues(
+                                          alpha: (1.0 - _screenBrightness)
+                                              .clamp(0.0, 0.8)
+                                              .toDouble(),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                if (_buffering)
+                                  Positioned.fill(
+                                    child: IgnorePointer(
+                                      child: ColoredBox(
+                                        color: Colors.black54,
+                                        child: Center(
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const CircularProgressIndicator(),
+                                              if (widget.appState.showBufferSpeed)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                    top: 12,
+                                                  ),
+                                                  child: Text(
+                                                    _bufferSpeedX == null
+                                                        ? '缓冲速度：--'
+                                                        : '缓冲速度：${_bufferSpeedX!.clamp(0.0, 99.0).toStringAsFixed(1)}x',
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                    ),
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                if (_playError != null)
+                                  Center(
+                                    child: Text(
+                                      '播放失败：$_playError',
+                                      style: const TextStyle(
+                                        color: Colors.redAccent,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                                Positioned.fill(
+                                  child: LayoutBuilder(
+                                    builder: (ctx, constraints) {
+                                      final w = constraints.maxWidth;
+                                      final h = constraints.maxHeight;
+                                      final sideDragEnabled =
+                                          widget.appState.gestureBrightness ||
+                                              widget.appState.gestureVolume;
+                                      return GestureDetector(
+                                        behavior: HitTestBehavior.translucent,
+                                        onTap: _toggleControls,
+                                        onDoubleTapDown: controlsEnabled
+                                            ? (d) => _doubleTapDownPosition =
+                                                d.localPosition
+                                            : null,
+                                        onDoubleTap: controlsEnabled
+                                            ? () {
+                                                final pos =
+                                                    _doubleTapDownPosition ??
+                                                        Offset(w / 2, 0);
+                                                unawaited(
+                                                  _handleDoubleTap(pos, w),
+                                                );
+                                              }
+                                            : null,
+                                        onHorizontalDragStart: (controlsEnabled &&
+                                                widget.appState.gestureSeek)
+                                            ? _onSeekDragStart
+                                            : null,
+                                        onHorizontalDragUpdate: (controlsEnabled &&
+                                                widget.appState.gestureSeek)
+                                            ? (d) => _onSeekDragUpdate(
+                                                  d,
+                                                  width: w,
+                                                  duration: _duration,
+                                                )
+                                            : null,
+                                        onHorizontalDragEnd: (controlsEnabled &&
+                                                widget.appState.gestureSeek)
+                                            ? _onSeekDragEnd
+                                            : null,
+                                        onVerticalDragStart: (controlsEnabled &&
+                                                sideDragEnabled)
+                                            ? (d) => _onSideDragStart(
+                                                  d,
+                                                  width: w,
+                                                )
+                                            : null,
+                                        onVerticalDragUpdate: (controlsEnabled &&
+                                                sideDragEnabled)
+                                            ? (d) => _onSideDragUpdate(
+                                                  d,
+                                                  height: h,
+                                                )
+                                            : null,
+                                        onVerticalDragEnd:
+                                            (controlsEnabled && sideDragEnabled)
+                                                ? _onSideDragEnd
+                                                : null,
+                                        onLongPressStart: (controlsEnabled &&
+                                                widget.appState
+                                                    .gestureLongPressSpeed)
+                                            ? _onLongPressStart
+                                            : null,
+                                        onLongPressMoveUpdate: (controlsEnabled &&
+                                                widget.appState
+                                                    .gestureLongPressSpeed &&
+                                                widget.appState
+                                                    .longPressSlideSpeed)
+                                            ? (d) => _onLongPressMoveUpdate(
+                                                  d,
+                                                  height: h,
+                                                )
+                                            : null,
+                                        onLongPressEnd: (controlsEnabled &&
+                                                widget.appState
+                                                    .gestureLongPressSpeed)
+                                            ? _onLongPressEnd
+                                            : null,
+                                        child: const SizedBox.expand(),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ],
+                            )
+                          : _playError != null
+                              ? Center(
+                                  child: Text(
+                                    '播放失败：$_playError',
+                                    style: const TextStyle(
+                                      color: Colors.redAccent,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                )
+                              : _buildMobileEmptyState(),
+                    ),
+                    if (_gestureOverlayText != null)
+                      Center(
+                        child: IgnorePointer(
+                          child: Material(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(12),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 10,
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    _gestureOverlayIcon ?? Icons.info_outline,
+                                    size: 20,
+                                    color: Colors.white,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    _gestureOverlayText!,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (!_mobileSidePanelVisible)
+                      Align(
+                        alignment: Alignment.topCenter,
+                        child: SafeArea(
+                          bottom: false,
+                          minimum: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                          child: AnimatedSlide(
+                            offset: _controlsVisible
+                                ? Offset.zero
+                                : const Offset(0, -0.18),
+                            duration: const Duration(milliseconds: 200),
+                            curve: Curves.easeOutCubic,
+                            child: AnimatedOpacity(
+                              opacity: _controlsVisible ? 1 : 0,
+                              duration: const Duration(milliseconds: 160),
+                              curve: Curves.easeOut,
+                              child: IgnorePointer(
+                                ignoring: !_controlsVisible,
+                                child: Listener(
+                                  onPointerDown: (_) => _showControls(),
+                                  child: _buildMobileTopStatusBar(
+                                    controlsEnabled: controlsEnabled,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (!_mobileSidePanelVisible)
+                      Align(
+                        alignment: Alignment.bottomCenter,
+                        child: SafeArea(
+                          top: false,
+                          minimum: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                          child: AnimatedSlide(
+                            offset: _controlsVisible
+                                ? Offset.zero
+                                : const Offset(0, 0.18),
+                            duration: const Duration(milliseconds: 200),
+                            curve: Curves.easeOutCubic,
+                            child: AnimatedOpacity(
+                              opacity: _controlsVisible ? 1 : 0,
+                              duration: const Duration(milliseconds: 160),
+                              curve: Curves.easeOut,
+                              child: IgnorePointer(
+                                ignoring: !_controlsVisible,
+                                child: Listener(
+                                  onPointerDown: (_) => _showControls(),
+                                  child: _buildMobileBottomStatusBar(
+                                    controlsEnabled: controlsEnabled,
+                                    controller: controller!,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    _buildMobileSidePanelOverlay(
+                      controlsEnabled: controlsEnabled,
+                    ),
+                  ],
+                )
+              : Column(
             children: [
               wrapVideo(
                 Container(
@@ -3032,6 +4090,16 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
       ),
     );
   }
+}
+
+enum _MobilePlayerPanel {
+  playlist,
+  audio,
+  core,
+  superResolution,
+  danmaku,
+  subtitle,
+  speed,
 }
 
 enum _OrientationMode { auto, landscape, portrait }
