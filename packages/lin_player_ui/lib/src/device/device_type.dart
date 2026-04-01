@@ -112,6 +112,32 @@ class DeviceType {
     }
   }
 
+  static Future<String> deviceDisplayName() async {
+    if (kIsWeb) return 'Web';
+
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        try {
+          final v = await _channel.invokeMethod<String>('deviceName');
+          final fixed = (v ?? '').trim();
+          if (fixed.isNotEmpty) return fixed;
+        } catch (_) {
+          // Fall through to platform fallback below.
+        }
+        return isTv ? 'Android TV' : 'Android';
+      case TargetPlatform.iOS:
+        return 'iOS';
+      case TargetPlatform.windows:
+        return 'Windows';
+      case TargetPlatform.macOS:
+        return 'macOS';
+      case TargetPlatform.linux:
+        return 'Linux';
+      case TargetPlatform.fuchsia:
+        return 'Fuchsia';
+    }
+  }
+
   static Future<int?> batteryLevel() async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return null;
 

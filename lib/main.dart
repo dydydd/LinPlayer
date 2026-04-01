@@ -158,12 +158,14 @@ Future<void> _bootstrapApp() async {
   // Ensure native media backends (mpv) are ready before any player is created.
   MediaKit.ensureInitialized();
   await DeviceType.init();
+  final defaultDeviceName = await DeviceType.deviceDisplayName();
   AppDiagnosticsLogger.instance.info(
     'app',
     'Application bootstrap started',
     data: <String, Object?>{
       'platform': kIsWeb ? 'web' : defaultTargetPlatform.name,
       'isTv': DeviceType.isTv,
+      'deviceName': defaultDeviceName,
     },
   );
 
@@ -171,6 +173,7 @@ Future<void> _bootstrapApp() async {
   ServerApiBootstrap.configure(
     userAgentProduct: appConfig.userAgentProduct,
     defaultClientName: appConfig.displayName,
+    defaultDeviceName: defaultDeviceName,
     appVersion: '1.0.0',
   );
 
@@ -179,6 +182,7 @@ Future<void> _bootstrapApp() async {
     ServerApiBootstrap.configure(
       userAgentProduct: appConfig.userAgentProduct,
       defaultClientName: appConfig.displayName,
+      defaultDeviceName: defaultDeviceName,
       appVersion: '${info.version}+${info.buildNumber}',
     );
     AppDiagnosticsLogger.instance.info(

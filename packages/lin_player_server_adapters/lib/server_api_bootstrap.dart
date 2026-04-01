@@ -8,6 +8,7 @@ class ServerApiBootstrap {
     required String userAgentProduct,
     required String appVersion,
     required String defaultClientName,
+    required String defaultDeviceName,
     bool allowBadCertificates = true,
     Duration connectionTimeout = const Duration(seconds: 6),
   }) {
@@ -19,6 +20,7 @@ class ServerApiBootstrap {
     );
     EmbyApi.setUserAgentProduct(userAgentProduct);
     EmbyApi.setDefaultClientName(defaultClientName);
+    EmbyApi.setDefaultDeviceName(defaultDeviceName);
     EmbyApi.setAppVersion(appVersion);
   }
 }

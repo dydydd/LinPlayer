@@ -63,6 +63,7 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, deviceChannelName).setMethodCallHandler { call, result ->
             when (call.method) {
                 "isAndroidTv" -> result.success(isAndroidTv())
+                "deviceName" -> result.success(deviceName())
                 "batteryLevel" -> result.success(batteryLevel())
                 "totalRxBytes" -> result.success(totalRxBytes())
                 "primaryAbi" -> result.success(primaryAbi())
@@ -133,6 +134,31 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    private fun deviceName(): String {
+        val manufacturer = Build.MANUFACTURER?.trim().orEmpty()
+        val brand = Build.BRAND?.trim().orEmpty()
+        val model = Build.MODEL?.trim().orEmpty()
+        val device = Build.DEVICE?.trim().orEmpty()
+        val product = Build.PRODUCT?.trim().orEmpty()
+
+        val display = when {
+            manufacturer.isNotEmpty() && model.isNotEmpty() ->
+                if (model.startsWith(manufacturer, ignoreCase = true)) model else "$manufacturer $model"
+            brand.isNotEmpty() && model.isNotEmpty() ->
+                if (model.startsWith(brand, ignoreCase = true)) model else "$brand $model"
+            model.isNotEmpty() -> model
+            device.isNotEmpty() -> device
+            product.isNotEmpty() -> product
+            isAndroidTv() -> "Android TV"
+            else -> "Android"
+        }.replace(Regex("\\s+"), " ").trim()
+
+        if (device.isEmpty() || display.equals(device, ignoreCase = true)) {
+            return display
+        }
+        return "$display ($device)"
     }
 
     private class LinPlayerProxySelector(

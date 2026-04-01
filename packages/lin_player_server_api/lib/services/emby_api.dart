@@ -404,6 +404,7 @@ class EmbyApi {
   static String appVersion = '1.0.0';
   static String userAgentProduct = 'LinPlayer';
   static String defaultClientName = 'LinPlayer';
+  static String defaultDeviceName = 'Flutter';
   static EmbyApiClientFactory? _clientFactory;
   static EmbyApiRouteLabelBuilder? _routeLabelBuilder;
 
@@ -424,6 +425,11 @@ class EmbyApi {
   static void setDefaultClientName(String name) {
     final v = name.trim();
     if (v.isNotEmpty) defaultClientName = v;
+  }
+
+  static void setDefaultDeviceName(String name) {
+    final v = name.trim();
+    if (v.isNotEmpty) defaultDeviceName = v;
   }
 
   static void setAppVersion(String version) {
@@ -457,7 +463,7 @@ class EmbyApi {
     required MediaServerType serverType,
     required String deviceId,
     String? client,
-    String device = 'Flutter',
+    String device = '',
     String? version,
     String? userId,
     String? token,
@@ -472,12 +478,14 @@ class EmbyApi {
     final clientName = (client == null || client.trim().isEmpty)
         ? defaultClientName
         : client.trim();
+    final deviceName =
+        device.trim().isEmpty ? defaultDeviceName : device.trim();
 
     final parts = <String>[
       if (userId != null && userId.trim().isNotEmpty)
         'UserId="${userId.trim()}"',
       'Client="$clientName"',
-      'Device="$device"',
+      'Device="$deviceName"',
       'DeviceId="$deviceId"',
       'Version="$v"',
       if (token != null && token.trim().isNotEmpty) 'Token="${token.trim()}"',
@@ -489,7 +497,7 @@ class EmbyApi {
     required MediaServerType serverType,
     required String deviceId,
     String? client,
-    String device = 'Flutter',
+    String device = '',
     String? version,
     String? userId,
     String? token,
@@ -538,7 +546,7 @@ class EmbyApi {
             ? defaultClientName
             : clientName.trim(),
         deviceName = (deviceName == null || deviceName.trim().isEmpty)
-            ? 'Flutter'
+            ? defaultDeviceName
             : deviceName.trim(),
         _client = client ?? _defaultClient();
 

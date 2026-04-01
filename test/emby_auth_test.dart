@@ -5,9 +5,31 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
+import 'package:lin_player_core/state/media_server_type.dart';
 import 'package:lin_player_server_api/services/emby_api.dart';
 
 void main() {
+  test('buildAuthorizationHeaders uses configured default device name', () {
+    final previous = EmbyApi.defaultDeviceName;
+    try {
+      EmbyApi.setDefaultDeviceName('Google Pixel 8');
+      final headers = EmbyApi.buildAuthorizationHeaders(
+        serverType: MediaServerType.emby,
+        deviceId: 'device-1',
+      );
+      expect(
+        headers['Authorization'],
+        contains('Device="Google Pixel 8"'),
+      );
+      expect(
+        headers['X-Emby-Authorization'],
+        contains('Device="Google Pixel 8"'),
+      );
+    } finally {
+      EmbyApi.setDefaultDeviceName(previous);
+    }
+  });
+
   test('authenticate prefers root base when user input ends with /emby',
       () async {
     final requested = <String>[];
