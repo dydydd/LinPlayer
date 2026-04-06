@@ -13,6 +13,8 @@ class PreloadRequest {
     this.preloadDuration = defaultPreloadDuration,
     this.dedupeFingerprint,
     this.httpProxyUrl,
+    this.ownerKey,
+    this.scopeKey,
   });
 
   final ResolvedPlaybackSource resolvedSource;
@@ -26,4 +28,13 @@ class PreloadRequest {
   /// "current item" vs "next item" without losing source-level identity.
   final String? dedupeFingerprint;
   final String? httpProxyUrl;
+
+  /// Optional lifecycle owner for cancellable preload work.
+  /// Typical values are a detail-page instance or a playback-session token.
+  final String? ownerKey;
+
+  /// Optional semantic scope inside the owner, mainly for diagnostics.
+  /// Typical values are "detail_current", "detail_next",
+  /// "playback_current", and "playback_next".
+  final String? scopeKey;
 }

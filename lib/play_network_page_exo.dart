@@ -106,6 +106,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   bool _nextEpisodePreloadTriggered = false;
   ResolvedPlaybackSource? _resolvedPlaybackSource;
   String? _preloadHttpProxyUrl;
+  String _preloadOwnerKey = '';
+  bool _allowRoutePop = false;
+  bool _exitInProgress = false;
 
   static const Duration _gestureOverlayAutoHideDelay =
       Duration(milliseconds: 800);
@@ -317,11 +320,69 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _uiTimer?.cancel();
     _uiTimer = null;
     _serverProgressSync?.stop();
+    PlaybackPreloadCoordinator.cancelOwner(_preloadOwnerKey);
+    _preloadOwnerKey = '';
     // ignore: unawaited_futures
     _reportPlaybackStoppedBestEffort();
     // ignore: unawaited_futures
     _controller?.dispose();
     _controller = null;
+  }
+
+  Future<void> _requestExitThenPop() async {
+    if (_exitInProgress) return;
+    _exitInProgress = true;
+
+    await _shutdownPlaybackForRouteExit();
+
+    try {
+      await WidgetsBinding.instance.endOfFrame;
+    } catch (_) {}
+
+    if (!mounted) return;
+    setState(() => _allowRoutePop = true);
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  Future<void> _shutdownPlaybackForRouteExit() async {
+    _controlsHideTimer?.cancel();
+    _controlsHideTimer = null;
+    _uiTimer?.cancel();
+    _uiTimer = null;
+    _resumeHintTimer?.cancel();
+    _resumeHintTimer = null;
+    _startOverHintTimer?.cancel();
+    _startOverHintTimer = null;
+    _gestureOverlayTimer?.cancel();
+    _gestureOverlayTimer = null;
+    _tvOkLongPressTimer?.cancel();
+    _tvOkLongPressTimer = null;
+    _mobileSpeedAdjustTimer?.cancel();
+    _mobileSpeedAdjustTimer = null;
+
+    _serverProgressSync?.stop();
+    if (_preloadOwnerKey.isNotEmpty) {
+      PlaybackPreloadCoordinator.cancelOwner(_preloadOwnerKey);
+      _preloadOwnerKey = '';
+    }
+    unawaited(_reportPlaybackStoppedBestEffort());
+
+    final controller = _controller;
+    _controller = null;
+    if (controller != null) {
+      try {
+        if (controller.value.isInitialized && controller.value.isPlaying) {
+          await controller.pause();
+        }
+      } catch (_) {}
+      try {
+        await controller.dispose();
+      } catch (_) {}
+    }
+
+    await _exitImmersiveMode(resetOrientations: true);
   }
 
   @override
@@ -331,6 +392,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       _route = null;
     }
     WidgetsBinding.instance.removeObserver(this);
+    PlaybackPreloadCoordinator.cancelOwner(_preloadOwnerKey);
+    _preloadOwnerKey = '';
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
     _uiTimer?.cancel();
@@ -1469,6 +1532,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         resolvedSource: resolvedSource,
         startPosition: effectiveStart,
         httpProxyUrl: _preloadHttpProxyUrl,
+        ownerKey: _preloadOwnerKey,
+        scopeKey: 'playback_current',
       ),
     );
 
@@ -1524,6 +1589,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           audioStreamIndex: _selectedAudioStreamIndex,
           subtitleStreamIndex: _selectedSubtitleStreamIndex,
           preferredVideoVersion: widget.appState.preferredVideoVersion,
+          ownerKey: _preloadOwnerKey,
+          scopeKey: 'playback_next',
         ),
       );
     } catch (_) {
@@ -4148,6 +4215,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   }
 
   Future<void> _init() async {
+    _allowRoutePop = false;
+    _exitInProgress = false;
     _uiTimer?.cancel();
     _uiTimer = null;
     _serverProgressSync?.stop();
@@ -4216,6 +4285,12 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _mobileVersionSourcesFuture = null;
     _mobileSpeedAdjustTimer?.cancel();
     _mobileSpeedAdjustTimer = null;
+
+    if (_preloadOwnerKey.isNotEmpty) {
+      PlaybackPreloadCoordinator.cancelOwner(_preloadOwnerKey);
+    }
+    _preloadOwnerKey =
+        PlaybackPreloadCoordinator.createOwnerToken('playback_exo');
 
     final prev = _controller;
     _controller = null;
@@ -5302,264 +5377,618 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
     final remoteEnabled = widget.isTv || widget.appState.forceRemoteControlKeys;
     _remoteEnabled = remoteEnabled;
+    final canPopRoute = Navigator.of(context).canPop();
+    final needsSafeExit =
+        canPopRoute && !_allowRoutePop && (_loading || controller != null);
 
-    return Focus(
-      focusNode: _tvSurfaceFocusNode,
-      autofocus: remoteEnabled,
-      canRequestFocus: remoteEnabled,
-      skipTraversal: true,
-      onKeyEvent: (node, event) {
-        if (!remoteEnabled) return KeyEventResult.ignored;
-        final key = event.logicalKey;
+    return PopScope(
+      canPop: !needsSafeExit,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop || !needsSafeExit) return;
+        unawaited(_requestExitThenPop());
+      },
+      child: Focus(
+        focusNode: _tvSurfaceFocusNode,
+        autofocus: remoteEnabled,
+        canRequestFocus: remoteEnabled,
+        skipTraversal: true,
+        onKeyEvent: (node, event) {
+          if (!remoteEnabled) return KeyEventResult.ignored;
+          final key = event.logicalKey;
 
-        if (widget.isTv && event is KeyDownEvent) {
-          if (key == LogicalKeyboardKey.arrowLeft ||
-              key == LogicalKeyboardKey.arrowRight) {
-            _showControls();
+          if (widget.isTv && event is KeyDownEvent) {
+            if (key == LogicalKeyboardKey.arrowLeft ||
+                key == LogicalKeyboardKey.arrowRight) {
+              _showControls();
+            }
+
+            final isBackKey = key == LogicalKeyboardKey.goBack ||
+                key == LogicalKeyboardKey.escape ||
+                key == LogicalKeyboardKey.browserBack;
+            if (isBackKey) {
+              if (_tvBottomPanelIndex != 0) {
+                _showControls();
+                _setTvBottomPanel(0);
+                _focusTvPlayPause();
+                return KeyEventResult.handled;
+              }
+              return KeyEventResult.ignored;
+            }
+
+            if (key == LogicalKeyboardKey.arrowDown) {
+              _showControls();
+              final before = _tvBottomPanelIndex;
+              _cycleTvBottomPanel(forward: true);
+              if (before == _tvBottomPanelCount - 1) {
+                _focusTvPlayPause();
+              }
+              return KeyEventResult.handled;
+            }
+            if (key == LogicalKeyboardKey.arrowUp) {
+              _showControls();
+              final before = _tvBottomPanelIndex;
+              _cycleTvBottomPanel(forward: false);
+              if (before == 1) {
+                _focusTvPlayPause();
+              }
+              return KeyEventResult.handled;
+            }
+
+            if (controlsEnabled && _tvBottomPanelIndex == 0) {
+              if (key == LogicalKeyboardKey.arrowLeft) {
+                _showControls();
+                // ignore: unawaited_futures
+                _seekRelative(Duration(seconds: -_seekBackSeconds));
+                return KeyEventResult.handled;
+              }
+              if (key == LogicalKeyboardKey.arrowRight) {
+                _showControls();
+                // ignore: unawaited_futures
+                _seekRelative(Duration(seconds: _seekForwardSeconds));
+                return KeyEventResult.handled;
+              }
+            }
           }
 
-          final isBackKey = key == LogicalKeyboardKey.goBack ||
-              key == LogicalKeyboardKey.escape ||
-              key == LogicalKeyboardKey.browserBack;
-          if (isBackKey) {
-            if (_tvBottomPanelIndex != 0) {
-              _showControls();
-              _setTvBottomPanel(0);
+          if (!node.hasPrimaryFocus) return KeyEventResult.ignored;
+
+          if (event is KeyDownEvent) {
+            if (key == LogicalKeyboardKey.arrowUp) {
+              _showControls(scheduleHide: false);
               _focusTvPlayPause();
               return KeyEventResult.handled;
             }
-            return KeyEventResult.ignored;
-          }
-
-          if (key == LogicalKeyboardKey.arrowDown) {
-            _showControls();
-            final before = _tvBottomPanelIndex;
-            _cycleTvBottomPanel(forward: true);
-            if (before == _tvBottomPanelCount - 1) {
-              _focusTvPlayPause();
-            }
-            return KeyEventResult.handled;
-          }
-          if (key == LogicalKeyboardKey.arrowUp) {
-            _showControls();
-            final before = _tvBottomPanelIndex;
-            _cycleTvBottomPanel(forward: false);
-            if (before == 1) {
-              _focusTvPlayPause();
-            }
-            return KeyEventResult.handled;
-          }
-
-          if (controlsEnabled && _tvBottomPanelIndex == 0) {
-            if (key == LogicalKeyboardKey.arrowLeft) {
-              _showControls();
-              // ignore: unawaited_futures
-              _seekRelative(Duration(seconds: -_seekBackSeconds));
-              return KeyEventResult.handled;
-            }
-            if (key == LogicalKeyboardKey.arrowRight) {
-              _showControls();
-              // ignore: unawaited_futures
-              _seekRelative(Duration(seconds: _seekForwardSeconds));
-              return KeyEventResult.handled;
+            if (key == LogicalKeyboardKey.arrowDown) {
+              if (_controlsVisible) {
+                _hideControlsForRemote();
+                return KeyEventResult.handled;
+              }
+              return KeyEventResult.ignored;
             }
           }
-        }
 
-        if (!node.hasPrimaryFocus) return KeyEventResult.ignored;
+          if (!controlsEnabled) return KeyEventResult.ignored;
 
-        if (event is KeyDownEvent) {
-          if (key == LogicalKeyboardKey.arrowUp) {
-            _showControls(scheduleHide: false);
-            _focusTvPlayPause();
-            return KeyEventResult.handled;
-          }
-          if (key == LogicalKeyboardKey.arrowDown) {
-            if (_controlsVisible) {
-              _hideControlsForRemote();
-              return KeyEventResult.handled;
+          final isOkKey = key == LogicalKeyboardKey.space ||
+              key == LogicalKeyboardKey.enter ||
+              key == LogicalKeyboardKey.select;
+          if (isOkKey) {
+            // If long-press speed is disabled, keep original behavior (toggle on key-down).
+            if (!widget.appState.gestureLongPressSpeed) {
+              if (event is KeyDownEvent) {
+                // ignore: unawaited_futures
+                _togglePlayPause();
+                return KeyEventResult.handled;
+              }
+              return KeyEventResult.ignored;
             }
-            return KeyEventResult.ignored;
-          }
-        }
 
-        if (!controlsEnabled) return KeyEventResult.ignored;
-
-        final isOkKey = key == LogicalKeyboardKey.space ||
-            key == LogicalKeyboardKey.enter ||
-            key == LogicalKeyboardKey.select;
-        if (isOkKey) {
-          // If long-press speed is disabled, keep original behavior (toggle on key-down).
-          if (!widget.appState.gestureLongPressSpeed) {
             if (event is KeyDownEvent) {
+              if (_tvOkLongPressTimer != null) return KeyEventResult.handled;
+              final controller = _controller;
+              if (controller == null || !controller.value.isInitialized) {
+                return KeyEventResult.ignored;
+              }
+
+              _tvOkLongPressTriggered = false;
+              _tvOkLongPressBaseRate = controller.value.playbackSpeed;
+              _tvOkLongPressTimer = Timer(_tvOkLongPressDelay, () {
+                if (!mounted) return;
+                final controller = _controller;
+                if (controller == null || !controller.value.isInitialized)
+                  return;
+
+                final base =
+                    _tvOkLongPressBaseRate ?? controller.value.playbackSpeed;
+                final targetRate =
+                    (base * widget.appState.longPressSpeedMultiplier)
+                        .clamp(0.25, 5.0)
+                        .toDouble();
+                _tvOkLongPressTriggered = true;
+                // ignore: unawaited_futures
+                controller.setPlaybackSpeed(targetRate);
+                _setGestureOverlay(
+                  icon: Icons.speed,
+                  text: '倍速 ×${(targetRate / base).toStringAsFixed(2)}',
+                );
+              });
+              return KeyEventResult.handled;
+            }
+
+            if (event is KeyUpEvent) {
+              final t = _tvOkLongPressTimer;
+              _tvOkLongPressTimer = null;
+              t?.cancel();
+
+              final controller = _controller;
+              if (controller == null || !controller.value.isInitialized) {
+                _tvOkLongPressBaseRate = null;
+                _tvOkLongPressTriggered = false;
+                return KeyEventResult.ignored;
+              }
+
+              if (_tvOkLongPressTriggered) {
+                final base = _tvOkLongPressBaseRate;
+                _tvOkLongPressTriggered = false;
+                _tvOkLongPressBaseRate = null;
+                if (base != null) {
+                  // ignore: unawaited_futures
+                  controller.setPlaybackSpeed(base);
+                }
+                _hideGestureOverlay();
+                return KeyEventResult.handled;
+              }
+
+              _tvOkLongPressBaseRate = null;
               // ignore: unawaited_futures
               _togglePlayPause();
               return KeyEventResult.handled;
             }
+
             return KeyEventResult.ignored;
           }
 
-          if (event is KeyDownEvent) {
-            if (_tvOkLongPressTimer != null) return KeyEventResult.handled;
-            final controller = _controller;
-            if (controller == null || !controller.value.isInitialized) {
-              return KeyEventResult.ignored;
-            }
+          if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
-            _tvOkLongPressTriggered = false;
-            _tvOkLongPressBaseRate = controller.value.playbackSpeed;
-            _tvOkLongPressTimer = Timer(_tvOkLongPressDelay, () {
-              if (!mounted) return;
-              final controller = _controller;
-              if (controller == null || !controller.value.isInitialized) return;
+          final allowSeek = !widget.isTv || _tvBottomPanelIndex == 0;
 
-              final base =
-                  _tvOkLongPressBaseRate ?? controller.value.playbackSpeed;
-              final targetRate =
-                  (base * widget.appState.longPressSpeedMultiplier)
-                      .clamp(0.25, 5.0)
-                      .toDouble();
-              _tvOkLongPressTriggered = true;
-              // ignore: unawaited_futures
-              controller.setPlaybackSpeed(targetRate);
-              _setGestureOverlay(
-                icon: Icons.speed,
-                text: '倍速 ×${(targetRate / base).toStringAsFixed(2)}',
-              );
-            });
+          if (allowSeek && key == LogicalKeyboardKey.arrowLeft) {
+            // ignore: unawaited_futures
+            _seekRelative(Duration(seconds: -_seekBackSeconds));
             return KeyEventResult.handled;
           }
-
-          if (event is KeyUpEvent) {
-            final t = _tvOkLongPressTimer;
-            _tvOkLongPressTimer = null;
-            t?.cancel();
-
-            final controller = _controller;
-            if (controller == null || !controller.value.isInitialized) {
-              _tvOkLongPressBaseRate = null;
-              _tvOkLongPressTriggered = false;
-              return KeyEventResult.ignored;
-            }
-
-            if (_tvOkLongPressTriggered) {
-              final base = _tvOkLongPressBaseRate;
-              _tvOkLongPressTriggered = false;
-              _tvOkLongPressBaseRate = null;
-              if (base != null) {
-                // ignore: unawaited_futures
-                controller.setPlaybackSpeed(base);
-              }
-              _hideGestureOverlay();
-              return KeyEventResult.handled;
-            }
-
-            _tvOkLongPressBaseRate = null;
+          if (allowSeek && key == LogicalKeyboardKey.arrowRight) {
             // ignore: unawaited_futures
-            _togglePlayPause();
+            _seekRelative(Duration(seconds: _seekForwardSeconds));
             return KeyEventResult.handled;
           }
 
           return KeyEventResult.ignored;
-        }
-
-        if (event is! KeyDownEvent) return KeyEventResult.ignored;
-
-        final allowSeek = !widget.isTv || _tvBottomPanelIndex == 0;
-
-        if (allowSeek && key == LogicalKeyboardKey.arrowLeft) {
-          // ignore: unawaited_futures
-          _seekRelative(Duration(seconds: -_seekBackSeconds));
-          return KeyEventResult.handled;
-        }
-        if (allowSeek && key == LogicalKeyboardKey.arrowRight) {
-          // ignore: unawaited_futures
-          _seekRelative(Duration(seconds: _seekForwardSeconds));
-          return KeyEventResult.handled;
-        }
-
-        return KeyEventResult.ignored;
-      },
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        extendBodyBehindAppBar: true,
-        appBar: null,
-        body: Column(
-          children: [
-            Expanded(
-              child: Container(
-                color: Colors.black,
-                child: isReady
-                    ? Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          Center(
-                            child: AspectRatio(
-                              aspectRatio: controller.value.aspectRatio == 0
-                                  ? 16 / 9
-                                  : controller.value.aspectRatio,
-                              child: VideoPlayer(controller),
+        },
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          extendBodyBehindAppBar: true,
+          appBar: null,
+          body: Column(
+            children: [
+              Expanded(
+                child: Container(
+                  color: Colors.black,
+                  child: isReady
+                      ? Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Center(
+                              child: AspectRatio(
+                                aspectRatio: controller.value.aspectRatio == 0
+                                    ? 16 / 9
+                                    : controller.value.aspectRatio,
+                                child: VideoPlayer(controller),
+                              ),
                             ),
-                          ),
-                          Positioned.fill(
-                            child: DanmakuStage(
-                              key: _danmakuKey,
-                              enabled: _danmakuEnabled,
-                              opacity: _danmakuOpacity,
-                              scale: _danmakuScale,
-                              speed: _danmakuSpeed,
-                              timeScale: controller.value.playbackSpeed,
-                              bold: _danmakuBold,
-                              scrollMaxLines: _danmakuMaxLines,
-                              topMaxLines: _danmakuTopMaxLines,
-                              bottomMaxLines: _danmakuBottomMaxLines,
-                              preventOverlap: _danmakuPreventOverlap,
-                            ),
-                          ),
-                          if ((!_isAndroid ||
-                                  _viewType == VideoViewType.textureView) &&
-                              _subtitleText.trim().isNotEmpty)
                             Positioned.fill(
-                              child: IgnorePointer(
-                                child: Align(
-                                  alignment: Alignment.bottomCenter,
-                                  child: Padding(
-                                    padding: EdgeInsets.fromLTRB(
-                                      16,
-                                      0,
-                                      16,
-                                      _subtitleBottomPadding,
-                                    ),
-                                    child: DecoratedBox(
-                                      decoration: BoxDecoration(
-                                        color: Colors.black.withValues(
-                                          alpha: 0.55,
-                                        ),
-                                        borderRadius: BorderRadius.circular(6),
+                              child: DanmakuStage(
+                                key: _danmakuKey,
+                                enabled: _danmakuEnabled,
+                                opacity: _danmakuOpacity,
+                                scale: _danmakuScale,
+                                speed: _danmakuSpeed,
+                                timeScale: controller.value.playbackSpeed,
+                                bold: _danmakuBold,
+                                scrollMaxLines: _danmakuMaxLines,
+                                topMaxLines: _danmakuTopMaxLines,
+                                bottomMaxLines: _danmakuBottomMaxLines,
+                                preventOverlap: _danmakuPreventOverlap,
+                              ),
+                            ),
+                            if ((!_isAndroid ||
+                                    _viewType == VideoViewType.textureView) &&
+                                _subtitleText.trim().isNotEmpty)
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  child: Align(
+                                    alignment: Alignment.bottomCenter,
+                                    child: Padding(
+                                      padding: EdgeInsets.fromLTRB(
+                                        16,
+                                        0,
+                                        16,
+                                        _subtitleBottomPadding,
                                       ),
+                                      child: DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.55,
+                                          ),
+                                          borderRadius:
+                                              BorderRadius.circular(6),
+                                        ),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 4,
+                                          ),
+                                          child: Text(
+                                            _subtitleText.trim(),
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              height: 1.4,
+                                              fontSize: _subtitleFontSize.clamp(
+                                                12.0,
+                                                60.0,
+                                              ),
+                                              fontWeight: _subtitleBold
+                                                  ? FontWeight.w600
+                                                  : FontWeight.normal,
+                                              color: Colors.white,
+                                              shadows: const [
+                                                Shadow(
+                                                  blurRadius: 6,
+                                                  offset: Offset(2, 2),
+                                                  color: Colors.black,
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            if (_screenBrightness < 0.999)
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  child: ColoredBox(
+                                    color: Colors.black.withValues(
+                                      alpha: (1.0 - _screenBrightness)
+                                          .clamp(0.0, 0.8)
+                                          .toDouble(),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            if (_buffering)
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  child: ColoredBox(
+                                    color: Colors.black26,
+                                    child: Center(
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const CircularProgressIndicator(),
+                                          if (widget.appState.showBufferSpeed)
+                                            Padding(
+                                              padding: const EdgeInsets.only(
+                                                  top: 12),
+                                              child: Text(
+                                                '网速：${_netSpeedBytesPerSecond == null ? '—' : formatBytesPerSecond(_netSpeedBytesPerSecond!)}',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            Positioned.fill(
+                              child: LayoutBuilder(
+                                builder: (ctx, constraints) {
+                                  final w = constraints.maxWidth;
+                                  final h = constraints.maxHeight;
+                                  final sideDragEnabled =
+                                      widget.appState.gestureBrightness ||
+                                          widget.appState.gestureVolume;
+                                  return GestureDetector(
+                                    behavior: HitTestBehavior.translucent,
+                                    onTap: _toggleControls,
+                                    onDoubleTapDown: controlsEnabled
+                                        ? (d) => _doubleTapDownPosition =
+                                            d.localPosition
+                                        : null,
+                                    onDoubleTap: controlsEnabled
+                                        ? () {
+                                            final pos =
+                                                _doubleTapDownPosition ??
+                                                    Offset(w / 2, 0);
+                                            // ignore: unawaited_futures
+                                            _handleDoubleTap(pos, w);
+                                          }
+                                        : null,
+                                    onHorizontalDragStart: (controlsEnabled &&
+                                            widget.appState.gestureSeek)
+                                        ? _onSeekDragStart
+                                        : null,
+                                    onHorizontalDragUpdate: (controlsEnabled &&
+                                            widget.appState.gestureSeek)
+                                        ? (d) => _onSeekDragUpdate(
+                                              d,
+                                              width: w,
+                                              duration:
+                                                  controller.value.duration,
+                                            )
+                                        : null,
+                                    onHorizontalDragEnd: (controlsEnabled &&
+                                            widget.appState.gestureSeek)
+                                        ? _onSeekDragEnd
+                                        : null,
+                                    onVerticalDragStart: (controlsEnabled &&
+                                            sideDragEnabled)
+                                        ? (d) => _onSideDragStart(d, width: w)
+                                        : null,
+                                    onVerticalDragUpdate: (controlsEnabled &&
+                                            sideDragEnabled)
+                                        ? (d) => _onSideDragUpdate(d, height: h)
+                                        : null,
+                                    onVerticalDragEnd:
+                                        (controlsEnabled && sideDragEnabled)
+                                            ? _onSideDragEnd
+                                            : null,
+                                    onLongPressStart: (controlsEnabled &&
+                                            widget
+                                                .appState.gestureLongPressSpeed)
+                                        ? _onLongPressStart
+                                        : null,
+                                    onLongPressMoveUpdate: (controlsEnabled &&
+                                            widget.appState
+                                                .gestureLongPressSpeed &&
+                                            widget.appState.longPressSlideSpeed)
+                                        ? (d) => _onLongPressMoveUpdate(
+                                              d,
+                                              height: h,
+                                            )
+                                        : null,
+                                    onLongPressEnd: (controlsEnabled &&
+                                            widget
+                                                .appState.gestureLongPressSpeed)
+                                        ? _onLongPressEnd
+                                        : null,
+                                    child: const SizedBox.expand(),
+                                  );
+                                },
+                              ),
+                            ),
+                            if (_gestureOverlayText != null)
+                              Center(
+                                child: IgnorePointer(
+                                  child: Material(
+                                    color: Colors.black54,
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 10,
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            _gestureOverlayIcon ??
+                                                Icons.info_outline,
+                                            size: 20,
+                                            color: Colors.white,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            _gestureOverlayText!,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            if (!widget.isTv && !_mobileSidePanelVisible)
+                              Align(
+                                alignment: Alignment.topCenter,
+                                child: SafeArea(
+                                  bottom: false,
+                                  minimum:
+                                      const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                                  child: AnimatedSlide(
+                                    offset: _controlsVisible
+                                        ? Offset.zero
+                                        : const Offset(0, -0.18),
+                                    duration: const Duration(milliseconds: 200),
+                                    curve: Curves.easeOutCubic,
+                                    child: AnimatedOpacity(
+                                      opacity: _controlsVisible ? 1 : 0,
+                                      duration:
+                                          const Duration(milliseconds: 160),
+                                      curve: Curves.easeOut,
+                                      child: IgnorePointer(
+                                        ignoring: !_controlsVisible,
+                                        child: Listener(
+                                          onPointerDown: (_) => _showControls(),
+                                          child: _buildMobileTopStatusBar(
+                                            context,
+                                            controlsEnabled: controlsEnabled,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            if (_skipIntroPromptVisible)
+                              Align(
+                                alignment: Alignment.topRight,
+                                child: SafeArea(
+                                  bottom: false,
+                                  child: Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                        12, 12, 12, 0),
+                                    child: Material(
+                                      color: Colors.black54,
+                                      borderRadius: BorderRadius.circular(999),
+                                      clipBehavior: Clip.antiAlias,
                                       child: Padding(
                                         padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 4,
+                                          horizontal: 12,
+                                          vertical: 10,
                                         ),
-                                        child: Text(
-                                          _subtitleText.trim(),
-                                          textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            height: 1.4,
-                                            fontSize: _subtitleFontSize.clamp(
-                                              12.0,
-                                              60.0,
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(
+                                              Icons.skip_next,
+                                              size: 18,
+                                              color: Colors.white,
                                             ),
-                                            fontWeight: _subtitleBold
-                                                ? FontWeight.w600
-                                                : FontWeight.normal,
-                                            color: Colors.white,
-                                            shadows: const [
-                                              Shadow(
-                                                blurRadius: 6,
-                                                offset: Offset(2, 2),
-                                                color: Colors.black,
+                                            const SizedBox(width: 6),
+                                            Builder(builder: (context) {
+                                              final end = _introTimestamps?.end;
+                                              final endText = (end != null &&
+                                                      end > Duration.zero)
+                                                  ? '（至 ${_fmtClock(end)}）'
+                                                  : '';
+                                              return Text(
+                                                '检测到片头$endText',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 13,
+                                                ),
+                                              );
+                                            }),
+                                            const SizedBox(width: 10),
+                                            InkWell(
+                                              onTap: _skipIntro,
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 10,
+                                                  vertical: 6,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white
+                                                      .withValues(alpha: 0.18),
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          999),
+                                                ),
+                                                child: const Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Icon(
+                                                      Icons.fast_forward,
+                                                      size: 18,
+                                                      color: Colors.white,
+                                                    ),
+                                                    SizedBox(width: 4),
+                                                    Text(
+                                                      '跳过',
+                                                      style: TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 13,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            InkWell(
+                                              onTap: _dismissSkipIntroPrompt,
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 10,
+                                                  vertical: 6,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white
+                                                      .withValues(alpha: 0.12),
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          999),
+                                                ),
+                                                child: const Text(
+                                                  '不跳过',
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 13,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            if (controlsEnabled &&
+                                _showResumeHint &&
+                                _resumeHintPosition != null)
+                              Align(
+                                alignment: Alignment.topCenter,
+                                child: SafeArea(
+                                  bottom: false,
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 12),
+                                    child: Material(
+                                      color: Colors.black54,
+                                      borderRadius: BorderRadius.circular(999),
+                                      clipBehavior: Clip.antiAlias,
+                                      child: InkWell(
+                                        onTap: _resumeToHistoryPosition,
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 10,
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(
+                                                Icons.history,
+                                                size: 18,
+                                                color: Colors.white,
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Text(
+                                                '跳转到 ${_fmtClock(_resumeHintPosition!)} 继续观看',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 13,
+                                                ),
                                               ),
                                             ],
                                           ),
@@ -5569,312 +5998,20 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                   ),
                                 ),
                               ),
-                            ),
-                          if (_screenBrightness < 0.999)
-                            Positioned.fill(
-                              child: IgnorePointer(
-                                child: ColoredBox(
-                                  color: Colors.black.withValues(
-                                    alpha: (1.0 - _screenBrightness)
-                                        .clamp(0.0, 0.8)
-                                        .toDouble(),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (_buffering)
-                            Positioned.fill(
-                              child: IgnorePointer(
-                                child: ColoredBox(
-                                  color: Colors.black26,
-                                  child: Center(
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const CircularProgressIndicator(),
-                                        if (widget.appState.showBufferSpeed)
-                                          Padding(
-                                            padding:
-                                                const EdgeInsets.only(top: 12),
-                                            child: Text(
-                                              '网速：${_netSpeedBytesPerSecond == null ? '—' : formatBytesPerSecond(_netSpeedBytesPerSecond!)}',
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                              ),
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          Positioned.fill(
-                            child: LayoutBuilder(
-                              builder: (ctx, constraints) {
-                                final w = constraints.maxWidth;
-                                final h = constraints.maxHeight;
-                                final sideDragEnabled =
-                                    widget.appState.gestureBrightness ||
-                                        widget.appState.gestureVolume;
-                                return GestureDetector(
-                                  behavior: HitTestBehavior.translucent,
-                                  onTap: _toggleControls,
-                                  onDoubleTapDown: controlsEnabled
-                                      ? (d) => _doubleTapDownPosition =
-                                          d.localPosition
-                                      : null,
-                                  onDoubleTap: controlsEnabled
-                                      ? () {
-                                          final pos = _doubleTapDownPosition ??
-                                              Offset(w / 2, 0);
-                                          // ignore: unawaited_futures
-                                          _handleDoubleTap(pos, w);
-                                        }
-                                      : null,
-                                  onHorizontalDragStart: (controlsEnabled &&
-                                          widget.appState.gestureSeek)
-                                      ? _onSeekDragStart
-                                      : null,
-                                  onHorizontalDragUpdate: (controlsEnabled &&
-                                          widget.appState.gestureSeek)
-                                      ? (d) => _onSeekDragUpdate(
-                                            d,
-                                            width: w,
-                                            duration: controller.value.duration,
-                                          )
-                                      : null,
-                                  onHorizontalDragEnd: (controlsEnabled &&
-                                          widget.appState.gestureSeek)
-                                      ? _onSeekDragEnd
-                                      : null,
-                                  onVerticalDragStart:
-                                      (controlsEnabled && sideDragEnabled)
-                                          ? (d) => _onSideDragStart(d, width: w)
-                                          : null,
-                                  onVerticalDragUpdate: (controlsEnabled &&
-                                          sideDragEnabled)
-                                      ? (d) => _onSideDragUpdate(d, height: h)
-                                      : null,
-                                  onVerticalDragEnd:
-                                      (controlsEnabled && sideDragEnabled)
-                                          ? _onSideDragEnd
-                                          : null,
-                                  onLongPressStart: (controlsEnabled &&
-                                          widget.appState.gestureLongPressSpeed)
-                                      ? _onLongPressStart
-                                      : null,
-                                  onLongPressMoveUpdate: (controlsEnabled &&
-                                          widget
-                                              .appState.gestureLongPressSpeed &&
-                                          widget.appState.longPressSlideSpeed)
-                                      ? (d) => _onLongPressMoveUpdate(
-                                            d,
-                                            height: h,
-                                          )
-                                      : null,
-                                  onLongPressEnd: (controlsEnabled &&
-                                          widget.appState.gestureLongPressSpeed)
-                                      ? _onLongPressEnd
-                                      : null,
-                                  child: const SizedBox.expand(),
-                                );
-                              },
-                            ),
-                          ),
-                          if (_gestureOverlayText != null)
-                            Center(
-                              child: IgnorePointer(
-                                child: Material(
-                                  color: Colors.black54,
-                                  borderRadius: BorderRadius.circular(12),
+                            if (controlsEnabled &&
+                                _showStartOverHint &&
+                                _startOverHintPosition != null)
+                              Align(
+                                alignment: Alignment.topCenter,
+                                child: SafeArea(
+                                  bottom: false,
                                   child: Padding(
                                     padding: const EdgeInsets.symmetric(
-                                      horizontal: 14,
-                                      vertical: 10,
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          _gestureOverlayIcon ??
-                                              Icons.info_outline,
-                                          size: 20,
-                                          color: Colors.white,
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          _gestureOverlayText!,
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 13,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (!widget.isTv && !_mobileSidePanelVisible)
-                            Align(
-                              alignment: Alignment.topCenter,
-                              child: SafeArea(
-                                bottom: false,
-                                minimum:
-                                    const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                                child: AnimatedSlide(
-                                  offset: _controlsVisible
-                                      ? Offset.zero
-                                      : const Offset(0, -0.18),
-                                  duration: const Duration(milliseconds: 200),
-                                  curve: Curves.easeOutCubic,
-                                  child: AnimatedOpacity(
-                                    opacity: _controlsVisible ? 1 : 0,
-                                    duration: const Duration(milliseconds: 160),
-                                    curve: Curves.easeOut,
-                                    child: IgnorePointer(
-                                      ignoring: !_controlsVisible,
-                                      child: Listener(
-                                        onPointerDown: (_) => _showControls(),
-                                        child: _buildMobileTopStatusBar(
-                                          context,
-                                          controlsEnabled: controlsEnabled,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (_skipIntroPromptVisible)
-                            Align(
-                              alignment: Alignment.topRight,
-                              child: SafeArea(
-                                bottom: false,
-                                child: Padding(
-                                  padding:
-                                      const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                                  child: Material(
-                                    color: Colors.black54,
-                                    borderRadius: BorderRadius.circular(999),
-                                    clipBehavior: Clip.antiAlias,
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 10,
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(
-                                            Icons.skip_next,
-                                            size: 18,
-                                            color: Colors.white,
-                                          ),
-                                          const SizedBox(width: 6),
-                                          Builder(builder: (context) {
-                                            final end = _introTimestamps?.end;
-                                            final endText = (end != null &&
-                                                    end > Duration.zero)
-                                                ? '（至 ${_fmtClock(end)}）'
-                                                : '';
-                                            return Text(
-                                              '检测到片头$endText',
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 13,
-                                              ),
-                                            );
-                                          }),
-                                          const SizedBox(width: 10),
-                                          InkWell(
-                                            onTap: _skipIntro,
-                                            borderRadius:
-                                                BorderRadius.circular(999),
-                                            child: Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                horizontal: 10,
-                                                vertical: 6,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: Colors.white
-                                                    .withValues(alpha: 0.18),
-                                                borderRadius:
-                                                    BorderRadius.circular(999),
-                                              ),
-                                              child: const Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Icon(
-                                                    Icons.fast_forward,
-                                                    size: 18,
-                                                    color: Colors.white,
-                                                  ),
-                                                  SizedBox(width: 4),
-                                                  Text(
-                                                    '跳过',
-                                                    style: TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 13,
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 6),
-                                          InkWell(
-                                            onTap: _dismissSkipIntroPrompt,
-                                            borderRadius:
-                                                BorderRadius.circular(999),
-                                            child: Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                horizontal: 10,
-                                                vertical: 6,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: Colors.white
-                                                    .withValues(alpha: 0.12),
-                                                borderRadius:
-                                                    BorderRadius.circular(999),
-                                              ),
-                                              child: const Text(
-                                                '不跳过',
-                                                style: TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 13,
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (controlsEnabled &&
-                              _showResumeHint &&
-                              _resumeHintPosition != null)
-                            Align(
-                              alignment: Alignment.topCenter,
-                              child: SafeArea(
-                                bottom: false,
-                                child: Padding(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 12),
-                                  child: Material(
-                                    color: Colors.black54,
-                                    borderRadius: BorderRadius.circular(999),
-                                    clipBehavior: Clip.antiAlias,
-                                    child: InkWell(
-                                      onTap: _resumeToHistoryPosition,
+                                        vertical: 12),
+                                    child: Material(
+                                      color: Colors.black54,
+                                      borderRadius: BorderRadius.circular(999),
+                                      clipBehavior: Clip.antiAlias,
                                       child: Padding(
                                         padding: const EdgeInsets.symmetric(
                                           horizontal: 12,
@@ -5890,10 +6027,51 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                             ),
                                             const SizedBox(width: 6),
                                             Text(
-                                              '跳转到 ${_fmtClock(_resumeHintPosition!)} 继续观看',
+                                              '已从 ${_fmtClock(_startOverHintPosition!)} 继续播放',
                                               style: const TextStyle(
                                                 color: Colors.white,
                                                 fontSize: 13,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 10),
+                                            InkWell(
+                                              onTap: _restartFromBeginning,
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 10,
+                                                  vertical: 6,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white
+                                                      .withValues(alpha: 0.18),
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          999),
+                                                ),
+                                                child: const Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Icon(
+                                                      Icons.replay,
+                                                      size: 18,
+                                                      color: Colors.white,
+                                                    ),
+                                                    SizedBox(width: 4),
+                                                    Text(
+                                                      '从头开始',
+                                                      style: TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 13,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
                                               ),
                                             ),
                                           ],
@@ -5903,211 +6081,134 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                   ),
                                 ),
                               ),
-                            ),
-                          if (controlsEnabled &&
-                              _showStartOverHint &&
-                              _startOverHintPosition != null)
-                            Align(
-                              alignment: Alignment.topCenter,
-                              child: SafeArea(
-                                bottom: false,
+                            if (widget.isTv)
+                              Align(
+                                alignment: Alignment.topCenter,
                                 child: Padding(
                                   padding:
-                                      const EdgeInsets.symmetric(vertical: 12),
-                                  child: Material(
-                                    color: Colors.black54,
-                                    borderRadius: BorderRadius.circular(999),
-                                    clipBehavior: Clip.antiAlias,
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 10,
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(
-                                            Icons.history,
-                                            size: 18,
-                                            color: Colors.white,
-                                          ),
-                                          const SizedBox(width: 6),
-                                          Text(
-                                            '已从 ${_fmtClock(_startOverHintPosition!)} 继续播放',
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          InkWell(
-                                            onTap: _restartFromBeginning,
-                                            borderRadius:
-                                                BorderRadius.circular(999),
-                                            child: Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                horizontal: 10,
-                                                vertical: 6,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: Colors.white
-                                                    .withValues(alpha: 0.18),
-                                                borderRadius:
-                                                    BorderRadius.circular(999),
-                                              ),
-                                              child: const Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Icon(
-                                                    Icons.replay,
-                                                    size: 18,
-                                                    color: Colors.white,
-                                                  ),
-                                                  SizedBox(width: 4),
-                                                  Text(
-                                                    '从头开始',
-                                                    style: TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 13,
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                        ],
+                                      const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                                  child: AnimatedSlide(
+                                    offset: _controlsVisible
+                                        ? Offset.zero
+                                        : const Offset(0, -0.20),
+                                    duration: const Duration(milliseconds: 200),
+                                    curve: Curves.easeOutCubic,
+                                    child: AnimatedOpacity(
+                                      opacity: _controlsVisible ? 1 : 0,
+                                      duration:
+                                          const Duration(milliseconds: 160),
+                                      curve: Curves.easeOut,
+                                      child: IgnorePointer(
+                                        ignoring: !_controlsVisible,
+                                        child: _buildTvTopStatusBar(),
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                          if (widget.isTv)
-                            Align(
-                              alignment: Alignment.topCenter,
-                              child: Padding(
-                                padding:
-                                    const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                                child: AnimatedSlide(
-                                  offset: _controlsVisible
-                                      ? Offset.zero
-                                      : const Offset(0, -0.20),
-                                  duration: const Duration(milliseconds: 200),
-                                  curve: Curves.easeOutCubic,
-                                  child: AnimatedOpacity(
-                                    opacity: _controlsVisible ? 1 : 0,
-                                    duration: const Duration(milliseconds: 160),
-                                    curve: Curves.easeOut,
-                                    child: IgnorePointer(
-                                      ignoring: !_controlsVisible,
-                                      child: _buildTvTopStatusBar(),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (widget.isTv)
-                            Align(
-                              alignment: Alignment.bottomCenter,
-                              child: Padding(
-                                padding:
-                                    const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                                child: AnimatedSlide(
-                                  offset: _controlsVisible
-                                      ? Offset.zero
-                                      : const Offset(0, 0.20),
-                                  duration: const Duration(milliseconds: 200),
-                                  curve: Curves.easeOutCubic,
-                                  child: AnimatedOpacity(
-                                    opacity: _controlsVisible ? 1 : 0,
-                                    duration: const Duration(milliseconds: 160),
-                                    curve: Curves.easeOut,
-                                    child: IgnorePointer(
-                                      ignoring: !_controlsVisible,
-                                      child: _buildTvBottomStatusBar(
-                                        enabled: controlsEnabled,
-                                        position: _position,
-                                        buffered: _lastBufferedEnd,
-                                        duration: _duration,
-                                        isPlaying: _isPlaying,
-                                        onPlay: () async {
-                                          _showControls();
-                                          await controller.play();
-                                          _maybeReportPlaybackProgress(
-                                            controller.value.position,
-                                            force: true,
-                                          );
-                                          _applyDanmakuPauseState(false);
-                                          if (mounted) setState(() {});
-                                        },
-                                        onPause: () async {
-                                          _showControls();
-                                          await controller.pause();
-                                          _maybeReportPlaybackProgress(
-                                            controller.value.position,
-                                            force: true,
-                                          );
-                                          _applyDanmakuPauseState(true);
-                                          if (mounted) setState(() {});
-                                        },
+                            if (widget.isTv)
+                              Align(
+                                alignment: Alignment.bottomCenter,
+                                child: Padding(
+                                  padding:
+                                      const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                                  child: AnimatedSlide(
+                                    offset: _controlsVisible
+                                        ? Offset.zero
+                                        : const Offset(0, 0.20),
+                                    duration: const Duration(milliseconds: 200),
+                                    curve: Curves.easeOutCubic,
+                                    child: AnimatedOpacity(
+                                      opacity: _controlsVisible ? 1 : 0,
+                                      duration:
+                                          const Duration(milliseconds: 160),
+                                      curve: Curves.easeOut,
+                                      child: IgnorePointer(
+                                        ignoring: !_controlsVisible,
+                                        child: _buildTvBottomStatusBar(
+                                          enabled: controlsEnabled,
+                                          position: _position,
+                                          buffered: _lastBufferedEnd,
+                                          duration: _duration,
+                                          isPlaying: _isPlaying,
+                                          onPlay: () async {
+                                            _showControls();
+                                            await controller.play();
+                                            _maybeReportPlaybackProgress(
+                                              controller.value.position,
+                                              force: true,
+                                            );
+                                            _applyDanmakuPauseState(false);
+                                            if (mounted) setState(() {});
+                                          },
+                                          onPause: () async {
+                                            _showControls();
+                                            await controller.pause();
+                                            _maybeReportPlaybackProgress(
+                                              controller.value.position,
+                                              force: true,
+                                            );
+                                            _applyDanmakuPauseState(true);
+                                            if (mounted) setState(() {});
+                                          },
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                          if (!widget.isTv && !_mobileSidePanelVisible)
-                            Align(
-                              alignment: Alignment.bottomCenter,
-                              child: SafeArea(
-                                top: false,
-                                minimum:
-                                    const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                                child: AnimatedSlide(
-                                  offset: _controlsVisible
-                                      ? Offset.zero
-                                      : const Offset(0, 0.18),
-                                  duration: const Duration(milliseconds: 200),
-                                  curve: Curves.easeOutCubic,
-                                  child: AnimatedOpacity(
-                                    opacity: _controlsVisible ? 1 : 0,
-                                    duration: const Duration(milliseconds: 160),
-                                    curve: Curves.easeOut,
-                                    child: IgnorePointer(
-                                      ignoring: !_controlsVisible,
-                                      child: Listener(
-                                        onPointerDown: (_) => _showControls(),
-                                        child: Focus(
-                                          canRequestFocus: false,
-                                          onKeyEvent: (node, event) {
-                                            if (!_remoteEnabled) {
-                                              return KeyEventResult.ignored;
-                                            }
-                                            if (event is! KeyDownEvent) {
-                                              return KeyEventResult.ignored;
-                                            }
-                                            if (event.logicalKey ==
-                                                LogicalKeyboardKey.arrowDown) {
-                                              final moved =
-                                                  FocusScope.of(context)
-                                                      .focusInDirection(
-                                                TraversalDirection.down,
-                                              );
-                                              if (moved) {
+                            if (!widget.isTv && !_mobileSidePanelVisible)
+                              Align(
+                                alignment: Alignment.bottomCenter,
+                                child: SafeArea(
+                                  top: false,
+                                  minimum:
+                                      const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                                  child: AnimatedSlide(
+                                    offset: _controlsVisible
+                                        ? Offset.zero
+                                        : const Offset(0, 0.18),
+                                    duration: const Duration(milliseconds: 200),
+                                    curve: Curves.easeOutCubic,
+                                    child: AnimatedOpacity(
+                                      opacity: _controlsVisible ? 1 : 0,
+                                      duration:
+                                          const Duration(milliseconds: 160),
+                                      curve: Curves.easeOut,
+                                      child: IgnorePointer(
+                                        ignoring: !_controlsVisible,
+                                        child: Listener(
+                                          onPointerDown: (_) => _showControls(),
+                                          child: Focus(
+                                            canRequestFocus: false,
+                                            onKeyEvent: (node, event) {
+                                              if (!_remoteEnabled) {
+                                                return KeyEventResult.ignored;
+                                              }
+                                              if (event is! KeyDownEvent) {
+                                                return KeyEventResult.ignored;
+                                              }
+                                              if (event.logicalKey ==
+                                                  LogicalKeyboardKey
+                                                      .arrowDown) {
+                                                final moved =
+                                                    FocusScope.of(context)
+                                                        .focusInDirection(
+                                                  TraversalDirection.down,
+                                                );
+                                                if (moved) {
+                                                  return KeyEventResult.handled;
+                                                }
+                                                _hideControlsForRemote();
                                                 return KeyEventResult.handled;
                                               }
-                                              _hideControlsForRemote();
-                                              return KeyEventResult.handled;
-                                            }
-                                            return KeyEventResult.ignored;
-                                          },
-                                          child: _buildMobileBottomStatusBar(
-                                            context,
-                                            controlsEnabled: controlsEnabled,
-                                            controller: controller,
+                                              return KeyEventResult.ignored;
+                                            },
+                                            child: _buildMobileBottomStatusBar(
+                                              context,
+                                              controlsEnabled: controlsEnabled,
+                                              controller: controller,
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -6115,29 +6216,30 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                   ),
                                 ),
                               ),
-                            ),
-                          if (!widget.isTv)
-                            _buildEpisodePickerOverlay(enableBlur: enableBlur),
-                          if (!widget.isTv)
-                            _buildMobileSidePanelOverlay(
-                              context: context,
-                              controlsEnabled: controlsEnabled,
-                            ),
-                        ],
-                      )
-                    : _playError != null
-                        ? Center(
-                            child: Text(
-                              _playError!,
-                              style: const TextStyle(color: Colors.redAccent),
-                              textAlign: TextAlign.center,
-                            ),
-                          )
-                        : const Center(child: CircularProgressIndicator()),
+                            if (!widget.isTv)
+                              _buildEpisodePickerOverlay(
+                                  enableBlur: enableBlur),
+                            if (!widget.isTv)
+                              _buildMobileSidePanelOverlay(
+                                context: context,
+                                controlsEnabled: controlsEnabled,
+                              ),
+                          ],
+                        )
+                      : _playError != null
+                          ? Center(
+                              child: Text(
+                                _playError!,
+                                style: const TextStyle(color: Colors.redAccent),
+                                textAlign: TextAlign.center,
+                              ),
+                            )
+                          : const Center(child: CircularProgressIndicator()),
+                ),
               ),
-            ),
-            if (_loading) const LinearProgressIndicator(),
-          ],
+              if (_loading) const LinearProgressIndicator(),
+            ],
+          ),
         ),
       ),
     );

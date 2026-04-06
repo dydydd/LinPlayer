@@ -223,6 +223,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
   bool _localFavorite = false;
   bool _favoriteLoaded = false;
   bool _markBusy = false;
+  late String _preloadOwnerKey;
 
   String? get _baseUrl => widget.server?.baseUrl ?? widget.appState.baseUrl;
   String? get _token => widget.server?.token ?? widget.appState.token;
@@ -231,8 +232,16 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
   @override
   void initState() {
     super.initState();
+    _preloadOwnerKey =
+        PlaybackPreloadCoordinator.createOwnerToken('detail_movie');
     _loadLocalFavorite();
     _load();
+  }
+
+  @override
+  void dispose() {
+    PlaybackPreloadCoordinator.cancelOwner(_preloadOwnerKey);
+    super.dispose();
   }
 
   String get _localFavoriteKey {
@@ -327,6 +336,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           audioStreamIndex: audioStreamIndex,
           subtitleStreamIndex: subtitleStreamIndex,
           preferredVideoVersion: widget.appState.preferredVideoVersion,
+          ownerKey: _preloadOwnerKey,
+          scopeKey: 'detail_current',
         ),
       );
     } catch (_) {
@@ -2380,8 +2391,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                               : LinNetworkImage(
                                                   imageUrl: imageUrl,
                                                   fit: BoxFit.cover,
-                                                  errorWidget:
-                                                      const ColoredBox(
+                                                  errorWidget: const ColoredBox(
                                                     color: Colors.black26,
                                                   ),
                                                 ),
@@ -5494,6 +5504,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   bool _markBusy = false;
   bool _localFavorite = false;
   bool _favoriteLoaded = false;
+  String _preloadOwnerKey = '';
 
   Map<String, Object?> _buildDetailPluginParams(MediaItem item) {
     final yearText = _mediaYearText(item);
@@ -5621,15 +5632,17 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     try {
       final serverId = widget.server?.id ?? widget.appState.activeServerId;
       final seriesId = (_seriesId ?? _episode.seriesId ?? '').trim();
-      final preferredMediaSourceIndex = serverId == null ||
-              serverId.trim().isEmpty ||
-              seriesId.isEmpty
-          ? null
-          : widget.appState.seriesMediaSourceIndex(
-              serverId: serverId.trim(),
-              seriesId: seriesId,
-            );
+      final preferredMediaSourceIndex =
+          serverId == null || serverId.trim().isEmpty || seriesId.isEmpty
+              ? null
+              : widget.appState.seriesMediaSourceIndex(
+                  serverId: serverId.trim(),
+                  seriesId: seriesId,
+                );
       final triggerSource = itemId.trim() == _episode.id.trim()
+          ? 'detail_current'
+          : 'detail_next';
+      final preloadScopeKey = itemId.trim() == _episode.id.trim()
           ? 'detail_current'
           : 'detail_next';
       final targetKind = itemId.trim() == _episode.id.trim()
@@ -5650,6 +5663,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
           audioStreamIndex: audioStreamIndex,
           subtitleStreamIndex: subtitleStreamIndex,
           preferredVideoVersion: widget.appState.preferredVideoVersion,
+          ownerKey: _preloadOwnerKey,
+          scopeKey: preloadScopeKey,
         ),
       );
     } catch (_) {
@@ -5668,8 +5683,16 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   void initState() {
     super.initState();
     _episode = widget.episode;
+    _preloadOwnerKey =
+        PlaybackPreloadCoordinator.createOwnerToken('detail_episode');
     _loadLocalFavorite();
     _load();
+  }
+
+  @override
+  void dispose() {
+    PlaybackPreloadCoordinator.cancelOwner(_preloadOwnerKey);
+    super.dispose();
   }
 
   Future<void> _loadLocalFavorite() async {
@@ -5755,6 +5778,11 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   }
 
   Future<void> _load() async {
+    if (_preloadOwnerKey.isNotEmpty) {
+      PlaybackPreloadCoordinator.cancelOwner(_preloadOwnerKey);
+    }
+    _preloadOwnerKey =
+        PlaybackPreloadCoordinator.createOwnerToken('detail_episode');
     setState(() {
       _loading = true;
       _error = null;

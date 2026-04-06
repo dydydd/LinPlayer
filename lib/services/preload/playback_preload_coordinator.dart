@@ -28,6 +28,8 @@ class PlaybackPreloadBuildRequest {
     this.subtitleStreamIndex,
     this.preferredVideoVersion = VideoVersionPreference.defaultVersion,
     this.preferBuiltInProxy = false,
+    this.ownerKey,
+    this.scopeKey,
   });
 
   final ServerAccess access;
@@ -43,6 +45,8 @@ class PlaybackPreloadBuildRequest {
   final int? subtitleStreamIndex;
   final VideoVersionPreference preferredVideoVersion;
   final bool preferBuiltInProxy;
+  final String? ownerKey;
+  final String? scopeKey;
 }
 
 @immutable
@@ -53,6 +57,8 @@ class PreparedPlaybackPreload {
     required this.resolvedSource,
     required this.startPosition,
     this.httpProxyUrl,
+    this.ownerKey,
+    this.scopeKey,
   });
 
   final PlaybackPreloadTargetKind targetKind;
@@ -60,6 +66,8 @@ class PreparedPlaybackPreload {
   final ResolvedPlaybackSource resolvedSource;
   final Duration startPosition;
   final String? httpProxyUrl;
+  final String? ownerKey;
+  final String? scopeKey;
 
   PreloadRequest toPreloadRequest() {
     return PreloadRequest(
@@ -68,6 +76,8 @@ class PreparedPlaybackPreload {
       startPosition: startPosition,
       dedupeFingerprint: _dedupeFingerprintForTargetKind(targetKind),
       httpProxyUrl: httpProxyUrl,
+      ownerKey: ownerKey,
+      scopeKey: scopeKey,
     );
   }
 
@@ -83,6 +93,8 @@ class PreparedPlaybackPreload {
 
 class PlaybackPreloadCoordinator {
   const PlaybackPreloadCoordinator._();
+
+  static int _nextOwnerTokenId = 0;
 
   static Future<PreparedPlaybackPreload> prepareItem(
     PlaybackPreloadBuildRequest request,
@@ -107,6 +119,8 @@ class PlaybackPreloadCoordinator {
       resolvedSource: buildResult.resolvedSource,
       startPosition: request.startPosition,
       preferBuiltInProxy: request.preferBuiltInProxy,
+      ownerKey: request.ownerKey,
+      scopeKey: request.scopeKey,
     );
   }
 
@@ -118,12 +132,15 @@ class PlaybackPreloadCoordinator {
     Duration startPosition = Duration.zero,
     String? httpProxyUrl,
     bool preferBuiltInProxy = false,
+    String? ownerKey,
+    String? scopeKey,
   }) {
     final normalizedStart =
         startPosition < Duration.zero ? Duration.zero : startPosition;
-    final normalizedTrigger = triggerSource.trim().isEmpty
-        ? 'unknown'
-        : triggerSource.trim();
+    final normalizedTrigger =
+        triggerSource.trim().isEmpty ? 'unknown' : triggerSource.trim();
+    final normalizedOwner = _normalizeScopeToken(ownerKey);
+    final normalizedScope = _normalizeScopeToken(scopeKey);
     final normalizedProxy = (httpProxyUrl ?? '').trim().isNotEmpty
         ? httpProxyUrl!.trim()
         : resolveHttpProxyUrl(
@@ -137,6 +154,8 @@ class PlaybackPreloadCoordinator {
       resolvedSource: resolvedSource.copyWith(proxyUrl: normalizedProxy),
       startPosition: normalizedStart,
       httpProxyUrl: normalizedProxy,
+      ownerKey: normalizedOwner,
+      scopeKey: normalizedScope,
     );
   }
 
@@ -155,6 +174,26 @@ class PlaybackPreloadCoordinator {
     );
   }
 
+  static String createOwnerToken(String namespace) {
+    final normalized = _normalizeScopeToken(namespace) ?? 'preload';
+    _nextOwnerTokenId += 1;
+    return '$normalized-${_nextOwnerTokenId.toString().padLeft(4, '0')}';
+  }
+
+  static void cancelOwner(String ownerKey) {
+    StreamPreloadService.instance.cancelOwner(ownerKey);
+  }
+
+  static void cancelOwnerScope({
+    required String ownerKey,
+    required String scopeKey,
+  }) {
+    StreamPreloadService.instance.cancelOwnerScope(
+      ownerKey: ownerKey,
+      scopeKey: scopeKey,
+    );
+  }
+
   static String? resolveHttpProxyUrl({
     required AppState appState,
     required String sourceUrl,
@@ -166,5 +205,11 @@ class PlaybackPreloadCoordinator {
       return BuiltInProxyService.proxyUrlForUri(uri);
     }
     return resolvePlaybackHttpProxyForUri(appState: appState, uri: uri);
+  }
+
+  static String? _normalizeScopeToken(String? raw) {
+    final value = (raw ?? '').trim();
+    if (value.isEmpty) return null;
+    return value.replaceAll(RegExp(r'\s+'), '_');
   }
 }

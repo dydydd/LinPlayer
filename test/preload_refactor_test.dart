@@ -32,6 +32,8 @@ void main() {
   test('PlaybackPreloadCoordinator keeps proxy metadata on prepared requests',
       () {
     const proxyUrl = 'http://127.0.0.1:8900';
+    const ownerKey = 'detail-owner-1';
+    const scopeKey = 'detail_current';
     final prepared = PlaybackPreloadCoordinator.prepareResolved(
       appState: AppState(),
       targetKind: PlaybackPreloadTargetKind.currentItem,
@@ -50,15 +52,21 @@ void main() {
         ],
       ),
       httpProxyUrl: proxyUrl,
+      ownerKey: ownerKey,
+      scopeKey: scopeKey,
     );
 
     expect(prepared.httpProxyUrl, proxyUrl);
     expect(prepared.resolvedSource.proxyUrl, proxyUrl);
+    expect(prepared.ownerKey, ownerKey);
+    expect(prepared.scopeKey, scopeKey);
 
     final request = prepared.toPreloadRequest();
     expect(request.httpProxyUrl, proxyUrl);
     expect(request.resolvedSource.proxyUrl, proxyUrl);
     expect(request.dedupeFingerprint, 'target:current');
+    expect(request.ownerKey, ownerKey);
+    expect(request.scopeKey, scopeKey);
   });
 
   test(
@@ -201,6 +209,87 @@ void main() {
     expect(keyDifferentProxy!.fingerprint, isNot(keyA.fingerprint));
     expect(keyDifferentMedia!.fingerprint, isNot(keyA.fingerprint));
   });
+
+  test(
+    'buildResolvedPlaybackCacheKey ignores volatile playback-session query params',
+    () {
+      final sourceA = ResolvedPlaybackSource(
+        itemId: 'item-session-cache-key',
+        playSessionId: 'ps-a',
+        mediaSourceId: 'ms-session-cache-key',
+        url: 'https://media.example.com/Videos/item-session-cache-key/stream'
+            '?static=true'
+            '&MediaSourceId=ms-session-cache-key'
+            '&PlaySessionId=ps-a'
+            '&UserId=user-a'
+            '&DeviceId=device-a'
+            '&api_key=token-a'
+            '&AudioStreamIndex=2'
+            '&SubtitleStreamIndex=5',
+        httpHeaders: const <String, String>{
+          'User-Agent': 'SourceUA/1.0',
+          'X-Auth': 'token',
+        },
+        isExternal: false,
+        mediaTypeHint: ResolvedPlaybackMediaType.file,
+        fromStrm: false,
+        redirectChain: const <String>[
+          'https://media.example.com/Videos/item-session-cache-key/stream',
+        ],
+        sourcePath: r'D:\Media\Series\Episode 01.mkv',
+      );
+      final sourceB = ResolvedPlaybackSource(
+        itemId: 'item-session-cache-key',
+        playSessionId: 'ps-b',
+        mediaSourceId: 'ms-session-cache-key',
+        url: 'https://media.example.com/Videos/item-session-cache-key/stream'
+            '?static=true'
+            '&MediaSourceId=ms-session-cache-key'
+            '&PlaySessionId=ps-b'
+            '&UserId=user-b'
+            '&DeviceId=device-b'
+            '&api_key=token-b'
+            '&AudioStreamIndex=2'
+            '&SubtitleStreamIndex=5',
+        httpHeaders: const <String, String>{
+          'X-Auth': 'token',
+          'User-Agent': 'SourceUA/1.0',
+        },
+        isExternal: false,
+        mediaTypeHint: ResolvedPlaybackMediaType.file,
+        fromStrm: false,
+        redirectChain: const <String>[
+          'https://media.example.com/Videos/item-session-cache-key/stream',
+        ],
+        sourcePath: r'D:\Media\Series\Episode 01.mkv',
+      );
+      final sourceDifferentSubtitle = sourceB.copyWith(
+        url: 'https://media.example.com/Videos/item-session-cache-key/stream'
+            '?static=true'
+            '&MediaSourceId=ms-session-cache-key'
+            '&PlaySessionId=ps-c'
+            '&UserId=user-c'
+            '&DeviceId=device-c'
+            '&api_key=token-c'
+            '&AudioStreamIndex=2'
+            '&SubtitleStreamIndex=6',
+      );
+
+      final keyA = buildResolvedPlaybackCacheKey(sourceA);
+      final keyB = buildResolvedPlaybackCacheKey(sourceB);
+      final keyDifferentSubtitle =
+          buildResolvedPlaybackCacheKey(sourceDifferentSubtitle);
+
+      expect(keyA, isNotNull);
+      expect(keyB, isNotNull);
+      expect(keyA!.fingerprint, keyB!.fingerprint);
+      expect(keyDifferentSubtitle, isNotNull);
+      expect(
+        keyDifferentSubtitle!.fingerprint,
+        isNot(keyA.fingerprint),
+      );
+    },
+  );
 
   test(
       'StreamCacheDownloadRequest keeps original cache semantics when re-pointed to a redirect-final URI',
@@ -1175,6 +1264,101 @@ void main() {
   });
 
   test(
+    'Playback reuses the resume-aligned direct-file range warmed by preload',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() async {
+        await server.close(force: true);
+      });
+
+      final observedRanges = <String?>[];
+      server.listen((HttpRequest request) async {
+        final range = request.headers.value(HttpHeaders.rangeHeader);
+        observedRanges.add(range);
+        final rangeMatch =
+            RegExp(r'^bytes=(\d+)-(\d*)$').firstMatch(range ?? '');
+        final rangeStart = int.tryParse(rangeMatch?.group(1) ?? '') ?? 0;
+        final responseBytes = rangeStart == 10000000
+            ? const <int>[8, 9, 10, 11, 12, 13, 14, 15]
+            : const <int>[0, 1, 2, 3, 4, 5, 6, 7];
+        final responseEnd = rangeStart + responseBytes.length - 1;
+
+        request.response.statusCode = HttpStatus.partialContent;
+        request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+        request.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          rangeMatch == null
+              ? 'bytes 0-7/80000000'
+              : 'bytes $rangeStart-$responseEnd/80000000',
+        );
+        request.response.headers.contentType = ContentType('video', 'mp4');
+        request.response.contentLength = responseBytes.length;
+        request.response.add(responseBytes);
+        await request.response.close();
+      });
+
+      final url = 'http://127.0.0.1:${server.port}/resume-playback.mp4';
+      final resolvedSource = ResolvedPlaybackSource(
+        itemId: 'episode-resume-playback',
+        playSessionId: 'ps-resume-playback',
+        mediaSourceId: 'ms-resume-playback',
+        url: url,
+        httpHeaders: const <String, String>{'User-Agent': 'SourceUA/1.0'},
+        isExternal: false,
+        mediaTypeHint: ResolvedPlaybackMediaType.file,
+        fromStrm: false,
+        redirectChain: <String>[url],
+        bitrate: 8000000,
+        sizeBytes: 80000000,
+      );
+
+      final preload = await StreamPreloadService.instance.preloadResolvedSource(
+        PreloadRequest(
+          resolvedSource: resolvedSource,
+          triggerSource: 'playback_resume',
+          startPosition: const Duration(seconds: 10),
+        ),
+      );
+      expect(preload.status, StreamPreloadStatus.success);
+      expect(observedRanges, contains('bytes=10000000-12999999'));
+
+      final proxyUri = await HttpStreamProxyServer.instance.registerStream(
+        remoteUri: Uri.parse(url),
+        httpHeaders: resolvedSource.httpHeaders,
+        fileName: 'resume-playback.mp4',
+        cacheKey: buildResolvedPlaybackCacheKey(resolvedSource),
+      );
+
+      final client = HttpClient();
+      addTearDown(() {
+        client.close(force: true);
+      });
+
+      final playbackRequest = await client.getUrl(proxyUri);
+      playbackRequest.headers.set(
+        HttpHeaders.rangeHeader,
+        'bytes=10000000-10000007',
+      );
+      final playbackResponse = await playbackRequest.close();
+      final playbackBody = await playbackResponse.fold<List<int>>(
+        <int>[],
+        (acc, chunk) => <int>[...acc, ...chunk],
+      );
+
+      expect(playbackResponse.statusCode, HttpStatus.partialContent);
+      expect(playbackBody, <int>[8, 9, 10, 11, 12, 13, 14, 15]);
+      expect(
+        observedRanges.where((value) => value == 'bytes=10000000-10000007'),
+        isEmpty,
+      );
+      expect(
+        HttpStreamProxyServer.instance.buildDiagnosticsText(),
+        contains('reuse=cache-only'),
+      );
+    },
+  );
+
+  test(
       'StreamPreloadService records redirect-final URL so playback tail fetch skips the redirect hop',
       () async {
     final upstreamProxy =
@@ -1800,6 +1984,352 @@ void main() {
     expect(requestCount, 7);
     expect(service.buildDiagnosticsText(), contains('activeCircuits: 0'));
   });
+
+  test(
+    'StreamPreloadService cancels owned in-flight preload and keeps later retries healthy',
+    () async {
+      final service = StreamPreloadService.instance;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() async {
+        await server.close(force: true);
+      });
+
+      final firstRequestSeen = Completer<void>();
+      var requestCount = 0;
+      server.listen((HttpRequest request) async {
+        requestCount++;
+        if (!firstRequestSeen.isCompleted) {
+          firstRequestSeen.complete();
+        }
+        request.response.statusCode = 206;
+        request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+        request.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes 0-1048575/1048576',
+        );
+        request.response.headers.contentType = ContentType('video', 'mp4');
+
+        if (requestCount == 1) {
+          request.response.add(List<int>.filled(4096, 1));
+          await request.response.flush();
+          await Future<void>.delayed(const Duration(seconds: 5));
+          try {
+            request.response.add(List<int>.filled(4096, 2));
+          } catch (_) {}
+        } else {
+          request.response.add(List<int>.filled(8192, 3));
+        }
+
+        try {
+          await request.response.close();
+        } catch (_) {}
+      });
+
+      final url = 'http://127.0.0.1:${server.port}/cancel-me.mp4';
+      final cancelledRequest = PreloadRequest(
+        resolvedSource: ResolvedPlaybackSource(
+          itemId: 'episode-cancelled',
+          playSessionId: 'ps-cancelled',
+          mediaSourceId: 'ms-cancelled',
+          url: url,
+          httpHeaders: const <String, String>{'User-Agent': 'SourceUA/1.0'},
+          isExternal: false,
+          mediaTypeHint: ResolvedPlaybackMediaType.unknown,
+          fromStrm: false,
+          redirectChain: <String>[url],
+          bitrate: 8000000,
+          sizeBytes: 1048576,
+        ),
+        triggerSource: 'playback_start',
+        ownerKey: 'playback-owner-1',
+        scopeKey: 'playback_current',
+      );
+
+      final future = service.preloadResolvedSource(cancelledRequest);
+      await firstRequestSeen.future.timeout(const Duration(seconds: 2));
+      service.cancelOwner('playback-owner-1');
+
+      final cancelled = await future.timeout(const Duration(seconds: 3));
+      expect(cancelled.status, StreamPreloadStatus.cancelled);
+
+      final diagnostics = service.buildDiagnosticsText();
+      final summary = service.buildStatusSummaryText();
+      expect(diagnostics, contains('status=cancelled'));
+      expect(diagnostics, contains('owner=playback-owner-1'));
+      expect(diagnostics, contains('scope=playback_current'));
+      expect(summary, contains('cancelled=1'));
+      expect(summary, contains('latestOwner: playback-owner-1'));
+      expect(summary, contains('latestScope: playback_current'));
+
+      final retried = await service.preloadResolvedSource(
+        PreloadRequest(
+          resolvedSource: cancelledRequest.resolvedSource,
+          triggerSource: 'playback_start',
+          ownerKey: 'playback-owner-2',
+          scopeKey: 'playback_current',
+        ),
+      );
+      expect(retried.status, StreamPreloadStatus.success);
+      expect(requestCount, greaterThanOrEqualTo(2));
+    },
+  );
+
+  test(
+    'PlaybackPreloadCoordinator cancels movie-detail preload when the page owner is released',
+    () async {
+      final service = StreamPreloadService.instance;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() async {
+        await server.close(force: true);
+      });
+
+      final firstRequestSeen = Completer<void>();
+      var requestCount = 0;
+      server.listen((HttpRequest request) async {
+        requestCount++;
+        if (!firstRequestSeen.isCompleted) {
+          firstRequestSeen.complete();
+        }
+        request.response.statusCode = 206;
+        request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+        request.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes 0-1048575/1048576',
+        );
+        request.response.headers.contentType = ContentType('video', 'mp4');
+        request.response.add(List<int>.filled(4096, 1));
+        await request.response.flush();
+        await Future<void>.delayed(const Duration(seconds: 5));
+        try {
+          request.response.add(List<int>.filled(4096, 2));
+        } catch (_) {}
+        try {
+          await request.response.close();
+        } catch (_) {}
+      });
+
+      final url = 'http://127.0.0.1:${server.port}/movie-preload.mp4';
+      final ownerKey =
+          PlaybackPreloadCoordinator.createOwnerToken('detail_movie');
+      final prepared = PlaybackPreloadCoordinator.prepareResolved(
+        appState: AppState(),
+        targetKind: PlaybackPreloadTargetKind.currentItem,
+        triggerSource: 'detail_current',
+        resolvedSource: ResolvedPlaybackSource(
+          itemId: 'movie-cancelled',
+          playSessionId: 'ps-movie-cancelled',
+          mediaSourceId: 'ms-movie-cancelled',
+          url: url,
+          httpHeaders: const <String, String>{'User-Agent': 'SourceUA/1.0'},
+          isExternal: false,
+          mediaTypeHint: ResolvedPlaybackMediaType.unknown,
+          fromStrm: false,
+          redirectChain: <String>[url],
+          bitrate: 8000000,
+          sizeBytes: 1048576,
+        ),
+        ownerKey: ownerKey,
+        scopeKey: 'detail_current',
+      );
+
+      expect(prepared.ownerKey, ownerKey);
+      expect(ownerKey, startsWith('detail_movie-'));
+
+      final future = PlaybackPreloadCoordinator.preloadPrepared(prepared);
+      await firstRequestSeen.future.timeout(const Duration(seconds: 2));
+      PlaybackPreloadCoordinator.cancelOwner(ownerKey);
+
+      final cancelled = await future.timeout(const Duration(seconds: 3));
+      expect(cancelled.status, StreamPreloadStatus.cancelled);
+      expect(requestCount, 1);
+      expect(service.buildDiagnosticsText(), contains('owner=$ownerKey'));
+      expect(service.buildDiagnosticsText(), contains('scope=detail_current'));
+    },
+  );
+
+  test(
+    'StreamPreloadService lets current-item preload run before next-item preload',
+    () async {
+      final service = StreamPreloadService.instance;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() async {
+        await server.close(force: true);
+      });
+
+      final currentStarted = Completer<void>();
+      final allowCurrentFinish = Completer<void>();
+      final nextStarted = Completer<void>();
+      final events = <String>[];
+
+      server.listen((HttpRequest request) async {
+        final path = request.uri.path;
+        if (path.endsWith('/current.mp4')) {
+          events.add('current-start');
+          if (!currentStarted.isCompleted) {
+            currentStarted.complete();
+          }
+          await allowCurrentFinish.future.timeout(const Duration(seconds: 2));
+          events.add('current-finish');
+        } else if (path.endsWith('/next.mp4')) {
+          events.add('next-start');
+          if (!nextStarted.isCompleted) {
+            nextStarted.complete();
+          }
+        }
+
+        request.response.statusCode = HttpStatus.partialContent;
+        request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+        request.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes 0-7/8',
+        );
+        request.response.headers.contentType = ContentType('video', 'mp4');
+        request.response.contentLength = 8;
+        request.response.add(const <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+        await request.response.close();
+      });
+
+      final currentUrl = 'http://127.0.0.1:${server.port}/current.mp4';
+      final nextUrl = 'http://127.0.0.1:${server.port}/next.mp4';
+
+      final currentFuture = service.preloadResolvedSource(
+        PreloadRequest(
+          resolvedSource: ResolvedPlaybackSource(
+            itemId: 'episode-current-priority',
+            playSessionId: 'ps-current-priority',
+            mediaSourceId: 'ms-current-priority',
+            url: currentUrl,
+            httpHeaders: const <String, String>{'User-Agent': 'SourceUA/1.0'},
+            isExternal: false,
+            mediaTypeHint: ResolvedPlaybackMediaType.file,
+            fromStrm: false,
+            redirectChain: <String>[currentUrl],
+            bitrate: 8000000,
+            sizeBytes: 8,
+          ),
+          triggerSource: 'detail_current',
+          dedupeFingerprint: 'target:current',
+          ownerKey: 'detail-owner-priority',
+          scopeKey: 'detail_current',
+        ),
+      );
+
+      await currentStarted.future.timeout(const Duration(seconds: 2));
+
+      final nextFuture = service.preloadResolvedSource(
+        PreloadRequest(
+          resolvedSource: ResolvedPlaybackSource(
+            itemId: 'episode-next-priority',
+            playSessionId: 'ps-next-priority',
+            mediaSourceId: 'ms-next-priority',
+            url: nextUrl,
+            httpHeaders: const <String, String>{'User-Agent': 'SourceUA/1.0'},
+            isExternal: false,
+            mediaTypeHint: ResolvedPlaybackMediaType.file,
+            fromStrm: false,
+            redirectChain: <String>[nextUrl],
+            bitrate: 8000000,
+            sizeBytes: 8,
+          ),
+          triggerSource: 'detail_next',
+          dedupeFingerprint: 'target:next',
+          ownerKey: 'detail-owner-priority',
+          scopeKey: 'detail_next',
+        ),
+      );
+
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      expect(nextStarted.isCompleted, isFalse);
+
+      allowCurrentFinish.complete();
+
+      final currentResult =
+          await currentFuture.timeout(const Duration(seconds: 3));
+      final nextResult = await nextFuture.timeout(const Duration(seconds: 3));
+
+      expect(currentResult.status, StreamPreloadStatus.success);
+      expect(nextResult.status, StreamPreloadStatus.success);
+      expect(events, <String>['current-start', 'current-finish', 'next-start']);
+    },
+  );
+
+  test(
+    'StreamPreloadService keeps shared in-flight preload alive after cancelling only the old owner',
+    () async {
+      final service = StreamPreloadService.instance;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() async {
+        await server.close(force: true);
+      });
+
+      final firstRequestStarted = Completer<void>();
+      var requestCount = 0;
+      server.listen((HttpRequest request) async {
+        requestCount++;
+        if (!firstRequestStarted.isCompleted) {
+          firstRequestStarted.complete();
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 180));
+        request.response.statusCode = HttpStatus.partialContent;
+        request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+        request.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes 0-7/8',
+        );
+        request.response.headers.contentType = ContentType('video', 'mp4');
+        request.response.contentLength = 8;
+        request.response.add(const <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+        await request.response.close();
+      });
+
+      final url = 'http://127.0.0.1:${server.port}/handover.mp4';
+      final source = ResolvedPlaybackSource(
+        itemId: 'episode-owner-handover',
+        playSessionId: 'ps-owner-handover',
+        mediaSourceId: 'ms-owner-handover',
+        url: url,
+        httpHeaders: const <String, String>{'User-Agent': 'SourceUA/1.0'},
+        isExternal: false,
+        mediaTypeHint: ResolvedPlaybackMediaType.file,
+        fromStrm: false,
+        redirectChain: <String>[url],
+        bitrate: 8000000,
+        sizeBytes: 8,
+      );
+
+      final firstFuture = service.preloadResolvedSource(
+        PreloadRequest(
+          resolvedSource: source,
+          triggerSource: 'playback_start',
+          dedupeFingerprint: 'target:current',
+          ownerKey: 'playback-owner-old',
+          scopeKey: 'playback_current',
+        ),
+      );
+
+      await firstRequestStarted.future.timeout(const Duration(seconds: 2));
+
+      final secondFuture = service.preloadResolvedSource(
+        PreloadRequest(
+          resolvedSource: source,
+          triggerSource: 'playback_start',
+          dedupeFingerprint: 'target:current',
+          ownerKey: 'playback-owner-new',
+          scopeKey: 'playback_current',
+        ),
+      );
+
+      service.cancelOwner('playback-owner-old');
+
+      final firstResult = await firstFuture.timeout(const Duration(seconds: 3));
+      final secondResult =
+          await secondFuture.timeout(const Duration(seconds: 3));
+
+      expect(firstResult.status, StreamPreloadStatus.success);
+      expect(secondResult.status, StreamPreloadStatus.success);
+      expect(requestCount, 1);
+    },
+  );
 }
 
 class _FakeAdapter extends Fake implements MediaServerAdapter {

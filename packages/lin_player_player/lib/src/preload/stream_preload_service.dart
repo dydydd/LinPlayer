@@ -17,6 +17,7 @@ import 'stream_cache_download_service.dart';
 enum StreamPreloadStatus {
   skippedDisabled,
   skippedAlreadyDone,
+  cancelled,
   success,
   failed,
   failedDisabled,
@@ -37,6 +38,8 @@ class StreamPreloadDiagnosticEntry {
   const StreamPreloadDiagnosticEntry({
     required this.timestamp,
     required this.triggerSource,
+    required this.ownerKey,
+    required this.scopeKey,
     required this.itemId,
     required this.mediaSourceId,
     required this.startPosition,
@@ -50,6 +53,8 @@ class StreamPreloadDiagnosticEntry {
 
   final DateTime timestamp;
   final String triggerSource;
+  final String ownerKey;
+  final String scopeKey;
   final String itemId;
   final String mediaSourceId;
   final Duration startPosition;
@@ -86,12 +91,14 @@ class StreamPreloadService {
   }
 
   final Set<String> _doneKeys = <String>{};
-  final Map<String, Future<StreamPreloadResult>> _inFlight =
-      <String, Future<StreamPreloadResult>>{};
+  final Map<String, _InFlightPreloadTask> _inFlight =
+      <String, _InFlightPreloadTask>{};
   final List<StreamPreloadDiagnosticEntry> _recentEntries =
       <StreamPreloadDiagnosticEntry>[];
   final Map<String, _PreloadCircuitState> _circuitStates =
       <String, _PreloadCircuitState>{};
+  int _activeCurrentPreloads = 0;
+  Completer<void>? _currentPreloadsDrained;
 
   static const int _maxRecentEntries = 48;
   DateTime Function() _clock = DateTime.now;
@@ -205,10 +212,18 @@ class StreamPreloadService {
     for (final entry in _recentEntries.skip(startIndex)) {
       final errorText =
           entry.error == null ? '' : ' error=${_summarizeInline(entry.error)}';
+      final ownerText = entry.ownerKey.isEmpty
+          ? ''
+          : ' owner=${_summarizeInline(entry.ownerKey)}';
+      final scopeText = entry.scopeKey.isEmpty
+          ? ''
+          : ' scope=${_summarizeInline(entry.scopeKey)}';
       buffer.writeln(
         '${entry.timestamp.toIso8601String()} '
         'trigger=${entry.triggerSource} '
         'status=${entry.status.name} '
+        '$ownerText'
+        '$scopeText '
         'item=${entry.itemId} '
         'mediaSource=${entry.mediaSourceId} '
         'start=${entry.startPosition.inSeconds}s '
@@ -258,6 +273,12 @@ class StreamPreloadService {
         ..writeln('latestTrigger: ${latest.triggerSource}')
         ..writeln('latestStatus: ${latest.status.name}')
         ..writeln('latestUrl: ${_summarizeUrl(latest.url)}');
+      if (latest.ownerKey.isNotEmpty) {
+        buffer.writeln('latestOwner: ${latest.ownerKey}');
+      }
+      if (latest.scopeKey.isNotEmpty) {
+        buffer.writeln('latestScope: ${latest.scopeKey}');
+      }
     }
     return buffer.toString().trim();
   }
@@ -282,12 +303,16 @@ class StreamPreloadService {
     required PreloadRequest request,
     required StreamPreloadResult result,
   }) {
+    final ownerKey = _normalizeLifecycleKey(request.ownerKey);
+    final scopeKey = _normalizeLifecycleKey(request.scopeKey);
     _recentEntries.add(
       StreamPreloadDiagnosticEntry(
         timestamp: _clock(),
         triggerSource: request.triggerSource.trim().isEmpty
             ? 'unknown'
             : request.triggerSource.trim(),
+        ownerKey: ownerKey,
+        scopeKey: scopeKey,
         itemId: request.resolvedSource.itemId,
         mediaSourceId: request.resolvedSource.mediaSourceId,
         startPosition: request.startPosition,
@@ -334,13 +359,44 @@ class StreamPreloadService {
     return '${text.substring(0, limit - 3)}...';
   }
 
+  String _normalizeLifecycleKey(String? raw) {
+    final value = (raw ?? '').trim();
+    if (value.isEmpty) return '';
+    return value.replaceAll(RegExp(r'\s+'), '_');
+  }
+
   @visibleForTesting
   void debugResetForTest({DateTime Function()? nowProvider}) {
     _doneKeys.clear();
     _inFlight.clear();
     _recentEntries.clear();
     _circuitStates.clear();
+    _activeCurrentPreloads = 0;
+    _currentPreloadsDrained = null;
     _clock = nowProvider ?? DateTime.now;
+  }
+
+  void cancelOwner(String ownerKey) {
+    final normalizedOwner = _normalizeLifecycleKey(ownerKey);
+    if (normalizedOwner.isEmpty) return;
+    for (final task in _inFlight.values.toList(growable: false)) {
+      task.detachOwner(normalizedOwner);
+    }
+  }
+
+  void cancelOwnerScope({
+    required String ownerKey,
+    required String scopeKey,
+  }) {
+    final normalizedOwner = _normalizeLifecycleKey(ownerKey);
+    final normalizedScope = _normalizeLifecycleKey(scopeKey);
+    if (normalizedOwner.isEmpty || normalizedScope.isEmpty) return;
+    for (final task in _inFlight.values.toList(growable: false)) {
+      task.detachOwnerScope(
+        ownerKey: normalizedOwner,
+        scopeKey: normalizedScope,
+      );
+    }
   }
 
   Future<StreamPreloadResult> preloadFirst3Seconds({
@@ -413,6 +469,8 @@ class StreamPreloadService {
         ? Duration.zero
         : request.startPosition;
     final effectiveProxyUrl = _effectiveProxyUrlFor(request);
+    final normalizedOwnerKey = _normalizeLifecycleKey(request.ownerKey);
+    final normalizedScopeKey = _normalizeLifecycleKey(request.scopeKey);
     final normalizedRequest = PreloadRequest(
       resolvedSource: request.resolvedSource.copyWith(
         proxyUrl: effectiveProxyUrl,
@@ -424,6 +482,8 @@ class StreamPreloadService {
           : request.preloadDuration,
       dedupeFingerprint: request.dedupeFingerprint,
       httpProxyUrl: effectiveProxyUrl,
+      ownerKey: normalizedOwnerKey,
+      scopeKey: normalizedScopeKey,
     );
     final scopeKey = _scopeKeyFor(normalizedRequest);
     final now = _clock();
@@ -452,8 +512,51 @@ class StreamPreloadService {
       return result;
     }
 
-    final inFlight = _inFlight[key];
-    if (inFlight != null) return inFlight;
+    final existingTask = _inFlight[key];
+    if (existingTask != null && !existingTask.cancellation.isCancelled) {
+      existingTask.attach(normalizedRequest);
+      return existingTask.future;
+    }
+
+    final priority = _priorityFor(normalizedRequest);
+    final cancellation = _PreloadCancellation();
+    final task = _InFlightPreloadTask(cancellation: cancellation)
+      ..attach(normalizedRequest);
+
+    if (priority == _PreloadPriority.next) {
+      await _waitForCurrentPreloadsToDrain(cancellation);
+      if (_doneKeys.contains(key)) {
+        final result =
+            const StreamPreloadResult(StreamPreloadStatus.skippedAlreadyDone);
+        _recordResult(request: normalizedRequest, result: result);
+        return result;
+      }
+      final refreshedOpenCircuit = _circuitStates[scopeKey];
+      if (refreshedOpenCircuit != null && refreshedOpenCircuit.isOpen(_clock())) {
+        final result = StreamPreloadResult(
+          StreamPreloadStatus.skippedDisabled,
+          error: _PreloadFailureInfo(
+            category: refreshedOpenCircuit.lastFailure?.category ??
+                _PreloadFailureCategory.unknown,
+            statusCode: refreshedOpenCircuit.lastFailure?.statusCode,
+            url: normalizedRequest.resolvedSource.url,
+            message:
+                'circuit-open:${refreshedOpenCircuit.openUntil!.difference(_clock()).inSeconds}s',
+          ),
+        );
+        _recordResult(request: normalizedRequest, result: result);
+        return result;
+      }
+      final refreshedTask = _inFlight[key];
+      if (refreshedTask != null && !refreshedTask.cancellation.isCancelled) {
+        refreshedTask.attach(normalizedRequest);
+        return refreshedTask.future;
+      }
+    }
+
+    if (priority == _PreloadPriority.current) {
+      _beginCurrentPreload();
+    }
 
     final run = () async {
       _PreloadFailureInfo? lastFailure;
@@ -463,6 +566,11 @@ class StreamPreloadService {
       StreamCacheDownloadService.instance.beginWarmup(cacheDownloadRequest);
       try {
         for (var attempt = 0; attempt < maxAttempts; attempt++) {
+          _throwIfCancelled(
+            cancellation,
+            url: source.url,
+            message: 'owner-cancelled',
+          );
           final headers = _buildRequestHeaders(source.httpHeaders);
           final bytesToFetch = _estimateBytesToFetch(
             source.bitrate,
@@ -481,6 +589,7 @@ class StreamPreloadService {
             sizeBytes: source.sizeBytes,
             httpProxyUrl: normalizedRequest.httpProxyUrl,
             cacheDownloadRequest: cacheDownloadRequest,
+            cancellation: cancellation,
           );
           if (outcome.success) {
             _doneKeys.add(key);
@@ -491,6 +600,14 @@ class StreamPreloadService {
             return result;
           }
           lastFailure = outcome.failure;
+          if (lastFailure?.category == _PreloadFailureCategory.cancelled) {
+            final result = StreamPreloadResult(
+              StreamPreloadStatus.cancelled,
+              error: lastFailure,
+            );
+            _recordResult(request: normalizedRequest, result: result);
+            return result;
+          }
 
           if (attempt < maxAttempts - 1 &&
               lastFailure != null &&
@@ -507,6 +624,14 @@ class StreamPreloadService {
               url: normalizedRequest.resolvedSource.url,
               message: 'prefetch-failed',
             );
+        if (failure.category == _PreloadFailureCategory.cancelled) {
+          final result = StreamPreloadResult(
+            StreamPreloadStatus.cancelled,
+            error: failure,
+          );
+          _recordResult(request: normalizedRequest, result: result);
+          return result;
+        }
         final disabledNow = _recordFailure(scopeKey, failure);
         final result = StreamPreloadResult(
           disabledNow
@@ -520,16 +645,30 @@ class StreamPreloadService {
         );
         _recordResult(request: normalizedRequest, result: result);
         return result;
+      } on _PreloadCancelledException catch (error) {
+        final failure = _classifyException(error, url: source.url);
+        final result = StreamPreloadResult(
+          StreamPreloadStatus.cancelled,
+          error: failure,
+        );
+        _recordResult(request: normalizedRequest, result: result);
+        return result;
       } finally {
         StreamCacheDownloadService.instance.endWarmup(cacheDownloadRequest);
+        if (priority == _PreloadPriority.current) {
+          _endCurrentPreload();
+        }
       }
     }();
 
-    _inFlight[key] = run;
+    task.future = run;
+    _inFlight[key] = task;
     try {
-      return await run;
+      return await task.future;
     } finally {
-      _inFlight.remove(key);
+      if (identical(_inFlight[key], task)) {
+        _inFlight.remove(key);
+      }
     }
   }
 
@@ -543,6 +682,51 @@ class StreamPreloadService {
     final seconds = preloadDuration.inMilliseconds / 1000.0;
     final estimated = (bytesPerSecond * seconds).round();
     return estimated.clamp(_minBytes, _maxBytes);
+  }
+
+  _PreloadPriority _priorityFor(PreloadRequest request) {
+    final scope = (request.scopeKey ?? '').trim().toLowerCase();
+    final fingerprint = (request.dedupeFingerprint ?? '').trim().toLowerCase();
+    if (scope.contains('current') || fingerprint == 'target:current') {
+      return _PreloadPriority.current;
+    }
+    if (scope.contains('next') || fingerprint == 'target:next') {
+      return _PreloadPriority.next;
+    }
+    return _PreloadPriority.normal;
+  }
+
+  void _beginCurrentPreload() {
+    if (_activeCurrentPreloads == 0) {
+      _currentPreloadsDrained = Completer<void>();
+    }
+    _activeCurrentPreloads += 1;
+  }
+
+  void _endCurrentPreload() {
+    if (_activeCurrentPreloads <= 0) return;
+    _activeCurrentPreloads -= 1;
+    if (_activeCurrentPreloads == 0) {
+      final drained = _currentPreloadsDrained;
+      _currentPreloadsDrained = null;
+      if (drained != null && !drained.isCompleted) {
+        drained.complete();
+      }
+    }
+  }
+
+  Future<void> _waitForCurrentPreloadsToDrain(
+    _PreloadCancellation cancellation,
+  ) async {
+    while (_activeCurrentPreloads > 0) {
+      final waiter = _currentPreloadsDrained?.future;
+      if (waiter == null) return;
+      await Future.any<void>(<Future<void>>[
+        waiter,
+        cancellation.cancelled,
+      ]);
+      _throwIfCancelled(cancellation, url: 'preload://scheduler');
+    }
   }
 
   bool _recordFailure(String scopeKey, _PreloadFailureInfo failure) {
@@ -606,7 +790,9 @@ class StreamPreloadService {
     required int? sizeBytes,
     String? httpProxyUrl,
     required StreamCacheDownloadRequest cacheDownloadRequest,
+    required _PreloadCancellation cancellation,
   }) async {
+    _throwIfCancelled(cancellation, url: url);
     if (kIsWeb) {
       return _PreloadAttemptResult.failure(
         _PreloadFailureInfo(
@@ -630,6 +816,11 @@ class StreamPreloadService {
     final client = LinHttpClientFactory.createHttpClient(
       _overrideConfig(httpProxyUrl),
     );
+    cancellation.addListener(() {
+      try {
+        client.close(force: true);
+      } catch (_) {}
+    });
     try {
       return await _prefetchUri(
         client: client,
@@ -644,6 +835,7 @@ class StreamPreloadService {
         bitrateBitsPerSecond: bitrateBitsPerSecond,
         sizeBytes: sizeBytes,
         cacheDownloadRequest: cacheDownloadRequest,
+        cancellation: cancellation,
       );
     } catch (error) {
       return _PreloadAttemptResult.failure(
@@ -694,7 +886,9 @@ class StreamPreloadService {
     required int? bitrateBitsPerSecond,
     required int? sizeBytes,
     required StreamCacheDownloadRequest cacheDownloadRequest,
+    required _PreloadCancellation cancellation,
   }) async {
+    _throwIfCancelled(cancellation, url: uri.toString());
     if (mediaTypeHint == ResolvedPlaybackMediaType.file) {
       return _prefetchDirectFile(
         uri: uri,
@@ -704,6 +898,7 @@ class StreamPreloadService {
         sizeBytes: sizeBytes,
         supportsByteRange: supportsByteRange,
         cacheDownloadRequest: cacheDownloadRequest,
+        cancellation: cancellation,
       );
     }
 
@@ -719,6 +914,7 @@ class StreamPreloadService {
       rangeStartBytes: 0,
       rangeBytes: sniffBytes,
       captureLimitBytes: firstCaptureLimit,
+      cancellation: cancellation,
     );
     if (!first.ok) {
       return _failureFromGetResult(
@@ -730,6 +926,7 @@ class StreamPreloadService {
 
     final playlistText = _asHlsPlaylistText(first);
     if (playlistText == null) {
+      _throwIfCancelled(cancellation, url: first.effectiveUri.toString());
       if (!useOffset) {
         await _seedLoopbackProxyCache(
           startByte: 0,
@@ -777,6 +974,7 @@ class StreamPreloadService {
         rangeStartBytes: startByte,
         rangeBytes: bytesToFetch,
         captureLimitBytes: bytesToFetch.clamp(0, _maxLoopbackSeedBytes).toInt(),
+        cancellation: cancellation,
       );
       if (!second.ok || second.bytesRead <= 0) {
         return _failureFromGetResult(
@@ -809,6 +1007,7 @@ class StreamPreloadService {
       startPosition: startPosition,
       preloadDuration: preloadDuration,
       cacheDownloadRequest: cacheDownloadRequest,
+      cancellation: cancellation,
     );
   }
 
@@ -820,15 +1019,18 @@ class StreamPreloadService {
     required int? sizeBytes,
     required bool? supportsByteRange,
     required StreamCacheDownloadRequest cacheDownloadRequest,
+    required _PreloadCancellation cancellation,
   }) async {
     final prefixBytes =
         startPosition > Duration.zero ? 512 * 1024 : bytesToFetch;
     try {
+      _throwIfCancelled(cancellation, url: uri.toString());
       await StreamCacheDownloadService.instance.warmRangeToCache(
         request: cacheDownloadRequest.withRemoteUri(uri),
         startByte: 0,
         lengthBytes: prefixBytes,
       );
+      _throwIfCancelled(cancellation, url: uri.toString());
     } catch (error) {
       return _PreloadAttemptResult.failure(
         _classifyException(error, url: uri.toString()),
@@ -839,6 +1041,7 @@ class StreamPreloadService {
       return const _PreloadAttemptResult.success();
     }
 
+    _throwIfCancelled(cancellation, url: uri.toString());
     final startByte = _estimateRangeStartBytes(
       startPosition: startPosition,
       bytesToFetch: bytesToFetch,
@@ -850,11 +1053,13 @@ class StreamPreloadService {
     }
 
     try {
+      _throwIfCancelled(cancellation, url: uri.toString());
       await StreamCacheDownloadService.instance.warmRangeToCache(
         request: cacheDownloadRequest.withRemoteUri(uri),
         startByte: startByte,
         lengthBytes: bytesToFetch,
       );
+      _throwIfCancelled(cancellation, url: uri.toString());
       return const _PreloadAttemptResult.success();
     } catch (error) {
       return _PreloadAttemptResult.failure(
@@ -935,7 +1140,9 @@ class StreamPreloadService {
     required Duration startPosition,
     required Duration preloadDuration,
     required StreamCacheDownloadRequest cacheDownloadRequest,
+    required _PreloadCancellation cancellation,
   }) async {
+    _throwIfCancelled(cancellation, url: playlistUri.toString());
     var parsed = _parseHls(
       playlistText,
       base: playlistUri,
@@ -960,6 +1167,7 @@ class StreamPreloadService {
         rangeStartBytes: 0,
         rangeBytes: 512 * 1024,
         captureLimitBytes: 1024 * 1024,
+        cancellation: cancellation,
       );
       if (!variant.ok) {
         return _failureFromGetResult(
@@ -1003,6 +1211,7 @@ class StreamPreloadService {
         rangeStartBytes: null,
         rangeBytes: null,
         captureLimitBytes: _maxLoopbackSeedBytes,
+        cancellation: cancellation,
       );
       if (!init.ok) {
         return _failureFromGetResult(
@@ -1043,6 +1252,7 @@ class StreamPreloadService {
     for (final seg in segs.skip(startIndex)) {
       if (remainingMs <= 0) break;
       if (segmentCount >= _kMaxHlsPreloadSegments) break;
+      _throwIfCancelled(cancellation, url: seg.uri.toString());
 
       final r = await _get(
         client: client,
@@ -1051,6 +1261,7 @@ class StreamPreloadService {
         rangeStartBytes: null,
         rangeBytes: null,
         captureLimitBytes: _maxLoopbackSeedBytes,
+        cancellation: cancellation,
       );
       if (!r.ok) {
         return _failureFromGetResult(
@@ -1144,7 +1355,9 @@ class StreamPreloadService {
     required int? rangeStartBytes,
     required int? rangeBytes,
     required int captureLimitBytes,
+    required _PreloadCancellation cancellation,
   }) async {
+    _throwIfCancelled(cancellation, url: uri.toString());
     final request =
         await client.getUrl(uri).timeout(const Duration(seconds: 8));
     request.followRedirects = true;
@@ -1177,6 +1390,7 @@ class StreamPreloadService {
 
     try {
       await for (final chunk in response.timeout(const Duration(seconds: 10))) {
+        _throwIfCancelled(cancellation, url: uri.toString());
         bytesRead += chunk.length;
         if (captureLimitBytes > 0 && captured.length < captureLimitBytes) {
           final take =
@@ -1195,6 +1409,8 @@ class StreamPreloadService {
     } catch (_) {
       // best-effort
     }
+
+    _throwIfCancelled(cancellation, url: uri.toString());
 
     if (totalBytes == null &&
         response.statusCode == HttpStatus.ok &&
@@ -1249,6 +1465,18 @@ class StreamPreloadService {
       return contentLength;
     }
     return null;
+  }
+
+  void _throwIfCancelled(
+    _PreloadCancellation cancellation, {
+    required String url,
+    String message = 'cancelled',
+  }) {
+    if (!cancellation.isCancelled) return;
+    throw _PreloadCancelledException(
+      url: url,
+      message: cancellation.reason ?? message,
+    );
   }
 
   _PreloadAttemptResult _failureFromGetResult(
@@ -1321,6 +1549,13 @@ class StreamPreloadService {
   }
 
   _PreloadFailureInfo _classifyException(Object error, {required String url}) {
+    if (error is _PreloadCancelledException) {
+      return _PreloadFailureInfo(
+        category: _PreloadFailureCategory.cancelled,
+        url: error.url,
+        message: error.message,
+      );
+    }
     if (error is TimeoutException) {
       return _PreloadFailureInfo(
         category: _PreloadFailureCategory.network,
@@ -1351,6 +1586,7 @@ class StreamPreloadService {
 }
 
 enum _PreloadFailureCategory {
+  cancelled,
   network,
   server,
   rateLimited,
@@ -1382,6 +1618,7 @@ class _PreloadFailureInfo {
       case _PreloadFailureCategory.emptyResponse:
       case _PreloadFailureCategory.unknown:
         return true;
+      case _PreloadFailureCategory.cancelled:
       case _PreloadFailureCategory.client:
       case _PreloadFailureCategory.unsupported:
         return false;
@@ -1425,6 +1662,123 @@ class _PreloadAttemptResult {
 
   final bool success;
   final _PreloadFailureInfo? failure;
+}
+
+class _PreloadCancelledException implements Exception {
+  const _PreloadCancelledException({
+    required this.url,
+    required this.message,
+  });
+
+  final String url;
+  final String message;
+}
+
+enum _PreloadPriority {
+  normal,
+  current,
+  next,
+}
+
+class _PreloadCancellation {
+  String? _reason;
+  final List<VoidCallback> _listeners = <VoidCallback>[];
+  final Completer<void> _cancelled = Completer<void>();
+
+  bool get isCancelled => (_reason ?? '').trim().isNotEmpty;
+  String? get reason => _reason;
+  Future<void> get cancelled => _cancelled.future;
+
+  void addListener(VoidCallback listener) {
+    if (isCancelled) {
+      listener();
+      return;
+    }
+    _listeners.add(listener);
+  }
+
+  void cancel([String reason = 'cancelled']) {
+    if (isCancelled) return;
+    _reason = reason.trim().isEmpty ? 'cancelled' : reason.trim();
+    if (!_cancelled.isCompleted) {
+      _cancelled.complete();
+    }
+    final listeners = List<VoidCallback>.from(_listeners);
+    _listeners.clear();
+    for (final listener in listeners) {
+      try {
+        listener();
+      } catch (_) {}
+    }
+  }
+}
+
+@immutable
+class _PreloadInterest {
+  const _PreloadInterest({
+    required this.ownerKey,
+    required this.scopeKey,
+  });
+
+  final String ownerKey;
+  final String scopeKey;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is _PreloadInterest &&
+        other.ownerKey == ownerKey &&
+        other.scopeKey == scopeKey;
+  }
+
+  @override
+  int get hashCode => Object.hash(ownerKey, scopeKey);
+}
+
+class _InFlightPreloadTask {
+  _InFlightPreloadTask({required this.cancellation});
+
+  final _PreloadCancellation cancellation;
+  final Set<_PreloadInterest> _ownedInterests = <_PreloadInterest>{};
+  var _hasUnownedInterest = false;
+  late Future<StreamPreloadResult> future;
+
+  void attach(PreloadRequest request) {
+    final ownerKey = (request.ownerKey ?? '').trim();
+    if (ownerKey.isEmpty) {
+      _hasUnownedInterest = true;
+      return;
+    }
+    _ownedInterests.add(
+      _PreloadInterest(
+        ownerKey: ownerKey,
+        scopeKey: (request.scopeKey ?? '').trim(),
+      ),
+    );
+  }
+
+  void detachOwner(String ownerKey) {
+    if (ownerKey.trim().isEmpty) return;
+    _ownedInterests.removeWhere((interest) => interest.ownerKey == ownerKey);
+    _cancelIfOrphaned(reason: 'owner-cancelled:$ownerKey');
+  }
+
+  void detachOwnerScope({
+    required String ownerKey,
+    required String scopeKey,
+  }) {
+    if (ownerKey.trim().isEmpty || scopeKey.trim().isEmpty) return;
+    _ownedInterests.removeWhere(
+      (interest) =>
+          interest.ownerKey == ownerKey && interest.scopeKey == scopeKey,
+    );
+    _cancelIfOrphaned(reason: 'scope-cancelled:$ownerKey/$scopeKey');
+  }
+
+  void _cancelIfOrphaned({required String reason}) {
+    if (_hasUnownedInterest || _ownedInterests.isNotEmpty) return;
+    cancellation.cancel(reason);
+  }
 }
 
 @immutable
