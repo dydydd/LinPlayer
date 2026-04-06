@@ -374,6 +374,7 @@ void main() {
 
     final snapshot = await activeProgress.future.timeout(
       const Duration(seconds: 2),
+      onTimeout: () => throw TimeoutException('waiting for active warmup'),
     );
     expect(snapshot.kind, HttpStreamCacheDownloadKind.warmup);
     expect(snapshot.startByte, 0);
@@ -389,6 +390,105 @@ void main() {
     expect(
       HttpStreamProxyServer.instance.currentDownloadProgressSnapshots(),
       isEmpty,
+    );
+  });
+
+  test('HttpStreamProxyServer cancels active playback fill without draining',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await server.close(force: true);
+    });
+
+    var upstreamChunks = 0;
+    server.listen((HttpRequest req) async {
+      req.response.statusCode = HttpStatus.ok;
+      req.response.headers.contentType = ContentType('video', 'mp4');
+      req.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+      try {
+        for (var i = 0; i < 200; i++) {
+          upstreamChunks++;
+          req.response.add(List<int>.filled(32 * 1024, i % 256));
+          await req.response.flush();
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+      } catch (_) {
+        // Expected when the proxy cancels the upstream request.
+      } finally {
+        try {
+          await req.response.close();
+        } catch (_) {}
+      }
+    });
+
+    final activeProgress = Completer<HttpStreamCacheDownloadProgressSnapshot>();
+    final completed = Completer<void>();
+    final sub = HttpStreamProxyServer.instance.downloadProgressStream.listen((
+      snapshots,
+    ) {
+      if (!activeProgress.isCompleted) {
+        final current = snapshots.where((entry) {
+          return entry.kind == HttpStreamCacheDownloadKind.playbackFill &&
+              entry.bytesWritten > 0;
+        });
+        if (current.isNotEmpty) {
+          activeProgress.complete(current.last);
+        }
+      }
+      if (activeProgress.isCompleted &&
+          !completed.isCompleted &&
+          snapshots.isEmpty) {
+        completed.complete();
+      }
+    });
+    addTearDown(() async {
+      await sub.cancel();
+    });
+
+    final proxyUri = await HttpStreamProxyServer.instance.registerStream(
+      remoteUri: Uri.parse('http://127.0.0.1:${server.port}/media'),
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      fileName: 'video.mp4',
+    );
+
+    final client = HttpClient();
+    addTearDown(() {
+      client.close(force: true);
+    });
+    final response = await (await client.getUrl(proxyUri)).close();
+    final responseSub = response.listen(
+      (_) {},
+      onError: (_) {},
+    );
+    addTearDown(() async {
+      await responseSub.cancel();
+    });
+
+    final snapshot = await activeProgress.future.timeout(
+      const Duration(seconds: 2),
+    );
+    expect(snapshot.kind, HttpStreamCacheDownloadKind.playbackFill);
+
+    final cancelled = HttpStreamProxyServer.instance
+        .cancelActivePlaybackDownloads(
+            cacheFingerprint: snapshot.key.fingerprint);
+    expect(cancelled, 1);
+
+    await completed.future.timeout(
+      const Duration(seconds: 2),
+      onTimeout: () => throw TimeoutException('waiting for playbackFill clear'),
+    );
+    await responseSub.cancel();
+    client.close(force: true);
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    expect(upstreamChunks, lessThan(200));
+    expect(
+      HttpStreamProxyServer.instance.currentDownloadProgressSnapshots(),
+      isEmpty,
+    );
+    expect(
+      HttpStreamProxyServer.instance.buildDiagnosticsText(),
+      isNot(contains('proxy-error')),
     );
   });
 

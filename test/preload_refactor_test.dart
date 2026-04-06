@@ -532,6 +532,44 @@ void main() {
       );
     });
 
+    test('uses size and runtime to estimate bitrate for resume byte ranges',
+        () async {
+      final adapter = _FakeAdapter(
+        playbackInfo: PlaybackInfoResult(
+          playSessionId: 'play-bitrate-estimate',
+          mediaSourceId: 'ms-bitrate-estimate',
+          mediaSources: const <Map<String, dynamic>>[
+            <String, dynamic>{
+              'Id': 'ms-bitrate-estimate',
+              'DirectStreamUrl': '/emby/Videos/item-bitrate/high.mkv',
+              'Bitrate': 20000,
+              'Size': 7689250423,
+              'RunTimeTicks': 30000000000,
+              'MediaStreams': <Map<String, dynamic>>[
+                <String, dynamic>{'Type': 'Video', 'Height': 1080},
+              ],
+            },
+          ],
+        ),
+      );
+
+      final result = await PlaybackSourceBuilder.build(
+        PlaybackSourceBuildRequest(
+          adapter: adapter,
+          auth: auth,
+          itemId: 'item-bitrate',
+          playerCore: PlaybackSourcePlayerCoreKind.mpv,
+          resolveExternalSource: false,
+        ),
+      );
+
+      expect(result.resolvedSource.bitrate, greaterThan(1000000));
+      expect(
+        result.resolvedSource.bitrate,
+        closeTo(((7689250423 * 8) / 3000).round(), 1),
+      );
+    });
+
     test('body-link resolution strips sensitive headers on cross-origin target',
         () async {
       final linkServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);

@@ -212,6 +212,58 @@ class _SettingsPageState extends State<SettingsPage> {
     return 'linplayer_diagnostics_$y$m${d}_$hh$mm$ss.txt';
   }
 
+  Future<String?> _saveTextFile({
+    required String dialogTitle,
+    required String fileName,
+    required String text,
+    required List<String> allowedExtensions,
+    required String fallbackExtension,
+  }) async {
+    final mobileBytes = (Platform.isAndroid || Platform.isIOS)
+        ? Uint8List.fromList(utf8.encode(text))
+        : null;
+    final path = await FilePicker.platform.saveFile(
+      dialogTitle: dialogTitle,
+      fileName: fileName,
+      type: FileType.custom,
+      allowedExtensions: allowedExtensions,
+      bytes: mobileBytes,
+    );
+    if (path == null || path.trim().isEmpty) return null;
+
+    if (mobileBytes != null) {
+      return path;
+    }
+
+    final normalized = _ensureKnownFileExtension(
+      path,
+      allowedExtensions: allowedExtensions,
+      fallbackExtension: fallbackExtension,
+    );
+    await File(normalized).writeAsString(text, flush: true);
+    return normalized;
+  }
+
+  String _ensureKnownFileExtension(
+    String path, {
+    required List<String> allowedExtensions,
+    required String fallbackExtension,
+  }) {
+    final lowerPath = path.toLowerCase();
+    for (final extension in allowedExtensions) {
+      final normalizedExtension = extension.startsWith('.')
+          ? extension.toLowerCase()
+          : '.${extension.toLowerCase()}';
+      if (lowerPath.endsWith(normalizedExtension)) {
+        return path;
+      }
+    }
+    final normalizedFallback = fallbackExtension.startsWith('.')
+        ? fallbackExtension
+        : '.$fallbackExtension';
+    return '$path$normalizedFallback';
+  }
+
   Future<T> _runWithBlockingDialog<T>(
     BuildContext context,
     Future<T> Function() action, {
@@ -613,16 +665,14 @@ class _SettingsPageState extends State<SettingsPage> {
           );
           return;
         case _BackupIoAction.file:
-          final path = await FilePicker.platform.saveFile(
+          final savedPath = await _saveTextFile(
             dialogTitle: '保存备份文件',
             fileName: _backupFileName(),
-            type: FileType.custom,
+            text: json,
             allowedExtensions: const ['json'],
+            fallbackExtension: 'json',
           );
-          if (path == null || path.trim().isEmpty) return;
-          final normalized =
-              path.toLowerCase().endsWith('.json') ? path : '$path.json';
-          await File(normalized).writeAsString(json, flush: true);
+          if (savedPath == null) return;
           if (!context.mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('已导出备份文件')),
@@ -707,16 +757,14 @@ class _SettingsPageState extends State<SettingsPage> {
           );
           return;
         case _BackupIoAction.file:
-          final path = await FilePicker.platform.saveFile(
+          final savedPath = await _saveTextFile(
             dialogTitle: '保存备份文件',
             fileName: _backupFileName(),
-            type: FileType.custom,
+            text: json,
             allowedExtensions: const ['json'],
+            fallbackExtension: 'json',
           );
-          if (path == null || path.trim().isEmpty) return;
-          final normalized =
-              path.toLowerCase().endsWith('.json') ? path : '$path.json';
-          await File(normalized).writeAsString(json, flush: true);
+          if (savedPath == null) return;
           if (!context.mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('已导出备份文件')),
@@ -1651,18 +1699,14 @@ class _SettingsPageState extends State<SettingsPage> {
           );
           return;
         case _BackupIoAction.file:
-          final path = await FilePicker.platform.saveFile(
+          final savedPath = await _saveTextFile(
             dialogTitle: '保存诊断日志',
             fileName: _diagnosticsFileName(),
-            type: FileType.custom,
+            text: text,
             allowedExtensions: const ['txt', 'log'],
+            fallbackExtension: 'txt',
           );
-          if (path == null || path.trim().isEmpty) return;
-          final normalized = (path.toLowerCase().endsWith('.txt') ||
-                  path.toLowerCase().endsWith('.log'))
-              ? path
-              : '$path.txt';
-          await File(normalized).writeAsString(text, flush: true);
+          if (savedPath == null) return;
           if (!context.mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('已导出诊断日志')),

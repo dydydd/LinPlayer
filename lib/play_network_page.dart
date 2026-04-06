@@ -171,6 +171,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   bool _nextEpisodePreloadTriggered = false;
   ResolvedPlaybackSource? _resolvedPlaybackSource;
   String? _preloadHttpProxyUrl;
+  String? _playbackCacheFingerprint;
   String _preloadOwnerKey = '';
   bool _allowRoutePop = false;
   bool _exitInProgress = false;
@@ -354,10 +355,22 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _serverProgressSync?.stop();
     PlaybackPreloadCoordinator.cancelOwner(_preloadOwnerKey);
     _preloadOwnerKey = '';
+    _cancelActivePlaybackCacheFills();
     // ignore: unawaited_futures
     _reportPlaybackStoppedBestEffort();
     // ignore: unawaited_futures
     _playerService.dispose();
+  }
+
+  void _cancelActivePlaybackCacheFills() {
+    final fingerprint = _playbackCacheFingerprint;
+    final cancelled = LocalHttpStreamProxy.cancelActivePlaybackFills(
+      cacheFingerprint: fingerprint,
+    );
+    if (cancelled == 0 && (fingerprint ?? '').trim().isNotEmpty) {
+      LocalHttpStreamProxy.cancelActivePlaybackFills();
+    }
+    _playbackCacheFingerprint = null;
   }
 
   Future<void> _requestExitThenPop() async {
@@ -400,6 +413,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       PlaybackPreloadCoordinator.cancelOwner(_preloadOwnerKey);
       _preloadOwnerKey = '';
     }
+    _cancelActivePlaybackCacheFills();
     unawaited(_reportPlaybackStoppedBestEffort());
 
     await _errorSub?.cancel();
@@ -439,6 +453,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     if (_preloadOwnerKey.isNotEmpty) {
       PlaybackPreloadCoordinator.cancelOwner(_preloadOwnerKey);
     }
+    _cancelActivePlaybackCacheFills();
     _preloadOwnerKey =
         PlaybackPreloadCoordinator.createOwnerToken('playback_mpv');
     await _errorSub?.cancel();
@@ -499,6 +514,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _nextEpisodePreloadTriggered = false;
     _resolvedPlaybackSource = null;
     _preloadHttpProxyUrl = null;
+    _playbackCacheFingerprint = null;
     _controlsVisible = true;
     _isScrubbing = false;
     _desktopSidePanel = _DesktopSidePanel.none;
@@ -2659,6 +2675,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       candidate,
       cacheKey: cacheKey,
     );
+    if (proxied != null) {
+      _playbackCacheFingerprint = cacheKey?.fingerprint;
+    }
     return proxied ?? candidate;
   }
 
@@ -3733,6 +3752,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     WidgetsBinding.instance.removeObserver(this);
     PlaybackPreloadCoordinator.cancelOwner(_preloadOwnerKey);
     _preloadOwnerKey = '';
+    _cancelActivePlaybackCacheFills();
     // ignore: unawaited_futures
     _reportPlaybackStoppedBestEffort();
     // ignore: unawaited_futures

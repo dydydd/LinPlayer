@@ -43,10 +43,13 @@ class HttpStreamProxyServer {
   final StreamController<List<HttpStreamCacheDownloadProgressSnapshot>>
       _downloadProgressController =
       StreamController<List<HttpStreamCacheDownloadProgressSnapshot>>.broadcast(
-        sync: true,
-      );
+    sync: true,
+  );
   final Map<String, _HttpStreamProxyDownloadProgress> _activeDownloads =
       <String, _HttpStreamProxyDownloadProgress>{};
+  final Map<String, _HttpStreamProxyDownloadCancellation>
+      _activeDownloadCancellations =
+      <String, _HttpStreamProxyDownloadCancellation>{};
   int _nextDownloadProgressId = 0;
 
   Stream<List<HttpStreamCacheDownloadProgressSnapshot>>
@@ -57,13 +60,15 @@ class HttpStreamProxyServer {
     _client = null;
   }
 
-  List<HttpStreamCacheDownloadProgressSnapshot> currentDownloadProgressSnapshots(
-      {int? maxEntries}) {
+  List<HttpStreamCacheDownloadProgressSnapshot>
+      currentDownloadProgressSnapshots({int? maxEntries}) {
     final snapshots = _activeDownloads.values
         .map((entry) => entry.snapshot())
         .toList(growable: false)
       ..sort((a, b) => a.startedAt.compareTo(b.startedAt));
-    if (maxEntries == null || maxEntries < 1 || snapshots.length <= maxEntries) {
+    if (maxEntries == null ||
+        maxEntries < 1 ||
+        snapshots.length <= maxEntries) {
       return List<HttpStreamCacheDownloadProgressSnapshot>.unmodifiable(
         snapshots,
       );
@@ -97,6 +102,26 @@ class HttpStreamProxyServer {
       );
     }
     return buffer.toString().trim();
+  }
+
+  int cancelActivePlaybackDownloads({String? cacheFingerprint}) {
+    final normalizedFingerprint = cacheFingerprint?.trim() ?? '';
+    final ids = _activeDownloads.values
+        .where(
+          (download) =>
+              download.kind == HttpStreamCacheDownloadKind.playbackFill &&
+              (normalizedFingerprint.isEmpty ||
+                  download.key.fingerprint == normalizedFingerprint),
+        )
+        .map((download) => download.id)
+        .toList(growable: false);
+    for (final id in ids) {
+      _activeDownloadCancellations[id]?.cancel();
+    }
+    if (ids.isNotEmpty) {
+      _emitDownloadProgressSnapshot();
+    }
+    return ids.length;
   }
 
   Future<Uri> ensureStarted() async {
@@ -401,6 +426,7 @@ class HttpStreamProxyServer {
     _inFlightWarmups.clear();
     _recentDiagnostics.clear();
     _activeDownloads.clear();
+    _activeDownloadCancellations.clear();
     _emitDownloadProgressSnapshot();
     final server = _server;
     _server = null;
@@ -463,6 +489,7 @@ class HttpStreamProxyServer {
     int? requestedBytes,
     int? totalBytes,
     String? contentTypeMime,
+    _HttpStreamProxyDownloadCancellation? cancellation,
   }) {
     final id = 'dl-${++_nextDownloadProgressId}';
     _activeDownloads[id] = _HttpStreamProxyDownloadProgress(
@@ -475,6 +502,9 @@ class HttpStreamProxyServer {
       totalBytes: totalBytes,
       contentTypeMime: contentTypeMime,
     );
+    if (cancellation != null) {
+      _activeDownloadCancellations[id] = cancellation;
+    }
     _emitDownloadProgressSnapshot();
     return id;
   }
@@ -489,6 +519,7 @@ class HttpStreamProxyServer {
 
   void _finishDownloadProgress(String? id) {
     if (id == null) return;
+    _activeDownloadCancellations.remove(id);
     if (_activeDownloads.remove(id) == null) return;
     _emitDownloadProgressSnapshot();
   }
@@ -636,6 +667,7 @@ class HttpStreamProxyServer {
         acceptRanges: acceptRanges,
         progressId: progressId,
       );
+      await remote.close();
       remote = null;
       if (cacheResult.bytesRelayed <= 0) {
         throw StateError('range-empty');
@@ -1125,6 +1157,7 @@ class HttpStreamProxyServer {
           response: response,
           requestRange: cacheRange,
           remote: remote.response,
+          abortRemote: remote.close,
         );
         diag.cacheStatus = relay.cached ? 'miss' : 'remote';
         diag.reason = relay.reason;
@@ -1133,6 +1166,7 @@ class HttpStreamProxyServer {
           diag.missReason = relay.reason;
         }
         diag.remoteBytes = relay.bytesRelayed;
+        await remote.close();
         remote = null;
       } else {
         diag.cacheStatus = 'miss';
@@ -1142,6 +1176,33 @@ class HttpStreamProxyServer {
           diag.missReason = 'head-remote';
         }
       }
+    } on _HttpStreamProxyDownloadCancelledException {
+      diag.statusCode = diag.statusCode == 0 ? 499 : diag.statusCode;
+      diag.cacheStatus =
+          diag.cacheStatus.isEmpty ? 'cancelled' : diag.cacheStatus;
+      diag.reason = 'download-cancelled';
+      diag.reuseOutcome =
+          diag.reuseOutcome.trim().isEmpty ? 'cancelled' : diag.reuseOutcome;
+      if (diag.missReason == '-' || diag.missReason.trim().isEmpty) {
+        diag.missReason = 'download-cancelled';
+      }
+      try {
+        await response.close();
+      } catch (_) {}
+    } on _HttpStreamProxyClientDisconnectedException {
+      diag.statusCode = diag.statusCode == 0 ? 499 : diag.statusCode;
+      diag.cacheStatus =
+          diag.cacheStatus.isEmpty ? 'client-disconnected' : diag.cacheStatus;
+      diag.reason = 'client-disconnected';
+      diag.reuseOutcome = diag.reuseOutcome.trim().isEmpty
+          ? 'client-disconnected'
+          : diag.reuseOutcome;
+      if (diag.missReason == '-' || diag.missReason.trim().isEmpty) {
+        diag.missReason = 'client-disconnected';
+      }
+      try {
+        await response.close();
+      } catch (_) {}
     } catch (_) {
       diag.statusCode =
           diag.statusCode == 0 ? HttpStatus.badGateway : diag.statusCode;
@@ -1226,9 +1287,11 @@ class HttpStreamProxyServer {
     String? range,
     String? ifRange,
   }) async {
-    final request = http.StreamedRequest(
+    final abort = Completer<void>();
+    final request = http.AbortableStreamedRequest(
       method,
       _resolveRemoteUri(entry, requestUri),
+      abortTrigger: abort.future,
     )
       ..followRedirects = true
       ..maxRedirects = 5
@@ -1250,11 +1313,12 @@ class HttpStreamProxyServer {
     }
 
     unawaited(request.sink.close());
-    final client = _createHttpClientForEntry(entry);
+    final client = _createHttpClientForEntry(entry, dedicated: true);
     final response = await client.send(request);
     return _OpenedRemote(
       response: response,
-      ownedClient: identical(client, _httpClient) ? null : client,
+      ownedClient: client,
+      abort: abort,
     );
   }
 
@@ -1292,6 +1356,7 @@ class HttpStreamProxyServer {
     _OpenedRemote? remote;
     _HttpStreamProxyInFlightCacheWrite? inFlightCacheWrite;
     String? progressId;
+    var responseCommitted = false;
     try {
       var totalBytes = totalFromCache;
       var contentTypeMime = coverage.contentTypeMime;
@@ -1361,6 +1426,7 @@ class HttpStreamProxyServer {
         final length = remainingCached < segment.availableBytes
             ? remainingCached
             : segment.availableBytes;
+        responseCommitted = true;
         await response.addStream(
           segment.range.openReadSlice(
             startOffset: segment.readOffset,
@@ -1371,6 +1437,7 @@ class HttpStreamProxyServer {
       }
 
       if (remote != null) {
+        final cancellation = _HttpStreamProxyDownloadCancellation();
         final bytesToSkip =
             (!range.hasRange && remote.response.statusCode == HttpStatus.ok)
                 ? nextStart
@@ -1388,12 +1455,15 @@ class HttpStreamProxyServer {
             fallback: entry.remoteUri,
           ),
           startByte: nextStart,
-          requestedBytes:
-              expectedBytes == null || expectedBytes <= 0 ? null : expectedBytes,
+          requestedBytes: expectedBytes == null || expectedBytes <= 0
+              ? null
+              : expectedBytes,
           totalBytes: totalBytes,
           contentTypeMime: contentTypeMime ??
               _contentTypeMimeFromHeaders(remote.response.headers),
+          cancellation: cancellation,
         );
+        responseCommitted = true;
         final relay = await _relayRemoteToResponse(
           entry: entry,
           response: response,
@@ -1405,8 +1475,11 @@ class HttpStreamProxyServer {
           totalBytes: totalBytes,
           acceptRanges: acceptRanges,
           progressId: progressId,
+          cancellation: cancellation,
+          abortRemote: remote.close,
         );
         remoteBytes = relay.bytesRelayed;
+        await remote.close();
         remote = null;
       }
 
@@ -1416,9 +1489,43 @@ class HttpStreamProxyServer {
         remoteBytes: remoteBytes,
         reason: needsRemoteTail ? 'cached-prefix+tail' : 'cached-coverage',
       );
+    } on _HttpStreamProxyDownloadCancelledException {
+      if (remote != null) {
+        await remote.close();
+      }
+      return _CachedServeResult.served(
+        statusCode: response.statusCode == 0
+            ? HttpStatus.partialContent
+            : response.statusCode,
+        cachedBytes: cachedBytesToServe,
+        remoteBytes: 0,
+        reason: 'download-cancelled',
+      );
+    } on _HttpStreamProxyClientDisconnectedException {
+      if (remote != null) {
+        await remote.close();
+      }
+      return _CachedServeResult.served(
+        statusCode: response.statusCode == 0
+            ? HttpStatus.partialContent
+            : response.statusCode,
+        cachedBytes: cachedBytesToServe,
+        remoteBytes: 0,
+        reason: 'client-disconnected',
+      );
     } catch (_) {
       if (remote != null) {
         await remote.close();
+      }
+      if (responseCommitted) {
+        return _CachedServeResult.served(
+          statusCode: response.statusCode == 0
+              ? HttpStatus.partialContent
+              : response.statusCode,
+          cachedBytes: cachedBytesToServe,
+          remoteBytes: 0,
+          reason: 'response-aborted',
+        );
       }
       return const _CachedServeResult.notServed(
         reason: 'cache-serve-error',
@@ -1436,6 +1543,7 @@ class HttpStreamProxyServer {
     required HttpResponse response,
     required _CacheableRangeRequest? requestRange,
     required http.StreamedResponse remote,
+    Future<void> Function()? abortRemote,
   }) async {
     final status = remote.statusCode;
     if (requestRange == null) {
@@ -1480,6 +1588,7 @@ class HttpStreamProxyServer {
         : (totalBytes != null && totalBytes > cacheStartByte
             ? totalBytes - cacheStartByte
             : null);
+    final cancellation = _HttpStreamProxyDownloadCancellation();
     final progressId = _startDownloadProgress(
       entry: entry,
       kind: HttpStreamCacheDownloadKind.playbackFill,
@@ -1492,6 +1601,7 @@ class HttpStreamProxyServer {
           expectedBytes == null || expectedBytes <= 0 ? null : expectedBytes,
       totalBytes: totalBytes,
       contentTypeMime: _contentTypeMimeFromHeaders(remote.headers),
+      cancellation: cancellation,
     );
     try {
       final relay = await _relayRemoteToResponse(
@@ -1505,6 +1615,8 @@ class HttpStreamProxyServer {
         acceptRanges: _acceptsByteRanges(remote.headers) ||
             status == HttpStatus.partialContent,
         progressId: progressId,
+        cancellation: cancellation,
+        abortRemote: abortRemote,
       );
       return _RemoteRelayResult(
         bytesRelayed: relay.bytesRelayed,
@@ -1526,13 +1638,36 @@ class HttpStreamProxyServer {
     required int? totalBytes,
     required bool acceptRanges,
     String? progressId,
+    _HttpStreamProxyDownloadCancellation? cancellation,
+    Future<void> Function()? abortRemote,
   }) async {
     final pendingFile = await entry.createPendingRangeFile(cacheStartByte);
     final sink = pendingFile.openWrite();
     var bytesRelayed = 0;
     var remainingSkip = skipBytes < 0 ? 0 : skipBytes;
+    var clientDisconnected = false;
+    unawaited(
+      response.done.then<void>(
+        (_) {
+          clientDisconnected = true;
+        },
+        onError: (_) {
+          clientDisconnected = true;
+        },
+      ),
+    );
+    final remoteIterator = StreamIterator<List<int>>(remote.stream);
     try {
-      await for (final chunk in remote.stream) {
+      while (true) {
+        final chunk = await _nextRemoteChunk(
+          remoteIterator,
+          cancellation: cancellation,
+          abortRemote: abortRemote,
+        );
+        if (chunk == null) break;
+        if (clientDisconnected) {
+          throw const _HttpStreamProxyClientDisconnectedException();
+        }
         var data = chunk;
         if (remainingSkip > 0) {
           if (remainingSkip >= data.length) {
@@ -1544,7 +1679,11 @@ class HttpStreamProxyServer {
         }
         if (data.isEmpty) continue;
         sink.add(data);
-        response.add(data);
+        try {
+          response.add(data);
+        } catch (_) {
+          throw const _HttpStreamProxyClientDisconnectedException();
+        }
         bytesRelayed += data.length;
         _incrementDownloadProgress(progressId ?? '', data.length);
       }
@@ -1569,6 +1708,9 @@ class HttpStreamProxyServer {
       return const _RemoteCacheResult(bytesRelayed: 0, cached: false);
     } catch (_) {
       try {
+        await remoteIterator.cancel();
+      } catch (_) {}
+      try {
         await sink.flush();
       } catch (_) {}
       try {
@@ -1578,7 +1720,37 @@ class HttpStreamProxyServer {
         await pendingFile.delete();
       } catch (_) {}
       rethrow;
+    } finally {
+      try {
+        await remoteIterator.cancel();
+      } catch (_) {}
     }
+  }
+
+  Future<List<int>?> _nextRemoteChunk(
+    StreamIterator<List<int>> iterator, {
+    _HttpStreamProxyDownloadCancellation? cancellation,
+    Future<void> Function()? abortRemote,
+  }) async {
+    final cancelSignal = cancellation?.cancelled;
+    if (cancelSignal == null) {
+      return await iterator.moveNext() ? iterator.current : null;
+    }
+    final result = await Future.any<Object?>(
+      <Future<Object?>>[
+        iterator.moveNext().then<Object?>((hasNext) => hasNext),
+        cancelSignal.then<Object?>(
+          (_) => const _HttpStreamProxyRemoteReadCancelled(),
+        ),
+      ],
+    );
+    if (result is _HttpStreamProxyRemoteReadCancelled) {
+      if (abortRemote != null) {
+        await abortRemote();
+      }
+      throw const _HttpStreamProxyDownloadCancelledException();
+    }
+    return result == true ? iterator.current : null;
   }
 
   Future<_RemoteCacheResult> _cacheRemoteToEntry({
@@ -1670,7 +1842,10 @@ class HttpStreamProxyServer {
     return total;
   }
 
-  http.Client _createHttpClientForEntry(_HttpStreamProxyEntry entry) {
+  http.Client _createHttpClientForEntry(
+    _HttpStreamProxyEntry entry, {
+    bool dedicated = false,
+  }) {
     final proxy = (entry.cacheKey.proxyUrl ?? '').trim();
     final proxyUri = proxy.isEmpty ? null : Uri.tryParse(proxy);
     final hasProxy = proxyUri != null &&
@@ -1678,7 +1853,11 @@ class HttpStreamProxyServer {
         proxyUri.port > 0 &&
         proxyUri.port <= 65535;
     if (!hasProxy) {
-      return _httpClient;
+      if (!dedicated) return _httpClient;
+      return _httpClientFactory?.call() ??
+          LinHttpClientFactory.createClient(
+            LinHttpClientFactory.config.copyWith(userAgent: ''),
+          );
     }
 
     return LinHttpClientFactory.createClient(
@@ -2887,18 +3066,49 @@ class _HttpStreamProxyInFlightCacheWrite {
   }
 }
 
+class _HttpStreamProxyDownloadCancellation {
+  final Completer<void> _cancelled = Completer<void>();
+
+  bool get isCancelled => _cancelled.isCompleted;
+  Future<void> get cancelled => _cancelled.future;
+
+  void cancel() {
+    if (!_cancelled.isCompleted) {
+      _cancelled.complete();
+    }
+  }
+}
+
+class _HttpStreamProxyRemoteReadCancelled {
+  const _HttpStreamProxyRemoteReadCancelled();
+}
+
+class _HttpStreamProxyDownloadCancelledException implements Exception {
+  const _HttpStreamProxyDownloadCancelledException();
+}
+
+class _HttpStreamProxyClientDisconnectedException implements Exception {
+  const _HttpStreamProxyClientDisconnectedException();
+}
+
 class _OpenedRemote {
   _OpenedRemote({
     required this.response,
     this.ownedClient,
-  });
+    Completer<void>? abort,
+  }) : _abort = abort;
 
   final http.StreamedResponse response;
   final http.Client? ownedClient;
+  final Completer<void>? _abort;
 
   Future<void> close() async {
+    final abort = _abort;
+    if (abort != null && !abort.isCompleted) {
+      abort.complete();
+    }
     try {
-      await response.stream.drain<void>();
+      await response.stream.listen(null).cancel();
     } catch (_) {}
     try {
       ownedClient?.close();

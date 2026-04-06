@@ -106,6 +106,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   bool _nextEpisodePreloadTriggered = false;
   ResolvedPlaybackSource? _resolvedPlaybackSource;
   String? _preloadHttpProxyUrl;
+  String? _playbackCacheFingerprint;
   String _preloadOwnerKey = '';
   bool _allowRoutePop = false;
   bool _exitInProgress = false;
@@ -322,11 +323,23 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _serverProgressSync?.stop();
     PlaybackPreloadCoordinator.cancelOwner(_preloadOwnerKey);
     _preloadOwnerKey = '';
+    _cancelActivePlaybackCacheFills();
     // ignore: unawaited_futures
     _reportPlaybackStoppedBestEffort();
     // ignore: unawaited_futures
     _controller?.dispose();
     _controller = null;
+  }
+
+  void _cancelActivePlaybackCacheFills() {
+    final fingerprint = _playbackCacheFingerprint;
+    final cancelled = LocalHttpStreamProxy.cancelActivePlaybackFills(
+      cacheFingerprint: fingerprint,
+    );
+    if (cancelled == 0 && (fingerprint ?? '').trim().isNotEmpty) {
+      LocalHttpStreamProxy.cancelActivePlaybackFills();
+    }
+    _playbackCacheFingerprint = null;
   }
 
   Future<void> _requestExitThenPop() async {
@@ -367,6 +380,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       PlaybackPreloadCoordinator.cancelOwner(_preloadOwnerKey);
       _preloadOwnerKey = '';
     }
+    _cancelActivePlaybackCacheFills();
     unawaited(_reportPlaybackStoppedBestEffort());
 
     final controller = _controller;
@@ -394,6 +408,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     WidgetsBinding.instance.removeObserver(this);
     PlaybackPreloadCoordinator.cancelOwner(_preloadOwnerKey);
     _preloadOwnerKey = '';
+    _cancelActivePlaybackCacheFills();
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
     _uiTimer?.cancel();
@@ -4273,6 +4288,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _skipIntroPromptVisible = false;
     _skipIntroHandled = false;
     _nextEpisodePreloadTriggered = false;
+    _cancelActivePlaybackCacheFills();
     _resolvedPlaybackSource = null;
     _preloadHttpProxyUrl = null;
     _controlsVisible = true;
@@ -4593,6 +4609,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       candidate,
       cacheKey: cacheKey,
     );
+    if (proxied != null) {
+      _playbackCacheFingerprint = cacheKey?.fingerprint;
+    }
     return proxied ?? candidate;
   }
 
@@ -5495,8 +5514,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
               _tvOkLongPressTimer = Timer(_tvOkLongPressDelay, () {
                 if (!mounted) return;
                 final controller = _controller;
-                if (controller == null || !controller.value.isInitialized)
+                if (controller == null || !controller.value.isInitialized) {
                   return;
+                }
 
                 final base =
                     _tvOkLongPressBaseRate ?? controller.value.playbackSpeed;

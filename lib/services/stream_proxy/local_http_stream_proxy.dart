@@ -41,6 +41,13 @@ class LocalHttpStreamProxy {
     return _wrapHttpSource(candidate, cacheKey: cacheKey);
   }
 
+  static int cancelActivePlaybackFills({String? cacheFingerprint}) {
+    if (kIsWeb) return 0;
+    return HttpStreamProxyServer.instance.cancelActivePlaybackDownloads(
+      cacheFingerprint: cacheFingerprint,
+    );
+  }
+
   static Future<PlayableSource?> _wrapHlsSource(
     PlayableSource candidate, {
     HttpStreamCacheKey? cacheKey,

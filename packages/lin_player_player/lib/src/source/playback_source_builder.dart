@@ -32,7 +32,8 @@ class PlaybackSourceBuilder {
       preferredMediaSourceIndex: request.preferredMediaSourceIndex,
       preferred: request.preferredVideoVersion,
     );
-    final selectedMediaSource = _findMediaSource(sources, selectedMediaSourceId);
+    final selectedMediaSource =
+        _findMediaSource(sources, selectedMediaSourceId);
     final baseSource = _buildInitialResolvedSource(
       request: request,
       info: info,
@@ -131,7 +132,8 @@ class PlaybackSourceBuilder {
       return applyQueryPrefs(resolved);
     }
 
-    final directStreamUrl = (mediaSource?['DirectStreamUrl'] as String?)?.trim();
+    final directStreamUrl =
+        (mediaSource?['DirectStreamUrl'] as String?)?.trim();
     final transcodingUrl = (mediaSource?['TranscodingUrl'] as String?)?.trim();
 
     String url;
@@ -142,8 +144,9 @@ class PlaybackSourceBuilder {
         transcodingUrl.isNotEmpty) {
       url = resolve(transcodingUrl);
     } else {
-      final pathUri =
-          (sourcePath == null || sourcePath.isEmpty) ? null : Uri.tryParse(sourcePath);
+      final pathUri = (sourcePath == null || sourcePath.isEmpty)
+          ? null
+          : Uri.tryParse(sourcePath);
       if (pathUri != null && pathUri.scheme.isNotEmpty) {
         if (pathUri.host.isNotEmpty &&
             (pathUri.scheme == 'http' || pathUri.scheme == 'https')) {
@@ -172,8 +175,9 @@ class PlaybackSourceBuilder {
         resolvedUri.host.isNotEmpty &&
         baseUri.host.isNotEmpty &&
         !shouldApplyServerParams(resolvedUri);
-    final headers =
-        isExternal ? const <String, String>{} : request.adapter.buildStreamHeaders(auth);
+    final headers = isExternal
+        ? const <String, String>{}
+        : request.adapter.buildStreamHeaders(auth);
     final mediaSourceId =
         ((mediaSource?['Id']?.toString() ?? info.mediaSourceId).trim());
     return ResolvedPlaybackSource(
@@ -292,7 +296,8 @@ class PlaybackSourceBuilder {
       playSessionId: source.playSessionId,
       mediaSourceId: source.mediaSourceId,
       url: finalUrl.isEmpty ? source.url : finalUrl,
-      httpHeaders: Map<String, String>.unmodifiable(result.effectiveRequestHeaders),
+      httpHeaders:
+          Map<String, String>.unmodifiable(result.effectiveRequestHeaders),
       isExternal: source.isExternal,
       mediaTypeHint: mediaHint,
       fromStrm: source.fromStrm,
@@ -322,7 +327,8 @@ class PlaybackSourceBuilder {
   }) {
     final selected = (selectedMediaSourceId ?? '').trim();
     if (selected.isNotEmpty &&
-        sources.any((source) => (source['Id']?.toString() ?? '').trim() == selected)) {
+        sources.any(
+            (source) => (source['Id']?.toString() ?? '').trim() == selected)) {
       return selected;
     }
     final preferredIndex = preferredMediaSourceIndex;
@@ -384,8 +390,7 @@ class PlaybackSourceBuilder {
         final secondaryValue = secondary(mediaSource);
         final better = higherIsBetter
             ? (primaryValue > bestPrimary ||
-                (primaryValue == bestPrimary &&
-                    secondaryValue > bestSecondary))
+                (primaryValue == bestPrimary && secondaryValue > bestSecondary))
             : (primaryValue < bestPrimary ||
                 (primaryValue == bestPrimary &&
                     secondaryValue < bestSecondary));
@@ -438,9 +443,9 @@ class PlaybackSourceBuilder {
         );
         break;
       case VideoVersionPreference.defaultVersion:
-        chosen =
-            (List<Map<String, dynamic>>.from(sources)..sort(_compareByQuality))
-                .first;
+        chosen = (List<Map<String, dynamic>>.from(sources)
+              ..sort(_compareByQuality))
+            .first;
         break;
     }
 
@@ -480,21 +485,23 @@ class PlaybackSourceBuilder {
 
   static int? _estimateBitrateBitsPerSecond(Map<String, dynamic>? mediaSource) {
     final bitrate = asInt(mediaSource?['Bitrate']);
-    if (bitrate != null && bitrate > 0) return bitrate;
-
     final sizeBytes = asInt(mediaSource?['Size']);
     final runTimeTicks = asInt(mediaSource?['RunTimeTicks']);
     if (sizeBytes == null ||
         sizeBytes <= 0 ||
         runTimeTicks == null ||
         runTimeTicks <= 0) {
-      return bitrate;
+      return bitrate != null && bitrate > 0 ? bitrate : null;
     }
 
     final seconds = runTimeTicks / 10000000.0;
-    if (seconds <= 0.5) return bitrate;
+    if (seconds <= 0.5) return bitrate != null && bitrate > 0 ? bitrate : null;
     final estimated = ((sizeBytes * 8) / seconds).round();
-    return estimated > 0 ? estimated : bitrate;
+    return estimated > 0
+        ? estimated
+        : bitrate != null && bitrate > 0
+            ? bitrate
+            : null;
   }
 
   static ResolvedPlaybackMediaType _mergeMediaTypeHint(
@@ -625,10 +632,9 @@ class PlaybackSourceBuilder {
   }
 
   static bool _sameOrigin(Uri a, Uri b) {
-    int portOf(Uri uri) => uri.hasPort ? uri.port : (uri.scheme == 'https' ? 443 : 80);
-    return a.scheme == b.scheme &&
-        a.host == b.host &&
-        portOf(a) == portOf(b);
+    int portOf(Uri uri) =>
+        uri.hasPort ? uri.port : (uri.scheme == 'https' ? 443 : 80);
+    return a.scheme == b.scheme && a.host == b.host && portOf(a) == portOf(b);
   }
 
   static void _removeHeader(Map<String, String> headers, String name) {
