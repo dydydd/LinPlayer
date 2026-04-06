@@ -3,6 +3,7 @@ import 'package:lin_player_server_api/services/http_stream_proxy.dart';
 
 import '../app_diagnostics_log.dart';
 import '../stream_resolver/stream_models.dart';
+import 'local_hls_stream_proxy.dart';
 
 class LocalHttpStreamProxy {
   const LocalHttpStreamProxy._();
@@ -29,18 +30,50 @@ class LocalHttpStreamProxy {
     return _wrapHttpSource(candidate);
   }
 
-  static Future<PlayableSource?> wrapPlaybackSource(
-    PlayableSource candidate,
-    {HttpStreamCacheKey? cacheKey}
-  ) async {
+  static Future<PlayableSource?> wrapPlaybackSource(PlayableSource candidate,
+      {HttpStreamCacheKey? cacheKey}) async {
     if (kIsWeb) return null;
+    if (candidate.mediaTypeHint == StreamMediaType.hls) {
+      return _wrapHlsSource(candidate, cacheKey: cacheKey);
+    }
     if (!_supportsCacheProxyMode(candidate)) return null;
     if (!_isSupportedHttpSource(candidate)) return null;
     return _wrapHttpSource(candidate, cacheKey: cacheKey);
   }
 
-  static Future<PlayableSource?> _wrapHttpSource(
-      PlayableSource candidate,
+  static Future<PlayableSource?> _wrapHlsSource(
+    PlayableSource candidate, {
+    HttpStreamCacheKey? cacheKey,
+  }) async {
+    if (!_isSupportedHttpSource(candidate)) return null;
+
+    final uri = Uri.tryParse(candidate.url.trim());
+    if (uri == null) return null;
+
+    try {
+      final proxyUri = await LocalHlsStreamProxy.instance.registerPlaylist(
+        remoteUri: uri,
+        httpHeaders: candidate.httpHeaders,
+        rootCacheKey: cacheKey,
+        preferredVariantBitrate: candidate.bitrateHint,
+      );
+      return PlayableSource(
+        url: proxyUri.toString(),
+        httpHeaders: const <String, String>{},
+        mediaTypeHint: candidate.mediaTypeHint,
+        fromStrm: candidate.fromStrm,
+        redirectChain: candidate.redirectChain,
+        contentTypeHint: candidate.contentTypeHint,
+        supportsByteRange: candidate.supportsByteRange,
+        httpStatusHint: candidate.httpStatusHint,
+        bitrateHint: candidate.bitrateHint,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<PlayableSource?> _wrapHttpSource(PlayableSource candidate,
       {HttpStreamCacheKey? cacheKey}) async {
     if (!_isSupportedHttpSource(candidate)) return null;
 
@@ -74,6 +107,7 @@ class LocalHttpStreamProxy {
         contentTypeHint: candidate.contentTypeHint,
         supportsByteRange: candidate.supportsByteRange,
         httpStatusHint: candidate.httpStatusHint,
+        bitrateHint: candidate.bitrateHint,
       );
     } catch (_) {
       return null;
@@ -99,11 +133,17 @@ class LocalHttpStreamProxy {
 
     final host = uri.host.trim().toLowerCase();
     if (host.isEmpty) return false;
-    if (host == 'localhost' || host == '127.0.0.1' || host == '::1') {
+    if ((host == 'localhost' || host == '127.0.0.1' || host == '::1') &&
+        _looksLikeLocalProxyUri(uri)) {
       return false;
     }
 
     return true;
+  }
+
+  static bool _looksLikeLocalProxyUri(Uri uri) {
+    final firstSegment = uri.pathSegments.isEmpty ? '' : uri.pathSegments.first;
+    return firstSegment == 'stream' || firstSegment == 'hls';
   }
 
   static bool _supportsCacheProxyMode(PlayableSource candidate) {

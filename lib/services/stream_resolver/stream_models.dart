@@ -41,6 +41,7 @@ class PlayableSource {
     this.contentTypeHint,
     this.supportsByteRange,
     this.httpStatusHint,
+    this.bitrateHint,
   })  : url = url.trim(),
         httpHeaders = Map.unmodifiable(
           (httpHeaders ?? const <String, String>{})
@@ -68,6 +69,9 @@ class PlayableSource {
 
   /// Best-effort HTTP status hint from resolver probes.
   final int? httpStatusHint;
+
+  /// Best-effort bitrate hint used by HLS variant selection.
+  final int? bitrateHint;
 }
 
 class StreamResolveRequest {

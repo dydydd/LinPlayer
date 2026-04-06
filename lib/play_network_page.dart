@@ -2564,6 +2564,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       contentTypeHint: resolvedSource.contentTypeHint,
       supportsByteRange: resolvedSource.supportsByteRange,
       httpStatusHint: resolvedSource.httpStatusHint,
+      bitrateHint: resolvedSource.bitrate,
     );
     final proxied = await LocalHttpStreamProxy.wrapPlaybackSource(
       candidate,

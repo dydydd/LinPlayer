@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lin_player/services/stream_proxy/local_hls_stream_proxy.dart';
 import 'package:lin_player/services/stream_proxy/local_http_stream_proxy.dart';
 import 'package:lin_player/services/stream_resolver/stream_models.dart';
 import 'package:lin_player_server_api/services/http_stream_proxy.dart';
@@ -9,6 +11,7 @@ import 'package:lin_player_server_api/services/http_stream_proxy.dart';
 void main() {
   setUp(() async {
     await HttpStreamProxyServer.instance.debugResetForTest();
+    await LocalHlsStreamProxy.instance.debugResetForTest();
   });
 
   test('HttpStreamProxyServer forwards Range and browser UA', () async {
@@ -1080,7 +1083,7 @@ void main() {
     );
   });
 
-  test('LocalHttpStreamProxy only wraps direct-file playback sources',
+  test('LocalHttpStreamProxy wraps direct-file and HLS playback sources',
       () async {
     final fileSource = PlayableSource(
       url: 'https://example.com/video.mp4',
@@ -1099,6 +1102,163 @@ void main() {
 
     expect(proxiedFile, isNotNull);
     expect(Uri.parse(proxiedFile!.url).host, '127.0.0.1');
-    expect(proxiedHls, isNull);
+    expect(proxiedHls, isNotNull);
+    expect(Uri.parse(proxiedHls!.url).host, '127.0.0.1');
+  });
+
+  test(
+      'LocalHttpStreamProxy rewrites HLS playlist entries through local proxies',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await server.close(force: true);
+    });
+
+    server.listen((HttpRequest request) async {
+      switch (request.uri.path) {
+        case '/master.m3u8':
+          request.response.statusCode = HttpStatus.ok;
+          request.response.headers.contentType =
+              ContentType('application', 'vnd.apple.mpegurl');
+          request.response.write(
+            '#EXTM3U\n'
+            '#EXT-X-STREAM-INF:BANDWIDTH=2000000\n'
+            'media.m3u8\n',
+          );
+          break;
+        case '/media.m3u8':
+          request.response.statusCode = HttpStatus.ok;
+          request.response.headers.contentType =
+              ContentType('application', 'vnd.apple.mpegurl');
+          request.response.write(
+            '#EXTM3U\n'
+            '#EXT-X-MAP:URI="init.mp4"\n'
+            '#EXTINF:2.0,\n'
+            'seg1.ts\n',
+          );
+          break;
+        case '/init.mp4':
+          request.response.statusCode = HttpStatus.ok;
+          request.response.headers.contentType = ContentType('video', 'mp4');
+          request.response.add(const <int>[0, 1, 2, 3]);
+          break;
+        case '/seg1.ts':
+          request.response.statusCode = HttpStatus.ok;
+          request.response.headers.contentType = ContentType('video', 'mp2t');
+          request.response.add(const <int>[4, 5, 6, 7]);
+          break;
+        default:
+          request.response.statusCode = HttpStatus.notFound;
+      }
+      await request.response.close();
+    });
+
+    final source = PlayableSource(
+      url: 'http://127.0.0.1:${server.port}/master.m3u8',
+      mediaTypeHint: StreamMediaType.hls,
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+    );
+    final proxied = await LocalHttpStreamProxy.wrapPlaybackSource(source);
+    expect(proxied, isNotNull);
+
+    final client = HttpClient();
+    addTearDown(() {
+      client.close(force: true);
+    });
+
+    final playlistResponse =
+        await (await client.getUrl(Uri.parse(proxied!.url))).close();
+    final playlistBody = utf8.decode(
+      await playlistResponse.fold<List<int>>(
+        <int>[],
+        (acc, chunk) => <int>[...acc, ...chunk],
+      ),
+      allowMalformed: true,
+    );
+    final nestedPlaylistUrl = RegExp(r'http://127\.0\.0\.1:\d+/hls/[^\s]+')
+        .firstMatch(playlistBody)
+        ?.group(0);
+
+    expect(playlistResponse.statusCode, HttpStatus.ok);
+    expect(playlistBody, contains('http://127.0.0.1:'));
+    expect(playlistBody, contains('/hls/'));
+    expect(nestedPlaylistUrl, isNotNull);
+
+    final nestedResponse =
+        await (await client.getUrl(Uri.parse(nestedPlaylistUrl!))).close();
+    final nestedBody = utf8.decode(
+      await nestedResponse.fold<List<int>>(
+        <int>[],
+        (acc, chunk) => <int>[...acc, ...chunk],
+      ),
+      allowMalformed: true,
+    );
+
+    expect(nestedResponse.statusCode, HttpStatus.ok);
+    expect(nestedBody, contains('/stream/'));
+  });
+
+  test(
+      'LocalHttpStreamProxy pins master playlist to the closest bitrate variant',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await server.close(force: true);
+    });
+
+    server.listen((HttpRequest request) async {
+      switch (request.uri.path) {
+        case '/master.m3u8':
+          request.response.statusCode = HttpStatus.ok;
+          request.response.headers.contentType =
+              ContentType('application', 'vnd.apple.mpegurl');
+          request.response.write(
+            '#EXTM3U\n'
+            '#EXT-X-STREAM-INF:BANDWIDTH=1000000\n'
+            'low.m3u8\n'
+            '#EXT-X-STREAM-INF:BANDWIDTH=4000000\n'
+            'high.m3u8\n',
+          );
+          break;
+        case '/low.m3u8':
+        case '/high.m3u8':
+          request.response.statusCode = HttpStatus.ok;
+          request.response.headers.contentType =
+              ContentType('application', 'vnd.apple.mpegurl');
+          request.response.write('#EXTM3U\n');
+          break;
+        default:
+          request.response.statusCode = HttpStatus.notFound;
+      }
+      await request.response.close();
+    });
+
+    final source = PlayableSource(
+      url: 'http://127.0.0.1:${server.port}/master.m3u8',
+      mediaTypeHint: StreamMediaType.hls,
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      bitrateHint: 1200000,
+    );
+    final proxied = await LocalHttpStreamProxy.wrapPlaybackSource(source);
+    expect(proxied, isNotNull);
+
+    final client = HttpClient();
+    addTearDown(() {
+      client.close(force: true);
+    });
+
+    final playlistResponse =
+        await (await client.getUrl(Uri.parse(proxied!.url))).close();
+    final playlistBody = utf8.decode(
+      await playlistResponse.fold<List<int>>(
+        <int>[],
+        (acc, chunk) => <int>[...acc, ...chunk],
+      ),
+      allowMalformed: true,
+    );
+
+    expect(playlistResponse.statusCode, HttpStatus.ok);
+    expect(RegExp(r'/hls/').allMatches(playlistBody).length, 1);
+    expect(playlistBody, isNot(contains('high.m3u8')));
   });
 }

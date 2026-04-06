@@ -146,7 +146,7 @@
 
 说明：本轮先采用“内聚在磁盘缓存代理里的薄下载入口”，而不是单独拆一个重型下载器服务。
 
-- [ ] 新建磁盘缓存下载器服务
+- [x] 新建磁盘缓存下载器服务
 - [x] 支持 HTTP Range 下载
 - [x] 支持断点续写
 - [x] 支持记录重定向后的最终 URL
@@ -215,10 +215,10 @@
 目标：把 direct file 方案跑通后，再处理 HLS 的真实难点。
 
 - [x] 先明确第一阶段是否只保证 direct file / redirect file / body-link file
-- [ ] 为 HLS 单独设计缓存策略
-- [ ] 明确是缓存最终 rendition，还是缓存 master/segment 层
+- [x] 为 HLS 单独设计缓存策略
+- [x] 明确是缓存最终 rendition，还是缓存 master/segment 层
 - [ ] 评估播放器实际所选 rendition 的可观测性
-- [ ] 评估 HLS 是否需要单独的本地清单重写方案
+- [x] 评估 HLS 是否需要单独的本地清单重写方案
 
 验收标准：
 

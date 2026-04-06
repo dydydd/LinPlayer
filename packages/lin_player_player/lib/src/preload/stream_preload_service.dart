@@ -12,6 +12,7 @@ import '../source/playback_cache_key.dart';
 import '../source/playback_source_builder.dart';
 import '../source/resolved_playback_source.dart';
 import 'preload_request.dart';
+import 'stream_cache_download_service.dart';
 
 enum StreamPreloadStatus {
   skippedDisabled,
@@ -126,11 +127,17 @@ class StreamPreloadService {
     return null;
   }
 
-  HttpStreamCacheKey? _cacheKeyForRequest(PreloadRequest request) {
-    return buildResolvedPlaybackCacheKey(
-      request.resolvedSource,
+  StreamCacheDownloadRequest _cacheDownloadRequestForRequest(
+    PreloadRequest request,
+  ) {
+    return StreamCacheDownloadRequest(
+      resolvedSource: request.resolvedSource,
       proxyUrl: _effectiveProxyUrlFor(request),
     );
+  }
+
+  HttpStreamCacheKey? _cacheKeyForRequest(PreloadRequest request) {
+    return _cacheDownloadRequestForRequest(request).cacheKey;
   }
 
   String _scopeKeyFor(PreloadRequest request) {
@@ -233,9 +240,8 @@ class StreamPreloadService {
         .join(', ');
     final activeCircuits =
         _circuitStates.values.where((state) => state.isOpen(now)).length;
-    final activeCacheDownloads = HttpStreamProxyServer.instance
-        .currentDownloadProgressSnapshots()
-        .length;
+    final activeCacheDownloads =
+        StreamCacheDownloadService.instance.currentProgressSnapshots().length;
 
     final latest = _recentEntries.isEmpty ? null : _recentEntries.last;
     final buffer = StringBuffer()
@@ -452,15 +458,9 @@ class StreamPreloadService {
     final run = () async {
       _PreloadFailureInfo? lastFailure;
       final source = normalizedRequest.resolvedSource;
-      final sourceUri = Uri.tryParse(source.url);
-      final cacheKey = _cacheKeyForRequest(normalizedRequest);
-      if (sourceUri != null) {
-        HttpStreamProxyServer.instance.beginStreamWarmup(
-          remoteUri: sourceUri,
-          httpHeaders: source.httpHeaders,
-          cacheKey: cacheKey,
-        );
-      }
+      final cacheDownloadRequest =
+          _cacheDownloadRequestForRequest(normalizedRequest);
+      StreamCacheDownloadService.instance.beginWarmup(cacheDownloadRequest);
       try {
         for (var attempt = 0; attempt < maxAttempts; attempt++) {
           final headers = _buildRequestHeaders(source.httpHeaders);
@@ -480,7 +480,7 @@ class StreamPreloadService {
             bitrateBitsPerSecond: source.bitrate,
             sizeBytes: source.sizeBytes,
             httpProxyUrl: normalizedRequest.httpProxyUrl,
-            cacheKey: cacheKey,
+            cacheDownloadRequest: cacheDownloadRequest,
           );
           if (outcome.success) {
             _doneKeys.add(key);
@@ -514,24 +514,14 @@ class StreamPreloadService {
               : StreamPreloadStatus.failed,
           error: failure,
         );
-        if (sourceUri != null) {
-          await HttpStreamProxyServer.instance.markStreamFailure(
-            remoteUri: sourceUri,
-            httpHeaders: source.httpHeaders,
-            cacheKey: cacheKey,
-            error: failure,
-          );
-        }
+        await StreamCacheDownloadService.instance.markFailure(
+          cacheDownloadRequest,
+          error: failure,
+        );
         _recordResult(request: normalizedRequest, result: result);
         return result;
       } finally {
-        if (sourceUri != null) {
-          HttpStreamProxyServer.instance.endStreamWarmup(
-            remoteUri: sourceUri,
-            httpHeaders: source.httpHeaders,
-            cacheKey: cacheKey,
-          );
-        }
+        StreamCacheDownloadService.instance.endWarmup(cacheDownloadRequest);
       }
     }();
 
@@ -615,7 +605,7 @@ class StreamPreloadService {
     required int? bitrateBitsPerSecond,
     required int? sizeBytes,
     String? httpProxyUrl,
-    HttpStreamCacheKey? cacheKey,
+    required StreamCacheDownloadRequest cacheDownloadRequest,
   }) async {
     if (kIsWeb) {
       return _PreloadAttemptResult.failure(
@@ -653,7 +643,7 @@ class StreamPreloadService {
         preloadDuration: preloadDuration,
         bitrateBitsPerSecond: bitrateBitsPerSecond,
         sizeBytes: sizeBytes,
-        cacheKey: cacheKey,
+        cacheDownloadRequest: cacheDownloadRequest,
       );
     } catch (error) {
       return _PreloadAttemptResult.failure(
@@ -703,18 +693,17 @@ class StreamPreloadService {
     required Duration preloadDuration,
     required int? bitrateBitsPerSecond,
     required int? sizeBytes,
-    HttpStreamCacheKey? cacheKey,
+    required StreamCacheDownloadRequest cacheDownloadRequest,
   }) async {
     if (mediaTypeHint == ResolvedPlaybackMediaType.file) {
       return _prefetchDirectFile(
         uri: uri,
-        cacheHeaders: cacheHeaders,
         bytesToFetch: bytesToFetch,
         startPosition: startPosition,
         bitrateBitsPerSecond: bitrateBitsPerSecond,
         sizeBytes: sizeBytes,
-        cacheKey: cacheKey,
         supportsByteRange: supportsByteRange,
+        cacheDownloadRequest: cacheDownloadRequest,
       );
     }
 
@@ -743,11 +732,9 @@ class StreamPreloadService {
     if (playlistText == null) {
       if (!useOffset) {
         await _seedLoopbackProxyCache(
-          uri: uri,
-          headers: cacheHeaders,
           startByte: 0,
           result: first,
-          cacheKey: cacheKey,
+          cacheDownloadRequest: cacheDownloadRequest,
         );
         return first.bytesRead > 0
             ? const _PreloadAttemptResult.success()
@@ -768,11 +755,9 @@ class StreamPreloadService {
       );
       if (startByte <= 0) {
         await _seedLoopbackProxyCache(
-          uri: uri,
-          headers: cacheHeaders,
           startByte: 0,
           result: first,
-          cacheKey: cacheKey,
+          cacheDownloadRequest: cacheDownloadRequest,
         );
         return first.bytesRead > 0
             ? const _PreloadAttemptResult.success()
@@ -803,18 +788,14 @@ class StreamPreloadService {
         );
       }
       await _seedLoopbackProxyCache(
-        uri: uri,
-        headers: cacheHeaders,
         startByte: 0,
         result: first,
-        cacheKey: cacheKey,
+        cacheDownloadRequest: cacheDownloadRequest,
       );
       await _seedLoopbackProxyCache(
-        uri: uri,
-        headers: cacheHeaders,
         startByte: startByte,
         result: second,
-        cacheKey: cacheKey,
+        cacheDownloadRequest: cacheDownloadRequest,
       );
       return const _PreloadAttemptResult.success();
     }
@@ -827,27 +808,24 @@ class StreamPreloadService {
       headers: headers,
       startPosition: startPosition,
       preloadDuration: preloadDuration,
+      cacheDownloadRequest: cacheDownloadRequest,
     );
   }
 
   Future<_PreloadAttemptResult> _prefetchDirectFile({
     required Uri uri,
-    required Map<String, String> cacheHeaders,
     required int bytesToFetch,
     required Duration startPosition,
     required int? bitrateBitsPerSecond,
     required int? sizeBytes,
     required bool? supportsByteRange,
-    HttpStreamCacheKey? cacheKey,
+    required StreamCacheDownloadRequest cacheDownloadRequest,
   }) async {
     final prefixBytes =
         startPosition > Duration.zero ? 512 * 1024 : bytesToFetch;
     try {
-      await HttpStreamProxyServer.instance.warmRangeToCache(
-        remoteUri: uri,
-        httpHeaders: cacheHeaders,
-        fileName: _suggestProxyFileName(uri),
-        cacheKey: cacheKey,
+      await StreamCacheDownloadService.instance.warmRangeToCache(
+        request: cacheDownloadRequest.withRemoteUri(uri),
         startByte: 0,
         lengthBytes: prefixBytes,
       );
@@ -872,11 +850,8 @@ class StreamPreloadService {
     }
 
     try {
-      await HttpStreamProxyServer.instance.warmRangeToCache(
-        remoteUri: uri,
-        httpHeaders: cacheHeaders,
-        fileName: _suggestProxyFileName(uri),
-        cacheKey: cacheKey,
+      await StreamCacheDownloadService.instance.warmRangeToCache(
+        request: cacheDownloadRequest.withRemoteUri(uri),
         startByte: startByte,
         lengthBytes: bytesToFetch,
       );
@@ -926,11 +901,9 @@ class StreamPreloadService {
   }
 
   Future<void> _seedLoopbackProxyCache({
-    required Uri uri,
-    required Map<String, String> headers,
     required int startByte,
     required StreamPreloadGetResult result,
-    HttpStreamCacheKey? cacheKey,
+    required StreamCacheDownloadRequest cacheDownloadRequest,
   }) async {
     if (kIsWeb) return;
     final seedUri = result.effectiveUri;
@@ -938,14 +911,11 @@ class StreamPreloadService {
     if (result.capturedBytes.isEmpty) return;
 
     try {
-      await HttpStreamProxyServer.instance.seedStreamCache(
+      await StreamCacheDownloadService.instance.seedCache(
         // Keep the cache key bound to the original playback semantics, but let
         // the proxy reuse the redirect-final transport URL for later cache
         // fills so playback does not need to repeat the redirect hop.
-        remoteUri: seedUri,
-        httpHeaders: headers,
-        fileName: _suggestProxyFileName(seedUri),
-        cacheKey: cacheKey,
+        request: cacheDownloadRequest.withRemoteUri(seedUri),
         startByte: startByte,
         bytes: result.capturedBytes,
         contentTypeMime: result.contentTypeMime,
@@ -957,14 +927,6 @@ class StreamPreloadService {
     }
   }
 
-  String _suggestProxyFileName(Uri uri) {
-    if (uri.pathSegments.isNotEmpty) {
-      final last = uri.pathSegments.last.trim();
-      if (last.isNotEmpty) return last;
-    }
-    return 'stream.bin';
-  }
-
   Future<_PreloadAttemptResult> _prefetchHls({
     required HttpClient client,
     required Uri playlistUri,
@@ -972,8 +934,14 @@ class StreamPreloadService {
     required Map<String, String> headers,
     required Duration startPosition,
     required Duration preloadDuration,
+    required StreamCacheDownloadRequest cacheDownloadRequest,
   }) async {
-    var parsed = _parseHls(playlistText, base: playlistUri);
+    var parsed = _parseHls(
+      playlistText,
+      base: playlistUri,
+      preferredBitrateBitsPerSecond:
+          cacheDownloadRequest.resolvedSource.bitrate,
+    );
     if (parsed == null) {
       return _PreloadAttemptResult.failure(
         _PreloadFailureInfo(
@@ -1010,7 +978,12 @@ class StreamPreloadService {
           ),
         );
       }
-      parsed = _parseHls(text, base: variant.effectiveUri);
+      parsed = _parseHls(
+        text,
+        base: variant.effectiveUri,
+        preferredBitrateBitsPerSecond:
+            cacheDownloadRequest.resolvedSource.bitrate,
+      );
       if (parsed == null) {
         return _PreloadAttemptResult.failure(
           _PreloadFailureInfo(
@@ -1029,7 +1002,7 @@ class StreamPreloadService {
         headers: headers,
         rangeStartBytes: null,
         rangeBytes: null,
-        captureLimitBytes: 0,
+        captureLimitBytes: _maxLoopbackSeedBytes,
       );
       if (!init.ok) {
         return _failureFromGetResult(
@@ -1038,6 +1011,12 @@ class StreamPreloadService {
           message: 'init-segment-failed',
         );
       }
+      await _seedHlsAssetCache(
+        assetUri: parsed.initSegmentUri!,
+        cacheHeaders: cacheDownloadRequest.resolvedSource.httpHeaders,
+        result: init,
+        cacheDownloadRequest: cacheDownloadRequest,
+      );
     }
 
     var remainingMs = preloadDuration.inMilliseconds;
@@ -1071,7 +1050,7 @@ class StreamPreloadService {
         headers: headers,
         rangeStartBytes: null,
         rangeBytes: null,
-        captureLimitBytes: 0,
+        captureLimitBytes: _maxLoopbackSeedBytes,
       );
       if (!r.ok) {
         return _failureFromGetResult(
@@ -1080,6 +1059,12 @@ class StreamPreloadService {
           message: 'segment-fetch-failed',
         );
       }
+      await _seedHlsAssetCache(
+        assetUri: seg.uri,
+        cacheHeaders: cacheDownloadRequest.resolvedSource.httpHeaders,
+        result: r,
+        cacheDownloadRequest: cacheDownloadRequest,
+      );
       fetchedAny = true;
       segmentCount++;
 
@@ -1098,6 +1083,48 @@ class StreamPreloadService {
       );
     }
     return const _PreloadAttemptResult.success();
+  }
+
+  Future<void> _seedHlsAssetCache({
+    required Uri assetUri,
+    required Map<String, String> cacheHeaders,
+    required StreamPreloadGetResult result,
+    required StreamCacheDownloadRequest cacheDownloadRequest,
+  }) async {
+    if (kIsWeb) return;
+    if (result.capturedBytes.isEmpty) return;
+
+    final rootCacheKey = cacheDownloadRequest.cacheKey;
+    final assetCacheKey = buildNetworkPlaybackCacheKey(
+      remoteUri: assetUri,
+      httpHeaders: cacheHeaders,
+      mediaSourceId: rootCacheKey?.mediaSourceId,
+      proxyUrl: rootCacheKey?.proxyUrl,
+    );
+
+    try {
+      await HttpStreamProxyServer.instance.seedStreamCache(
+        remoteUri: result.effectiveUri,
+        httpHeaders: cacheHeaders,
+        fileName: _suggestProxyFileName(result.effectiveUri),
+        cacheKey: assetCacheKey,
+        startByte: 0,
+        bytes: result.capturedBytes,
+        contentTypeMime: result.contentTypeMime,
+        totalBytes: result.totalBytes,
+        acceptRanges: result.acceptsByteRanges,
+      );
+    } catch (_) {
+      // Best-effort warmup only.
+    }
+  }
+
+  String _suggestProxyFileName(Uri uri) {
+    if (uri.pathSegments.isNotEmpty) {
+      final last = uri.pathSegments.last.trim();
+      if (last.isNotEmpty) return last;
+    }
+    return 'stream.bin';
   }
 
   String? _asHlsPlaylistText(StreamPreloadGetResult result) {
@@ -1140,7 +1167,7 @@ class StreamPreloadService {
         (response.headers.value(HttpHeaders.acceptRangesHeader) ?? '')
             .toLowerCase()
             .contains('bytes');
-    final totalBytes = _inferTotalBytes(
+    var totalBytes = _inferTotalBytes(
       response: response,
       rangeStartBytes: rangeStartBytes,
     );
@@ -1167,6 +1194,12 @@ class StreamPreloadService {
       }
     } catch (_) {
       // best-effort
+    }
+
+    if (totalBytes == null &&
+        response.statusCode == HttpStatus.ok &&
+        bytesRead > 0) {
+      totalBytes = bytesRead;
     }
 
     var effective = uri;
@@ -1444,6 +1477,7 @@ class _HlsParseResult {
 _HlsParseResult? _parseHls(
   String text, {
   required Uri base,
+  int? preferredBitrateBitsPerSecond,
   _HlsVariantSelectionStrategy variantSelectionStrategy =
       _kHlsVariantSelectionStrategy,
 }) {
@@ -1510,6 +1544,7 @@ _HlsParseResult? _parseHls(
 
   final variantUri = _pickVariantUri(
     variants,
+    preferredBitrateBitsPerSecond: preferredBitrateBitsPerSecond,
     strategy: variantSelectionStrategy,
   );
 
@@ -1522,10 +1557,27 @@ _HlsParseResult? _parseHls(
 
 Uri? _pickVariantUri(
   List<({Uri uri, int bandwidth})> variants, {
+  int? preferredBitrateBitsPerSecond,
   required _HlsVariantSelectionStrategy strategy,
 }) {
   if (variants.isEmpty) return null;
   switch (strategy) {
+    case _HlsVariantSelectionStrategy.closestToPreferredBitrate:
+      final preferred = preferredBitrateBitsPerSecond ?? 0;
+      if (preferred > 0) {
+        variants.sort((a, b) {
+          final aDistance = (a.bandwidth - preferred).abs();
+          final bDistance = (b.bandwidth - preferred).abs();
+          if (aDistance != bDistance) return aDistance.compareTo(bDistance);
+          if (a.bandwidth != b.bandwidth) {
+            return a.bandwidth.compareTo(b.bandwidth);
+          }
+          return 0;
+        });
+        return variants.first.uri;
+      }
+      variants.sort((a, b) => b.bandwidth.compareTo(a.bandwidth));
+      return variants.first.uri;
     case _HlsVariantSelectionStrategy.highestBandwidth:
       variants.sort((a, b) => b.bandwidth.compareTo(a.bandwidth));
       return variants.first.uri;
@@ -1535,8 +1587,9 @@ Uri? _pickVariantUri(
 const int _kMaxHlsPreloadSegments = 3;
 
 enum _HlsVariantSelectionStrategy {
+  closestToPreferredBitrate,
   highestBandwidth,
 }
 
 const _HlsVariantSelectionStrategy _kHlsVariantSelectionStrategy =
-    _HlsVariantSelectionStrategy.highestBandwidth;
+    _HlsVariantSelectionStrategy.closestToPreferredBitrate;

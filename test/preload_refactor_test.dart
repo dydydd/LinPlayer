@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lin_player/services/preload/playback_preload_coordinator.dart';
+import 'package:lin_player/services/stream_proxy/local_hls_stream_proxy.dart';
+import 'package:lin_player/services/stream_proxy/local_http_stream_proxy.dart';
 import 'package:lin_player/services/stream_resolver/stream_resolver.dart';
 import 'package:lin_player_core/state/media_server_type.dart';
 import 'package:lin_player_player/lin_player_player.dart';
@@ -24,6 +26,7 @@ void main() {
   setUp(() async {
     StreamPreloadService.instance.debugResetForTest();
     await HttpStreamProxyServer.instance.debugResetForTest();
+    await LocalHlsStreamProxy.instance.debugResetForTest();
   });
 
   test('PlaybackPreloadCoordinator keeps proxy metadata on prepared requests',
@@ -197,6 +200,146 @@ void main() {
     expect(keyDifferentMedia, isNotNull);
     expect(keyDifferentProxy!.fingerprint, isNot(keyA.fingerprint));
     expect(keyDifferentMedia!.fingerprint, isNot(keyA.fingerprint));
+  });
+
+  test(
+      'StreamCacheDownloadRequest keeps original cache semantics when re-pointed to a redirect-final URI',
+      () {
+    const proxyUrl = 'http://127.0.0.1:7890';
+    final request = StreamCacheDownloadRequest(
+      resolvedSource: const ResolvedPlaybackSource(
+        itemId: 'item-cache-download',
+        playSessionId: 'ps-cache-download',
+        mediaSourceId: 'ms-cache-download',
+        url:
+            'https://media.example.com/Videos/item-cache-download/stream.mp4?AudioStreamIndex=2',
+        httpHeaders: <String, String>{'User-Agent': 'SourceUA/1.0'},
+        isExternal: false,
+        mediaTypeHint: ResolvedPlaybackMediaType.file,
+        fromStrm: false,
+        redirectChain: <String>[
+          'https://media.example.com/Videos/item-cache-download/stream.mp4',
+        ],
+        proxyUrl: proxyUrl,
+      ),
+    );
+
+    final redirected = request.withRemoteUri(
+      Uri.parse('https://cdn.example.net/final.mp4'),
+    );
+
+    expect(request.remoteUri?.toString(), contains('media.example.com'));
+    expect(
+        redirected.remoteUri?.toString(), 'https://cdn.example.net/final.mp4');
+    expect(request.effectiveProxyUrl, proxyUrl);
+    expect(redirected.effectiveProxyUrl, proxyUrl);
+    expect(request.cacheKey, isNotNull);
+    expect(redirected.cacheKey, isNotNull);
+    expect(redirected.cacheKey!.fingerprint, request.cacheKey!.fingerprint);
+    expect(redirected.effectiveFileName, 'final.mp4');
+  });
+
+  test(
+      'StreamCacheDownloadService warms resolved source ranges for later playback reuse',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await server.close(force: true);
+    });
+
+    var prefixHits = 0;
+    var tailHits = 0;
+    final observedRanges = <String?>[];
+    server.listen((HttpRequest request) async {
+      final range = request.headers.value(HttpHeaders.rangeHeader);
+      observedRanges.add(range);
+      final bytes = <int>[0, 1, 2, 3, 4, 5, 6, 7];
+      if ((range ?? '').startsWith('bytes=4-')) {
+        tailHits++;
+        request.response.statusCode = HttpStatus.partialContent;
+        request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+        request.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes 4-7/8',
+        );
+        request.response.headers.contentType = ContentType('video', 'mp4');
+        request.response.contentLength = 4;
+        request.response.add(bytes.sublist(4));
+        await request.response.close();
+        return;
+      }
+
+      prefixHits++;
+      request.response.statusCode = HttpStatus.partialContent;
+      request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+      request.response.headers.set(
+        HttpHeaders.contentRangeHeader,
+        'bytes 0-3/8',
+      );
+      request.response.headers.contentType = ContentType('video', 'mp4');
+      request.response.contentLength = 4;
+      request.response.add(bytes.sublist(0, 4));
+      await request.response.close();
+    });
+
+    final url = 'http://127.0.0.1:${server.port}/download-service.mp4';
+    final request = StreamCacheDownloadRequest(
+      resolvedSource: ResolvedPlaybackSource(
+        itemId: 'episode-download-service',
+        playSessionId: 'ps-download-service',
+        mediaSourceId: 'ms-download-service',
+        url: url,
+        httpHeaders: const <String, String>{'User-Agent': 'SourceUA/1.0'},
+        isExternal: false,
+        mediaTypeHint: ResolvedPlaybackMediaType.file,
+        fromStrm: false,
+        redirectChain: <String>[url],
+        bitrate: 8000000,
+        sizeBytes: 8,
+      ),
+    );
+
+    final warmup = await StreamCacheDownloadService.instance.warmRangeToCache(
+      request: request,
+      startByte: 0,
+      lengthBytes: 4,
+    );
+    final snapshot =
+        await StreamCacheDownloadService.instance.describe(request);
+
+    expect(warmup, isNotNull);
+    expect(warmup!.requestedBytes, 4);
+    expect(snapshot, isNotNull);
+    expect(snapshot!.state, HttpStreamCacheState.playable);
+    expect(snapshot.cachedBytes, 4);
+    expect(snapshot.ranges, hasLength(1));
+    expect(snapshot.ranges.single.startByte, 0);
+    expect(snapshot.ranges.single.lengthBytes, 4);
+
+    final proxyUri =
+        await StreamCacheDownloadService.instance.registerStream(request);
+    expect(proxyUri, isNotNull);
+
+    final client = HttpClient();
+    addTearDown(() {
+      client.close(force: true);
+    });
+
+    final response = await (await client.getUrl(proxyUri!)).close();
+    final body = await response.fold<List<int>>(
+      <int>[],
+      (acc, chunk) => <int>[...acc, ...chunk],
+    );
+
+    expect(response.statusCode, HttpStatus.ok);
+    expect(body, <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(prefixHits, 1);
+    expect(tailHits, 1);
+    expect(
+      observedRanges.whereType<String>(),
+      contains(predicate<String>((value) => value.startsWith('bytes=0-'))),
+    );
+    expect(observedRanges, contains('bytes=4-'));
   });
 
   group('PlaybackSourceBuilder', () {
@@ -834,7 +977,8 @@ void main() {
   test(
       'Preload + proxy playback reuses cached prefix and only fills the missing tail',
       () async {
-    final upstreamProxy = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final upstreamProxy =
+        await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() async {
       await upstreamProxy.close(force: true);
     });
@@ -931,7 +1075,10 @@ void main() {
     expect(prefixHits, 1);
     expect(tailHits, 1);
     expect(
-      observedRanges.whereType<String>().where((value) => value.startsWith('bytes=0-')).length,
+      observedRanges
+          .whereType<String>()
+          .where((value) => value.startsWith('bytes=0-'))
+          .length,
       1,
     );
     expect(observedRanges, contains('bytes=4-'));
@@ -1030,7 +1177,8 @@ void main() {
   test(
       'StreamPreloadService records redirect-final URL so playback tail fetch skips the redirect hop',
       () async {
-    final upstreamProxy = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final upstreamProxy =
+        await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() async {
       await upstreamProxy.close(force: true);
     });
@@ -1297,6 +1445,92 @@ void main() {
     expect(hits.containsKey('/seg3.ts'), isFalse);
   });
 
+  test('StreamPreloadService picks the HLS variant closest to source bitrate',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await server.close(force: true);
+    });
+
+    final hits = <String, int>{};
+    server.listen((HttpRequest request) async {
+      final path = request.uri.path;
+      hits[path] = (hits[path] ?? 0) + 1;
+
+      switch (path) {
+        case '/master.m3u8':
+          request.response.statusCode = HttpStatus.ok;
+          request.response.headers.contentType =
+              ContentType('application', 'vnd.apple.mpegurl');
+          request.response.write(
+            '#EXTM3U\n'
+            '#EXT-X-STREAM-INF:BANDWIDTH=1200000\n'
+            'low.m3u8\n'
+            '#EXT-X-STREAM-INF:BANDWIDTH=5000000\n'
+            'high.m3u8\n',
+          );
+          break;
+        case '/low.m3u8':
+          request.response.statusCode = HttpStatus.ok;
+          request.response.headers.contentType =
+              ContentType('application', 'vnd.apple.mpegurl');
+          request.response.write(
+            '#EXTM3U\n'
+            '#EXTINF:2.0,\n'
+            'low1.ts\n',
+          );
+          break;
+        case '/high.m3u8':
+          request.response.statusCode = HttpStatus.ok;
+          request.response.headers.contentType =
+              ContentType('application', 'vnd.apple.mpegurl');
+          request.response.write(
+            '#EXTM3U\n'
+            '#EXTINF:2.0,\n'
+            'high1.ts\n',
+          );
+          break;
+        case '/low1.ts':
+        case '/high1.ts':
+          request.response.statusCode = HttpStatus.ok;
+          request.response.headers.contentType = ContentType('video', 'mp2t');
+          request.response.add(const <int>[0, 1, 2, 3]);
+          break;
+        default:
+          request.response.statusCode = HttpStatus.notFound;
+      }
+
+      await request.response.close();
+    });
+
+    final url = 'http://127.0.0.1:${server.port}/master.m3u8';
+    final result = await StreamPreloadService.instance.preloadResolvedSource(
+      PreloadRequest(
+        resolvedSource: ResolvedPlaybackSource(
+          itemId: 'episode-hls-closest',
+          playSessionId: 'ps-hls-closest',
+          mediaSourceId: 'ms-hls-closest',
+          url: url,
+          httpHeaders: const <String, String>{'User-Agent': 'SourceUA/1.0'},
+          isExternal: false,
+          mediaTypeHint: ResolvedPlaybackMediaType.hls,
+          fromStrm: false,
+          redirectChain: <String>[url],
+          bitrate: 1500000,
+          sizeBytes: 4000000,
+        ),
+        triggerSource: 'detail_current',
+      ),
+    );
+
+    expect(result.status, StreamPreloadStatus.success);
+    expect(hits['/master.m3u8'], 1);
+    expect(hits['/low.m3u8'], 1);
+    expect(hits.containsKey('/high.m3u8'), isFalse);
+    expect(hits['/low1.ts'], 1);
+    expect(hits.containsKey('/high1.ts'), isFalse);
+  });
+
   test(
     'StreamPreloadService preloads HLS media playlist from the resume-aligned segment',
     () async {
@@ -1365,6 +1599,136 @@ void main() {
       expect(hits.containsKey('/seg1.ts'), isFalse);
       expect(hits['/seg2.ts'], 1);
       expect(hits['/seg3.ts'], 1);
+    },
+  );
+
+  test(
+    'Preloaded HLS assets are reused by the local playback HLS proxy',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() async {
+        await server.close(force: true);
+      });
+
+      final hits = <String, int>{};
+      server.listen((HttpRequest request) async {
+        final path = request.uri.path;
+        hits[path] = (hits[path] ?? 0) + 1;
+
+        switch (path) {
+          case '/media.m3u8':
+            request.response.statusCode = HttpStatus.ok;
+            request.response.headers.contentType =
+                ContentType('application', 'vnd.apple.mpegurl');
+            request.response.write(
+              '#EXTM3U\n'
+              '#EXT-X-MAP:URI="init.mp4"\n'
+              '#EXTINF:2.0,\n'
+              'seg1.ts\n'
+              '#EXTINF:2.0,\n'
+              'seg2.ts\n',
+            );
+            break;
+          case '/init.mp4':
+            request.response.statusCode = HttpStatus.ok;
+            request.response.headers.contentType = ContentType('video', 'mp4');
+            request.response.add(const <int>[0, 1, 2, 3]);
+            break;
+          case '/seg1.ts':
+            request.response.statusCode = HttpStatus.ok;
+            request.response.headers.contentType = ContentType('video', 'mp2t');
+            request.response.add(const <int>[4, 5, 6, 7]);
+            break;
+          case '/seg2.ts':
+            request.response.statusCode = HttpStatus.ok;
+            request.response.headers.contentType = ContentType('video', 'mp2t');
+            request.response.add(const <int>[8, 9, 10, 11]);
+            break;
+          default:
+            request.response.statusCode = HttpStatus.notFound;
+        }
+
+        await request.response.close();
+      });
+
+      final url = 'http://127.0.0.1:${server.port}/media.m3u8';
+      final resolvedSource = ResolvedPlaybackSource(
+        itemId: 'episode-hls-reuse',
+        playSessionId: 'ps-hls-reuse',
+        mediaSourceId: 'ms-hls-reuse',
+        url: url,
+        httpHeaders: const <String, String>{'User-Agent': 'SourceUA/1.0'},
+        isExternal: false,
+        mediaTypeHint: ResolvedPlaybackMediaType.hls,
+        fromStrm: false,
+        redirectChain: <String>[url],
+        bitrate: 4000000,
+        sizeBytes: 4000000,
+      );
+
+      final preload = await StreamPreloadService.instance.preloadResolvedSource(
+        PreloadRequest(
+          resolvedSource: resolvedSource,
+          triggerSource: 'detail_current',
+        ),
+      );
+
+      expect(preload.status, StreamPreloadStatus.success);
+      expect(hits['/init.mp4'], 1);
+      expect(hits['/seg1.ts'], 1);
+
+      final proxied = await LocalHttpStreamProxy.wrapPlaybackSource(
+        PlayableSource(
+          url: resolvedSource.url,
+          httpHeaders: resolvedSource.httpHeaders,
+          mediaTypeHint: StreamMediaType.hls,
+          fromStrm: false,
+          redirectChain: resolvedSource.redirectChain,
+        ),
+        cacheKey: buildResolvedPlaybackCacheKey(resolvedSource),
+      );
+      expect(proxied, isNotNull);
+
+      final client = HttpClient();
+      addTearDown(() {
+        client.close(force: true);
+      });
+
+      final playlistResponse =
+          await (await client.getUrl(Uri.parse(proxied!.url))).close();
+      final playlistText = utf8.decode(
+        await playlistResponse.fold<List<int>>(
+          <int>[],
+          (acc, chunk) => <int>[...acc, ...chunk],
+        ),
+        allowMalformed: true,
+      );
+      final streamUrls = RegExp(r'http://127\.0\.0\.1:\d+/stream/[^\s]+')
+          .allMatches(playlistText)
+          .map((match) => match.group(0)!)
+          .toList(growable: false);
+
+      expect(streamUrls.length, greaterThanOrEqualTo(2));
+
+      final initResponse =
+          await (await client.getUrl(Uri.parse(streamUrls[0]))).close();
+      final initBytes = await initResponse.fold<List<int>>(
+        <int>[],
+        (acc, chunk) => <int>[...acc, ...chunk],
+      );
+      final seg1Response =
+          await (await client.getUrl(Uri.parse(streamUrls[1]))).close();
+      final seg1Bytes = await seg1Response.fold<List<int>>(
+        <int>[],
+        (acc, chunk) => <int>[...acc, ...chunk],
+      );
+
+      expect(initResponse.statusCode, HttpStatus.ok);
+      expect(initBytes, <int>[0, 1, 2, 3]);
+      expect(seg1Response.statusCode, HttpStatus.ok);
+      expect(seg1Bytes, <int>[4, 5, 6, 7]);
+      expect(hits['/init.mp4'], 1);
+      expect(hits['/seg1.ts'], 1);
     },
   );
 

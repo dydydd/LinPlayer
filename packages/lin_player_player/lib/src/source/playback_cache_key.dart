@@ -2,6 +2,24 @@ import 'package:lin_player_server_api/services/http_stream_proxy.dart';
 
 import 'resolved_playback_source.dart';
 
+HttpStreamCacheKey buildNetworkPlaybackCacheKey({
+  required Uri remoteUri,
+  Map<String, String>? httpHeaders,
+  String? mediaSourceId,
+  int? audioStreamIndex,
+  int? subtitleStreamIndex,
+  String? proxyUrl,
+}) {
+  return HttpStreamCacheKey.fromNetworkSource(
+    remoteUri: remoteUri,
+    httpHeaders: httpHeaders,
+    mediaSourceId: mediaSourceId,
+    audioStreamIndex: audioStreamIndex,
+    subtitleStreamIndex: subtitleStreamIndex,
+    proxyUrl: proxyUrl,
+  );
+}
+
 HttpStreamCacheKey? buildResolvedPlaybackCacheKey(
   ResolvedPlaybackSource source, {
   String? proxyUrl,
@@ -12,7 +30,7 @@ HttpStreamCacheKey? buildResolvedPlaybackCacheKey(
   final uri = Uri.tryParse(rawUrl);
   if (uri == null) return null;
 
-  return HttpStreamCacheKey.fromNetworkSource(
+  return buildNetworkPlaybackCacheKey(
     remoteUri: uri,
     httpHeaders: source.httpHeaders,
     mediaSourceId: source.mediaSourceId,

@@ -4512,6 +4512,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       contentTypeHint: resolvedSource.contentTypeHint,
       supportsByteRange: resolvedSource.supportsByteRange,
       httpStatusHint: resolvedSource.httpStatusHint,
+      bitrateHint: resolvedSource.bitrate,
     );
     final proxied = await LocalHttpStreamProxy.wrapPlaybackSource(
       candidate,
