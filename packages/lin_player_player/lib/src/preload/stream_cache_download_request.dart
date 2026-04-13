@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:lin_player_server_api/services/http_stream_proxy.dart';
 
@@ -8,6 +6,8 @@ import '../source/resolved_playback_source.dart';
 
 @immutable
 class StreamCacheDownloadRequest {
+  /// Carries the shared cache identity plus transport metadata for warmup,
+  /// proxy registration, redirect-final reuse, and diagnostics.
   const StreamCacheDownloadRequest({
     required this.resolvedSource,
     this.proxyUrl,
@@ -64,95 +64,68 @@ class StreamCacheDownloadRequest {
       fileName: fileName ?? this.fileName,
     );
   }
-}
 
-class StreamCacheDownloadService {
-  StreamCacheDownloadService._();
-
-  static final StreamCacheDownloadService instance =
-      StreamCacheDownloadService._();
-
-  Stream<List<HttpStreamCacheDownloadProgressSnapshot>>
-      get downloadProgressStream =>
-          HttpStreamProxyServer.instance.downloadProgressStream;
-
-  List<HttpStreamCacheDownloadProgressSnapshot> currentProgressSnapshots({
-    int? maxEntries,
-  }) {
-    return HttpStreamProxyServer.instance.currentDownloadProgressSnapshots(
-      maxEntries: maxEntries,
-    );
-  }
-
-  String buildActiveDownloadsText({int maxEntries = 8}) {
-    return HttpStreamProxyServer.instance.buildActiveDownloadsText(
-      maxEntries: maxEntries,
-    );
-  }
-
-  Future<Uri?> registerStream(StreamCacheDownloadRequest request) async {
-    final remoteUri = request.remoteUri;
+  Future<Uri?> registerStream() async {
+    final remoteUri = this.remoteUri;
     if (remoteUri == null) return null;
     return HttpStreamProxyServer.instance.registerStream(
       remoteUri: remoteUri,
-      httpHeaders: request.httpHeaders,
-      fileName: request.effectiveFileName,
-      cacheKey: request.cacheKey,
+      httpHeaders: httpHeaders,
+      fileName: effectiveFileName,
+      cacheKey: cacheKey,
     );
   }
 
-  void beginWarmup(StreamCacheDownloadRequest request) {
-    final remoteUri = request.remoteUri;
+  void beginWarmup() {
+    final remoteUri = this.remoteUri;
     if (remoteUri == null) return;
     HttpStreamProxyServer.instance.beginStreamWarmup(
       remoteUri: remoteUri,
-      httpHeaders: request.httpHeaders,
-      cacheKey: request.cacheKey,
+      httpHeaders: httpHeaders,
+      cacheKey: cacheKey,
     );
   }
 
-  void endWarmup(StreamCacheDownloadRequest request) {
-    final remoteUri = request.remoteUri;
+  void endWarmup() {
+    final remoteUri = this.remoteUri;
     if (remoteUri == null) return;
     HttpStreamProxyServer.instance.endStreamWarmup(
       remoteUri: remoteUri,
-      httpHeaders: request.httpHeaders,
-      cacheKey: request.cacheKey,
+      httpHeaders: httpHeaders,
+      cacheKey: cacheKey,
     );
   }
 
   Future<HttpStreamWarmupResult?> warmRangeToCache({
-    required StreamCacheDownloadRequest request,
     required int startByte,
     required int lengthBytes,
   }) async {
-    final remoteUri = request.remoteUri;
+    final remoteUri = this.remoteUri;
     if (remoteUri == null) return null;
     return HttpStreamProxyServer.instance.warmRangeToCache(
       remoteUri: remoteUri,
-      httpHeaders: request.httpHeaders,
-      fileName: request.effectiveFileName,
-      cacheKey: request.cacheKey,
+      httpHeaders: httpHeaders,
+      fileName: effectiveFileName,
+      cacheKey: cacheKey,
       startByte: startByte,
       lengthBytes: lengthBytes,
     );
   }
 
   Future<Uri?> seedCache({
-    required StreamCacheDownloadRequest request,
     required int startByte,
     required List<int> bytes,
     String? contentTypeMime,
     int? totalBytes,
     bool acceptRanges = false,
   }) async {
-    final remoteUri = request.remoteUri;
+    final remoteUri = this.remoteUri;
     if (remoteUri == null) return null;
     return HttpStreamProxyServer.instance.seedStreamCache(
       remoteUri: remoteUri,
-      httpHeaders: request.httpHeaders,
-      fileName: request.effectiveFileName,
-      cacheKey: request.cacheKey,
+      httpHeaders: httpHeaders,
+      fileName: effectiveFileName,
+      cacheKey: cacheKey,
       startByte: startByte,
       bytes: bytes,
       contentTypeMime: contentTypeMime,
@@ -161,30 +134,24 @@ class StreamCacheDownloadService {
     );
   }
 
-  Future<void> markFailure(
-    StreamCacheDownloadRequest request, {
-    Object? error,
-  }) async {
-    final remoteUri = request.remoteUri;
+  Future<void> markFailure({Object? error}) async {
+    final remoteUri = this.remoteUri;
     if (remoteUri == null) return;
     await HttpStreamProxyServer.instance.markStreamFailure(
       remoteUri: remoteUri,
-      httpHeaders: request.httpHeaders,
-      cacheKey: request.cacheKey,
+      httpHeaders: httpHeaders,
+      cacheKey: cacheKey,
       error: error,
     );
   }
 
-  Future<HttpStreamCacheSnapshot?> describe(
-    StreamCacheDownloadRequest request, {
-    DateTime? now,
-  }) async {
-    final remoteUri = request.remoteUri;
+  Future<HttpStreamCacheSnapshot?> describe({DateTime? now}) async {
+    final remoteUri = this.remoteUri;
     if (remoteUri == null) return null;
     return HttpStreamProxyServer.instance.debugDescribeStream(
       remoteUri: remoteUri,
-      httpHeaders: request.httpHeaders,
-      cacheKey: request.cacheKey,
+      httpHeaders: httpHeaders,
+      cacheKey: cacheKey,
       now: now,
     );
   }

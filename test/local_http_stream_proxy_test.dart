@@ -8,6 +8,19 @@ import 'package:lin_player/services/stream_proxy/local_http_stream_proxy.dart';
 import 'package:lin_player/services/stream_resolver/stream_models.dart';
 import 'package:lin_player_server_api/services/http_stream_proxy.dart';
 
+Future<String> _waitForProxyDiagnostics(
+  bool Function(String text) predicate, {
+  Duration timeout = const Duration(seconds: 2),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (true) {
+    final text = HttpStreamProxyServer.instance.buildDiagnosticsText();
+    if (predicate(text)) return text;
+    if (!DateTime.now().isBefore(deadline)) return text;
+    await Future<void>.delayed(const Duration(milliseconds: 25));
+  }
+}
+
 void main() {
   setUp(() async {
     await HttpStreamProxyServer.instance.debugResetForTest();
@@ -151,6 +164,55 @@ void main() {
 
     expect(response.statusCode, anyOf(200, 206));
     expect(getRange, 'bytes=0-0');
+  });
+
+  test('HttpStreamProxyServer serves HEAD from cached metadata', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await server.close(force: true);
+    });
+
+    var upstreamHits = 0;
+    server.listen((HttpRequest req) async {
+      upstreamHits++;
+      req.response.statusCode = HttpStatus.ok;
+      req.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+      req.response.headers.contentType = ContentType('video', 'mp4');
+      req.response.contentLength = 8;
+      req.response.add(const <int>[9, 9, 9, 9, 9, 9, 9, 9]);
+      await req.response.close();
+    });
+
+    final proxyUri = await HttpStreamProxyServer.instance.seedStreamCache(
+      remoteUri: Uri.parse('http://127.0.0.1:${server.port}/media'),
+      httpHeaders: const <String, String>{'User-Agent': 'BrowserUA'},
+      fileName: 'video.mp4',
+      startByte: 0,
+      bytes: const <int>[0, 1, 2, 3],
+      contentTypeMime: 'video/mp4',
+      totalBytes: 8,
+      acceptRanges: true,
+    );
+
+    final client = HttpClient();
+    addTearDown(() {
+      client.close(force: true);
+    });
+
+    final response = await (await client.headUrl(proxyUri)).close();
+    await response.drain<void>();
+    final diagnostics = await _waitForProxyDiagnostics(
+      (text) =>
+          text.contains('reason=head-metadata') &&
+          text.contains('reuse=cache-only'),
+    );
+
+    expect(response.statusCode, HttpStatus.ok);
+    expect(response.headers.contentLength, 8);
+    expect(response.headers.value(HttpHeaders.acceptRangesHeader), 'bytes');
+    expect(upstreamHits, 0);
+    expect(diagnostics, contains('reason=head-metadata'));
+    expect(diagnostics, contains('reuse=cache-only'));
   });
 
   test('LocalHttpStreamProxy adds proxied STRM candidate first', () async {

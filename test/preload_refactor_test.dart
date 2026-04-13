@@ -329,7 +329,7 @@ void main() {
   });
 
   test(
-      'StreamCacheDownloadService warms resolved source ranges for later playback reuse',
+      'StreamCacheDownloadRequest warms resolved source ranges for later playback reuse',
       () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() async {
@@ -371,7 +371,7 @@ void main() {
       await request.response.close();
     });
 
-    final url = 'http://127.0.0.1:${server.port}/download-service.mp4';
+    final url = 'http://127.0.0.1:${server.port}/stream-cache-request.mp4';
     final request = StreamCacheDownloadRequest(
       resolvedSource: ResolvedPlaybackSource(
         itemId: 'episode-download-service',
@@ -388,13 +388,11 @@ void main() {
       ),
     );
 
-    final warmup = await StreamCacheDownloadService.instance.warmRangeToCache(
-      request: request,
+    final warmup = await request.warmRangeToCache(
       startByte: 0,
       lengthBytes: 4,
     );
-    final snapshot =
-        await StreamCacheDownloadService.instance.describe(request);
+    final snapshot = await request.describe();
 
     expect(warmup, isNotNull);
     expect(warmup!.requestedBytes, 4);
@@ -405,8 +403,7 @@ void main() {
     expect(snapshot.ranges.single.startByte, 0);
     expect(snapshot.ranges.single.lengthBytes, 4);
 
-    final proxyUri =
-        await StreamCacheDownloadService.instance.registerStream(request);
+    final proxyUri = await request.registerStream();
     expect(proxyUri, isNotNull);
 
     final client = HttpClient();
@@ -824,16 +821,21 @@ void main() {
 
     final ranges = <String?>[];
     server.listen((HttpRequest request) async {
-      ranges.add(request.headers.value(HttpHeaders.rangeHeader));
+      final range = request.headers.value(HttpHeaders.rangeHeader);
+      ranges.add(range);
+      final rangeMatch = RegExp(r'^bytes=(\d+)-(\d+)$').firstMatch(range ?? '');
+      final rangeStart = int.tryParse(rangeMatch?.group(1) ?? '') ?? 0;
+      final rangeEnd = int.tryParse(rangeMatch?.group(2) ?? '') ?? 7;
+      final responseLength = rangeEnd - rangeStart + 1;
       request.response.statusCode = 206;
       request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
       request.response.headers.set(
         HttpHeaders.contentRangeHeader,
-        'bytes 0-7/80000000',
+        'bytes $rangeStart-$rangeEnd/80000000',
       );
       request.response.headers.contentType = ContentType('video', 'mp4');
-      request.response.contentLength = 8;
-      request.response.add(const <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+      request.response.contentLength = responseLength;
+      request.response.add(List<int>.filled(responseLength, 1));
       await request.response.close();
     });
 
@@ -859,6 +861,7 @@ void main() {
     );
 
     expect(result.status, StreamPreloadStatus.success);
+    expect(result.detail, contains('direct-file-ready'));
     expect(ranges, hasLength(2));
     expect(ranges.first, 'bytes=0-524287');
     expect(ranges.last, startsWith('bytes=10000000-'));
@@ -874,16 +877,22 @@ void main() {
 
       final ranges = <String?>[];
       server.listen((HttpRequest request) async {
-        ranges.add(request.headers.value(HttpHeaders.rangeHeader));
+        final range = request.headers.value(HttpHeaders.rangeHeader);
+        ranges.add(range);
+        final rangeMatch =
+            RegExp(r'^bytes=(\d+)-(\d+)$').firstMatch(range ?? '');
+        final rangeStart = int.tryParse(rangeMatch?.group(1) ?? '') ?? 0;
+        final rangeEnd = int.tryParse(rangeMatch?.group(2) ?? '') ?? 7;
+        final responseLength = rangeEnd - rangeStart + 1;
         request.response.statusCode = 206;
         request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
         request.response.headers.set(
           HttpHeaders.contentRangeHeader,
-          'bytes 0-7/80000000',
+          'bytes $rangeStart-$rangeEnd/80000000',
         );
         request.response.headers.contentType = ContentType('video', 'mp4');
-        request.response.contentLength = 8;
-        request.response.add(const <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+        request.response.contentLength = responseLength;
+        request.response.add(List<int>.filled(responseLength, 2));
         await request.response.close();
       });
 
@@ -910,6 +919,7 @@ void main() {
       );
 
       expect(result.status, StreamPreloadStatus.success);
+      expect(result.detail, contains('direct-file-ready'));
       expect(ranges, hasLength(2));
       expect(ranges.first, 'bytes=0-524287');
       expect(ranges.last, 'bytes=10000000-14999999');
@@ -1113,22 +1123,23 @@ void main() {
     var prefixHits = 0;
     var tailHits = 0;
     final observedRanges = <String?>[];
+    const warmedBytes = 3000000;
+    const totalBytes = warmedBytes + 4;
 
     upstreamProxy.listen((HttpRequest request) async {
       final range = request.headers.value(HttpHeaders.rangeHeader);
       observedRanges.add(range);
-      final bytes = <int>[0, 1, 2, 3, 4, 5, 6, 7];
-      if ((range ?? '').startsWith('bytes=4-')) {
+      if ((range ?? '').startsWith('bytes=$warmedBytes-')) {
         tailHits++;
         request.response.statusCode = HttpStatus.partialContent;
         request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
         request.response.headers.set(
           HttpHeaders.contentRangeHeader,
-          'bytes 4-7/8',
+          'bytes $warmedBytes-${totalBytes - 1}/$totalBytes',
         );
         request.response.headers.contentType = ContentType('video', 'mp4');
         request.response.contentLength = 4;
-        request.response.add(bytes.sublist(4));
+        request.response.add(const <int>[4, 5, 6, 7]);
         await request.response.close();
         return;
       }
@@ -1138,11 +1149,11 @@ void main() {
       request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
       request.response.headers.set(
         HttpHeaders.contentRangeHeader,
-        'bytes 0-3/8',
+        'bytes 0-${warmedBytes - 1}/$totalBytes',
       );
       request.response.headers.contentType = ContentType('video', 'mp4');
-      request.response.contentLength = 4;
-      request.response.add(bytes.sublist(0, 4));
+      request.response.contentLength = warmedBytes;
+      request.response.add(List<int>.filled(warmedBytes, 1));
       await request.response.close();
     });
 
@@ -1159,7 +1170,7 @@ void main() {
       fromStrm: false,
       redirectChain: const <String>[remoteUrl],
       bitrate: 8000000,
-      sizeBytes: 8,
+      sizeBytes: totalBytes,
     );
 
     final preloadResult =
@@ -1198,7 +1209,9 @@ void main() {
     );
 
     expect(response.statusCode, HttpStatus.ok);
-    expect(body, <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(body.length, totalBytes);
+    expect(body.take(4).toList(), <int>[1, 1, 1, 1]);
+    expect(body.skip(warmedBytes).toList(), <int>[4, 5, 6, 7]);
     expect(prefixHits, 1);
     expect(tailHits, 1);
     expect(
@@ -1208,7 +1221,7 @@ void main() {
           .length,
       1,
     );
-    expect(observedRanges, contains('bytes=4-'));
+    expect(observedRanges, contains('bytes=$warmedBytes-'));
     expect(
       HttpStreamProxyServer.instance.buildDiagnosticsText(),
       contains('reuse=cache+remote-tail'),
@@ -1316,9 +1329,13 @@ void main() {
         final rangeMatch =
             RegExp(r'^bytes=(\d+)-(\d*)$').firstMatch(range ?? '');
         final rangeStart = int.tryParse(rangeMatch?.group(1) ?? '') ?? 0;
-        final responseBytes = rangeStart == 10000000
-            ? const <int>[8, 9, 10, 11, 12, 13, 14, 15]
-            : const <int>[0, 1, 2, 3, 4, 5, 6, 7];
+        final rangeEnd = int.tryParse(rangeMatch?.group(2) ?? '') ??
+            (rangeStart == 0 ? 524287 : 12999999);
+        final responseLength = rangeEnd - rangeStart + 1;
+        final responseBytes = List<int>.generate(
+          responseLength,
+          (index) => rangeStart == 10000000 ? 8 + (index % 8) : index % 256,
+        );
         final responseEnd = rangeStart + responseBytes.length - 1;
 
         request.response.statusCode = HttpStatus.partialContent;
@@ -1358,6 +1375,7 @@ void main() {
         ),
       );
       expect(preload.status, StreamPreloadStatus.success);
+      expect(preload.detail, contains('direct-file-ready'));
       expect(observedRanges, contains('bytes=10000000-12999999'));
 
       final proxyUri = await HttpStreamProxyServer.instance.registerStream(
@@ -1397,6 +1415,179 @@ void main() {
   );
 
   test(
+    'Playback probe and resume request both reuse the warmed direct-file playable set',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() async {
+        await server.close(force: true);
+      });
+
+      final observedRanges = <String?>[];
+      server.listen((HttpRequest request) async {
+        final range = request.headers.value(HttpHeaders.rangeHeader);
+        observedRanges.add(range);
+        final rangeMatch =
+            RegExp(r'^bytes=(\d+)-(\d*)$').firstMatch(range ?? '');
+        final rangeStart = int.tryParse(rangeMatch?.group(1) ?? '') ?? 0;
+        final rangeEnd = int.tryParse(rangeMatch?.group(2) ?? '') ??
+            (rangeStart == 0 ? 524287 : 12999999);
+        final responseLength = rangeEnd - rangeStart + 1;
+        final responseBytes = List<int>.generate(
+          responseLength,
+          (index) => rangeStart == 10000000 ? 8 + (index % 8) : index % 256,
+        );
+        final responseEnd = rangeStart + responseBytes.length - 1;
+
+        request.response.statusCode = HttpStatus.partialContent;
+        request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+        request.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          rangeMatch == null
+              ? 'bytes 0-7/80000000'
+              : 'bytes $rangeStart-$responseEnd/80000000',
+        );
+        request.response.headers.contentType = ContentType('video', 'mp4');
+        request.response.contentLength = responseBytes.length;
+        request.response.add(responseBytes);
+        await request.response.close();
+      });
+
+      final url = 'http://127.0.0.1:${server.port}/resume-probe.mp4';
+      final resolvedSource = ResolvedPlaybackSource(
+        itemId: 'episode-resume-probe',
+        playSessionId: 'ps-resume-probe',
+        mediaSourceId: 'ms-resume-probe',
+        url: url,
+        httpHeaders: const <String, String>{'User-Agent': 'SourceUA/1.0'},
+        isExternal: false,
+        mediaTypeHint: ResolvedPlaybackMediaType.file,
+        fromStrm: false,
+        redirectChain: <String>[url],
+        bitrate: 8000000,
+        sizeBytes: 80000000,
+      );
+
+      final preload = await StreamPreloadService.instance.preloadResolvedSource(
+        PreloadRequest(
+          resolvedSource: resolvedSource,
+          triggerSource: 'playback_resume',
+          startPosition: const Duration(seconds: 10),
+        ),
+      );
+      expect(preload.status, StreamPreloadStatus.success);
+      expect(preload.detail, contains('direct-file-ready'));
+
+      final proxyUri = await HttpStreamProxyServer.instance.registerStream(
+        remoteUri: Uri.parse(url),
+        httpHeaders: resolvedSource.httpHeaders,
+        fileName: 'resume-probe.mp4',
+        cacheKey: buildResolvedPlaybackCacheKey(resolvedSource),
+      );
+
+      final client = HttpClient();
+      addTearDown(() {
+        client.close(force: true);
+      });
+
+      final probeRequest = await client.getUrl(proxyUri);
+      probeRequest.headers.set(HttpHeaders.rangeHeader, 'bytes=0-0');
+      final probeResponse = await probeRequest.close();
+      final probeBody = await probeResponse.fold<List<int>>(
+        <int>[],
+        (acc, chunk) => <int>[...acc, ...chunk],
+      );
+
+      final resumeRequest = await client.getUrl(proxyUri);
+      resumeRequest.headers.set(
+        HttpHeaders.rangeHeader,
+        'bytes=10000000-10000007',
+      );
+      final resumeResponse = await resumeRequest.close();
+      final resumeBody = await resumeResponse.fold<List<int>>(
+        <int>[],
+        (acc, chunk) => <int>[...acc, ...chunk],
+      );
+
+      expect(probeResponse.statusCode, HttpStatus.partialContent);
+      expect(probeBody, <int>[0]);
+      expect(resumeResponse.statusCode, HttpStatus.partialContent);
+      expect(resumeBody, <int>[8, 9, 10, 11, 12, 13, 14, 15]);
+      expect(
+        observedRanges,
+        <String?>['bytes=0-524287', 'bytes=10000000-12999999'],
+      );
+      expect(
+        HttpStreamProxyServer.instance.buildDiagnosticsText(),
+        contains('range=bytes=0-0'),
+      );
+      expect(
+        HttpStreamProxyServer.instance.buildDiagnosticsText(),
+        contains('range=bytes=10000000-10000007'),
+      );
+      expect(
+        HttpStreamProxyServer.instance.buildDiagnosticsText(),
+        contains('reuse=cache-only'),
+      );
+    },
+  );
+
+  test(
+    'StreamPreloadService does not treat a partially cached resume window as direct-file ready',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() async {
+        await server.close(force: true);
+      });
+
+      server.listen((HttpRequest request) async {
+        final range = request.headers.value(HttpHeaders.rangeHeader);
+        final rangeMatch =
+            RegExp(r'^bytes=(\d+)-(\d+)$').firstMatch(range ?? '');
+        final rangeStart = int.tryParse(rangeMatch?.group(1) ?? '') ?? 0;
+        final responseLength = rangeStart == 0 ? 512 * 1024 : 8;
+        final responseEnd = rangeStart + responseLength - 1;
+        request.response.statusCode = HttpStatus.partialContent;
+        request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+        request.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes $rangeStart-$responseEnd/80000000',
+        );
+        request.response.headers.contentType = ContentType('video', 'mp4');
+        request.response.contentLength = responseLength;
+        request.response.add(List<int>.filled(responseLength, 3));
+        await request.response.close();
+      });
+
+      final url = 'http://127.0.0.1:${server.port}/resume-incomplete.mp4';
+      final result = await StreamPreloadService.instance.preloadResolvedSource(
+        PreloadRequest(
+          resolvedSource: ResolvedPlaybackSource(
+            itemId: 'episode-resume-incomplete',
+            playSessionId: 'ps-resume-incomplete',
+            mediaSourceId: 'ms-resume-incomplete',
+            url: url,
+            httpHeaders: const <String, String>{'User-Agent': 'SourceUA/1.0'},
+            isExternal: false,
+            mediaTypeHint: ResolvedPlaybackMediaType.file,
+            fromStrm: false,
+            redirectChain: <String>[url],
+            bitrate: 8000000,
+            sizeBytes: 80000000,
+          ),
+          triggerSource: 'playback_resume',
+          startPosition: const Duration(seconds: 10),
+        ),
+      );
+
+      expect(result.status, StreamPreloadStatus.failed);
+      expect(
+        StreamPreloadService.instance.buildDiagnosticsText(),
+        contains('direct-file-not-ready'),
+      );
+    },
+  );
+
+  test(
       'StreamPreloadService records redirect-final URL so playback tail fetch skips the redirect hop',
       () async {
     final upstreamProxy =
@@ -1409,6 +1600,8 @@ void main() {
     var finalHits = 0;
     final observedTargets = <String>[];
     final observedRanges = <String?>[];
+    const warmedBytes = 3000000;
+    const totalBytes = warmedBytes + 4;
 
     upstreamProxy.listen((HttpRequest request) async {
       final target =
@@ -1430,17 +1623,16 @@ void main() {
         finalHits++;
         final range = request.headers.value(HttpHeaders.rangeHeader);
         observedRanges.add(range);
-        final bytes = <int>[0, 1, 2, 3, 4, 5, 6, 7];
-        if ((range ?? '').startsWith('bytes=4-')) {
+        if ((range ?? '').startsWith('bytes=$warmedBytes-')) {
           request.response.statusCode = HttpStatus.partialContent;
           request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
           request.response.headers.set(
             HttpHeaders.contentRangeHeader,
-            'bytes 4-7/8',
+            'bytes $warmedBytes-${totalBytes - 1}/$totalBytes',
           );
           request.response.headers.contentType = ContentType('video', 'mp4');
           request.response.contentLength = 4;
-          request.response.add(bytes.sublist(4));
+          request.response.add(const <int>[4, 5, 6, 7]);
           await request.response.close();
           return;
         }
@@ -1449,11 +1641,11 @@ void main() {
         request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
         request.response.headers.set(
           HttpHeaders.contentRangeHeader,
-          'bytes 0-3/8',
+          'bytes 0-${warmedBytes - 1}/$totalBytes',
         );
         request.response.headers.contentType = ContentType('video', 'mp4');
-        request.response.contentLength = 4;
-        request.response.add(bytes.sublist(0, 4));
+        request.response.contentLength = warmedBytes;
+        request.response.add(List<int>.filled(warmedBytes, 2));
         await request.response.close();
         return;
       }
@@ -1475,7 +1667,7 @@ void main() {
       fromStrm: false,
       redirectChain: const <String>[remoteUrl],
       bitrate: 8000000,
-      sizeBytes: 8,
+      sizeBytes: totalBytes,
     );
 
     final preloadResult =
@@ -1514,14 +1706,16 @@ void main() {
     );
 
     expect(response.statusCode, HttpStatus.ok);
-    expect(body, <int>[0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(body.length, totalBytes);
+    expect(body.take(4).toList(), <int>[2, 2, 2, 2]);
+    expect(body.skip(warmedBytes).toList(), <int>[4, 5, 6, 7]);
     expect(startHits, 1);
     expect(finalHits, 2);
     expect(
       observedRanges.whereType<String>(),
       contains(predicate<String>((value) => value.startsWith('bytes=0-'))),
     );
-    expect(observedRanges, contains('bytes=4-'));
+    expect(observedRanges, contains('bytes=$warmedBytes-'));
     expect(
       observedTargets.where((value) => value.contains('start.mp4')).length,
       1,

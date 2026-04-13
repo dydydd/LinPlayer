@@ -12,7 +12,7 @@ import '../source/playback_cache_key.dart';
 import '../source/playback_source_builder.dart';
 import '../source/resolved_playback_source.dart';
 import 'preload_request.dart';
-import 'stream_cache_download_service.dart';
+import 'stream_cache_download_request.dart';
 
 enum StreamPreloadStatus {
   skippedDisabled,
@@ -25,10 +25,11 @@ enum StreamPreloadStatus {
 
 @immutable
 class StreamPreloadResult {
-  const StreamPreloadResult(this.status, {this.error});
+  const StreamPreloadResult(this.status, {this.error, this.detail});
 
   final StreamPreloadStatus status;
   final Object? error;
+  final String? detail;
 
   bool get disabledNow => status == StreamPreloadStatus.failedDisabled;
 }
@@ -49,6 +50,7 @@ class StreamPreloadDiagnosticEntry {
     required this.url,
     required this.status,
     this.error,
+    this.detail,
   });
 
   final DateTime timestamp;
@@ -64,6 +66,7 @@ class StreamPreloadDiagnosticEntry {
   final String url;
   final StreamPreloadStatus status;
   final Object? error;
+  final String? detail;
 }
 
 class StreamPreloadService {
@@ -212,6 +215,9 @@ class StreamPreloadService {
     for (final entry in _recentEntries.skip(startIndex)) {
       final errorText =
           entry.error == null ? '' : ' error=${_summarizeInline(entry.error)}';
+      final detailText = (entry.detail ?? '').trim().isEmpty
+          ? ''
+          : ' detail=${_summarizeInline(entry.detail)}';
       final ownerText = entry.ownerKey.isEmpty
           ? ''
           : ' owner=${_summarizeInline(entry.ownerKey)}';
@@ -231,6 +237,7 @@ class StreamPreloadService {
         'external=${entry.isExternal} '
         'proxy=${entry.usesProxy} '
         'url=${_summarizeUrl(entry.url)}'
+        '$detailText'
         '$errorText',
       );
     }
@@ -255,8 +262,9 @@ class StreamPreloadService {
         .join(', ');
     final activeCircuits =
         _circuitStates.values.where((state) => state.isOpen(now)).length;
-    final activeCacheDownloads =
-        StreamCacheDownloadService.instance.currentProgressSnapshots().length;
+    final activeCacheDownloads = HttpStreamProxyServer.instance
+        .currentDownloadProgressSnapshots()
+        .length;
 
     final latest = _recentEntries.isEmpty ? null : _recentEntries.last;
     final buffer = StringBuffer()
@@ -278,6 +286,10 @@ class StreamPreloadService {
       }
       if (latest.scopeKey.isNotEmpty) {
         buffer.writeln('latestScope: ${latest.scopeKey}');
+      }
+      final latestDetail = (latest.detail ?? '').trim();
+      if (latestDetail.isNotEmpty) {
+        buffer.writeln('latestDetail: $latestDetail');
       }
     }
     return buffer.toString().trim();
@@ -322,6 +334,7 @@ class StreamPreloadService {
         url: request.resolvedSource.url,
         status: result.status,
         error: result.error,
+        detail: result.detail,
       ),
     );
     if (_recentEntries.length > _maxRecentEntries) {
@@ -564,7 +577,7 @@ class StreamPreloadService {
       final source = normalizedRequest.resolvedSource;
       final cacheDownloadRequest =
           _cacheDownloadRequestForRequest(normalizedRequest);
-      StreamCacheDownloadService.instance.beginWarmup(cacheDownloadRequest);
+      cacheDownloadRequest.beginWarmup();
       try {
         for (var attempt = 0; attempt < maxAttempts; attempt++) {
           _throwIfCancelled(
@@ -595,8 +608,10 @@ class StreamPreloadService {
           if (outcome.success) {
             _doneKeys.add(key);
             _circuitStates.remove(scopeKey);
-            final result =
-                const StreamPreloadResult(StreamPreloadStatus.success);
+            final result = StreamPreloadResult(
+              StreamPreloadStatus.success,
+              detail: outcome.detail,
+            );
             _recordResult(request: normalizedRequest, result: result);
             return result;
           }
@@ -640,10 +655,7 @@ class StreamPreloadService {
               : StreamPreloadStatus.failed,
           error: failure,
         );
-        await StreamCacheDownloadService.instance.markFailure(
-          cacheDownloadRequest,
-          error: failure,
-        );
+        await cacheDownloadRequest.markFailure(error: failure);
         _recordResult(request: normalizedRequest, result: result);
         return result;
       } on _PreloadCancelledException catch (error) {
@@ -655,7 +667,7 @@ class StreamPreloadService {
         _recordResult(request: normalizedRequest, result: result);
         return result;
       } finally {
-        StreamCacheDownloadService.instance.endWarmup(cacheDownloadRequest);
+        cacheDownloadRequest.endWarmup();
         if (priority == _PreloadPriority.current) {
           _endCurrentPreload();
         }
@@ -1028,15 +1040,20 @@ class StreamPreloadService {
     required StreamCacheDownloadRequest cacheDownloadRequest,
     required _PreloadCancellation cancellation,
   }) async {
-    final prefixBytes =
-        startPosition > Duration.zero ? 512 * 1024 : bytesToFetch;
+    final playableSet = _buildDirectFilePlayableSet(
+      bytesToFetch: bytesToFetch,
+      startPosition: startPosition,
+      bitrateBitsPerSecond: bitrateBitsPerSecond,
+      sizeBytes: sizeBytes,
+      supportsByteRange: supportsByteRange,
+    );
+    final prefixBytes = playableSet.prefixLengthBytes;
     try {
       _throwIfCancelled(cancellation, url: uri.toString());
-      await StreamCacheDownloadService.instance.warmRangeToCache(
-        request: cacheDownloadRequest.withRemoteUri(uri),
-        startByte: 0,
-        lengthBytes: prefixBytes,
-      );
+      await cacheDownloadRequest.withRemoteUri(uri).warmRangeToCache(
+            startByte: 0,
+            lengthBytes: prefixBytes,
+          );
       _throwIfCancelled(cancellation, url: uri.toString());
     } catch (error) {
       return _PreloadAttemptResult.failure(
@@ -1045,29 +1062,35 @@ class StreamPreloadService {
     }
 
     if (startPosition <= Duration.zero || supportsByteRange == false) {
-      return const _PreloadAttemptResult.success();
+      return _evaluateDirectFilePlayableSet(
+        uri: uri,
+        cacheDownloadRequest: cacheDownloadRequest.withRemoteUri(uri),
+        playableSet: playableSet,
+      );
     }
 
     _throwIfCancelled(cancellation, url: uri.toString());
-    final startByte = _estimateRangeStartBytes(
-      startPosition: startPosition,
-      bytesToFetch: bytesToFetch,
-      bitrateBitsPerSecond: bitrateBitsPerSecond,
-      sizeBytes: sizeBytes,
-    );
+    final startByte = playableSet.resumeStartByte;
     if (startByte <= 0) {
-      return const _PreloadAttemptResult.success();
+      return _evaluateDirectFilePlayableSet(
+        uri: uri,
+        cacheDownloadRequest: cacheDownloadRequest.withRemoteUri(uri),
+        playableSet: playableSet,
+      );
     }
 
     try {
       _throwIfCancelled(cancellation, url: uri.toString());
-      await StreamCacheDownloadService.instance.warmRangeToCache(
-        request: cacheDownloadRequest.withRemoteUri(uri),
-        startByte: startByte,
-        lengthBytes: bytesToFetch,
-      );
+      await cacheDownloadRequest.withRemoteUri(uri).warmRangeToCache(
+            startByte: startByte,
+            lengthBytes: bytesToFetch,
+          );
       _throwIfCancelled(cancellation, url: uri.toString());
-      return const _PreloadAttemptResult.success();
+      return _evaluateDirectFilePlayableSet(
+        uri: uri,
+        cacheDownloadRequest: cacheDownloadRequest.withRemoteUri(uri),
+        playableSet: playableSet,
+      );
     } catch (error) {
       return _PreloadAttemptResult.failure(
         _classifyException(error, url: uri.toString()),
@@ -1101,6 +1124,162 @@ class StreamPreloadService {
     return start;
   }
 
+  _DirectFilePlayableSet _buildDirectFilePlayableSet({
+    required int bytesToFetch,
+    required Duration startPosition,
+    required int? bitrateBitsPerSecond,
+    required int? sizeBytes,
+    required bool? supportsByteRange,
+  }) {
+    final prefixLengthBytes =
+        startPosition > Duration.zero ? 512 * 1024 : bytesToFetch;
+    final resumeStartByte =
+        startPosition > Duration.zero && supportsByteRange != false
+            ? _estimateRangeStartBytes(
+                startPosition: startPosition,
+                bytesToFetch: bytesToFetch,
+                bitrateBitsPerSecond: bitrateBitsPerSecond,
+                sizeBytes: sizeBytes,
+              )
+            : 0;
+    final requirements = <_DirectFilePlayableRequirement>[
+      _DirectFilePlayableRequirement(
+        label: 'initial-prefix',
+        startByte: 0,
+        lengthBytes: prefixLengthBytes,
+      ),
+    ];
+    if (resumeStartByte > 0) {
+      requirements.add(
+        _DirectFilePlayableRequirement(
+          label: 'resume-window',
+          startByte: resumeStartByte,
+          lengthBytes: bytesToFetch,
+        ),
+      );
+    }
+    return _DirectFilePlayableSet(
+      prefixLengthBytes: prefixLengthBytes,
+      resumeStartByte: resumeStartByte,
+      requirements: requirements,
+    );
+  }
+
+  Future<_PreloadAttemptResult> _evaluateDirectFilePlayableSet({
+    required Uri uri,
+    required StreamCacheDownloadRequest cacheDownloadRequest,
+    required _DirectFilePlayableSet playableSet,
+  }) async {
+    final snapshot = await cacheDownloadRequest.describe();
+    if (snapshot == null) {
+      return _PreloadAttemptResult.failure(
+        _PreloadFailureInfo(
+          category: _PreloadFailureCategory.emptyResponse,
+          url: uri.toString(),
+          message: 'direct-file-cache-missing',
+        ),
+      );
+    }
+
+    final coverages = playableSet.requirements.map((requirement) {
+      final coveredBytes = _cachedCoverageStartingAt(
+        snapshot: snapshot,
+        startByte: requirement.startByte,
+      );
+      final requiredBytes = _requiredPlayableBytesForRequirement(
+        snapshot: snapshot,
+        requirement: requirement,
+      );
+      return _DirectFilePlayableCoverage(
+        requirement: requirement,
+        requiredBytes: requiredBytes,
+        coveredBytes: coveredBytes,
+      );
+    }).toList(growable: false);
+    final ready = snapshot.isPlayable &&
+        coverages.every((coverage) => coverage.satisfied);
+    final detail = _summarizeDirectFilePlayableSet(
+      snapshot: snapshot,
+      coverages: coverages,
+      ready: ready,
+    );
+    if (ready) {
+      return _PreloadAttemptResult.success(detail: detail);
+    }
+    return _PreloadAttemptResult.failure(
+      _PreloadFailureInfo(
+        category: _PreloadFailureCategory.emptyResponse,
+        url: uri.toString(),
+        message: detail,
+      ),
+    );
+  }
+
+  int _cachedCoverageStartingAt({
+    required HttpStreamCacheSnapshot snapshot,
+    required int startByte,
+  }) {
+    if (startByte < 0) return 0;
+    final ranges = snapshot.ranges.toList(growable: false)
+      ..sort((a, b) => a.startByte.compareTo(b.startByte));
+    var covered = 0;
+    var cursor = startByte;
+    var started = false;
+    for (final range in ranges) {
+      final rangeStart = range.startByte;
+      final rangeEnd = range.endExclusive;
+      if (!started) {
+        if (rangeEnd <= cursor) continue;
+        if (rangeStart > cursor) break;
+        started = true;
+      } else if (rangeStart > cursor) {
+        break;
+      }
+
+      final segmentStart = rangeStart > cursor ? rangeStart : cursor;
+      final segmentLength = rangeEnd - segmentStart;
+      if (segmentLength <= 0) continue;
+      covered += segmentLength;
+      cursor = segmentStart + segmentLength;
+    }
+    return covered;
+  }
+
+  int _requiredPlayableBytesForRequirement({
+    required HttpStreamCacheSnapshot snapshot,
+    required _DirectFilePlayableRequirement requirement,
+  }) {
+    final totalBytes = snapshot.totalBytes;
+    if (totalBytes == null || totalBytes <= 0) {
+      return requirement.lengthBytes;
+    }
+    if (requirement.startByte >= totalBytes) {
+      return 0;
+    }
+    final available = totalBytes - requirement.startByte;
+    return available < requirement.lengthBytes
+        ? available
+        : requirement.lengthBytes;
+  }
+
+  String _summarizeDirectFilePlayableSet({
+    required HttpStreamCacheSnapshot snapshot,
+    required List<_DirectFilePlayableCoverage> coverages,
+    required bool ready,
+  }) {
+    final parts = coverages
+        .map(
+          (coverage) =>
+              '${coverage.requirement.label}@${coverage.requirement.startByte}'
+              '+${coverage.coveredBytes}/${coverage.requiredBytes}',
+        )
+        .join(', ');
+    return 'direct-file-${ready ? "ready" : "not-ready"} '
+        'state=${snapshot.state.name} '
+        'contiguousStart=${snapshot.contiguousBytesFromStart} '
+        'ranges=[$parts]';
+  }
+
   bool _shouldSeedLoopbackCache(Uri uri) {
     final scheme = uri.scheme.toLowerCase();
     if (scheme != 'http' && scheme != 'https') return false;
@@ -1123,17 +1302,16 @@ class StreamPreloadService {
     if (result.capturedBytes.isEmpty) return;
 
     try {
-      await StreamCacheDownloadService.instance.seedCache(
-        // Keep the cache key bound to the original playback semantics, but let
-        // the proxy reuse the redirect-final transport URL for later cache
-        // fills so playback does not need to repeat the redirect hop.
-        request: cacheDownloadRequest.withRemoteUri(seedUri),
-        startByte: startByte,
-        bytes: result.capturedBytes,
-        contentTypeMime: result.contentTypeMime,
-        totalBytes: result.totalBytes,
-        acceptRanges: result.acceptsByteRanges,
-      );
+      await cacheDownloadRequest.withRemoteUri(seedUri).seedCache(
+            // Keep the cache key bound to the original playback semantics, but let
+            // the proxy reuse the redirect-final transport URL for later cache
+            // fills so playback does not need to repeat the redirect hop.
+            startByte: startByte,
+            bytes: result.capturedBytes,
+            contentTypeMime: result.contentTypeMime,
+            totalBytes: result.totalBytes,
+            acceptRanges: result.acceptsByteRanges,
+          );
     } catch (_) {
       // Best-effort warmup only.
     }
@@ -1667,14 +1845,58 @@ class _PreloadCircuitState {
 
 @immutable
 class _PreloadAttemptResult {
-  const _PreloadAttemptResult.success()
+  const _PreloadAttemptResult.success({this.detail})
       : success = true,
         failure = null;
 
-  const _PreloadAttemptResult.failure(this.failure) : success = false;
+  const _PreloadAttemptResult.failure(this.failure)
+      : success = false,
+        detail = null;
 
   final bool success;
   final _PreloadFailureInfo? failure;
+  final String? detail;
+}
+
+@immutable
+class _DirectFilePlayableSet {
+  const _DirectFilePlayableSet({
+    required this.prefixLengthBytes,
+    required this.resumeStartByte,
+    required this.requirements,
+  });
+
+  final int prefixLengthBytes;
+  final int resumeStartByte;
+  final List<_DirectFilePlayableRequirement> requirements;
+}
+
+@immutable
+class _DirectFilePlayableRequirement {
+  const _DirectFilePlayableRequirement({
+    required this.label,
+    required this.startByte,
+    required this.lengthBytes,
+  });
+
+  final String label;
+  final int startByte;
+  final int lengthBytes;
+}
+
+@immutable
+class _DirectFilePlayableCoverage {
+  const _DirectFilePlayableCoverage({
+    required this.requirement,
+    required this.requiredBytes,
+    required this.coveredBytes,
+  });
+
+  final _DirectFilePlayableRequirement requirement;
+  final int requiredBytes;
+  final int coveredBytes;
+
+  bool get satisfied => coveredBytes >= requiredBytes;
 }
 
 class _PreloadCancelledException implements Exception {

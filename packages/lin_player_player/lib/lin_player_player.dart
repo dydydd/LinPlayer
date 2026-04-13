@@ -8,7 +8,7 @@ export 'player_service.dart';
 export 'stream_cache.dart';
 export 'src/preload/stream_preload_service.dart';
 export 'src/preload/preload_request.dart';
-export 'src/preload/stream_cache_download_service.dart';
+export 'src/preload/stream_cache_download_request.dart';
 export 'src/external_player/external_mpv_launcher.dart';
 export 'src/player/anime4k.dart';
 export 'src/player/danmaku.dart';

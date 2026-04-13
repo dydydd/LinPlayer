@@ -102,8 +102,8 @@
 
 所以这轮的判断应该是：
 
-- `StreamCacheDownloadService` 可以保留
-- 也可以继续下沉、内聚、弱化存在感
+- `StreamCacheDownloadService` 不再作为独立服务保留
+- 保留 `StreamCacheDownloadRequest` 作为共享缓存语义对象
 - 是否保留为独立服务，不是验收标准
 
 真正的验收标准只有：
@@ -193,9 +193,9 @@
 
 - [x] 明确三类触发场景：剧集详情页、电影详情页、下一集
 - [x] 明确本轮 HLS 范围：仅 direct HLS / 固定源链路 / 非 ABR 目标
-- [ ] 为 direct file / redirect file / body-link file 定义“起播最小可播集合”
+- [x] 为 direct file / redirect file / body-link file 定义“起播最小可播集合”：0 秒起播时要求前缀起播窗口已就绪；续播时要求首段探测前缀 + 续播点对应字节窗口都已进入共享缓存
 - [x] 为 HLS 定义“起播最小可播集合”：播放入口 playlist（master / media）+ 实际选中的 variant playlist（如有）+ init segment（如有）+ 起播点对应首段 segment（最多 3 段 / 约 3 秒）
-- [ ] 把预加载成功判定从“下载过”改成“起播可直接利用缓存”
+- [x] 把预加载成功判定从“下载过”改成“起播可直接利用缓存”
 - [x] 为详情页当前项、详情页下一项、播放页当前项、播放页下一项定义 owner / scope
 
 验收标准：
@@ -217,8 +217,8 @@
 - [x] 找出“播放器首个关键请求”是否命中缓存
 - [x] 从真机诊断确认：播放器已走 loopback cache proxy，但缓存命中后的 `cached-prefix + remote-tail` 在播放器探测断开时被误记为 `proxy-error/cache-serve-error`，会干扰起播复用判断
 - [x] 从真机诊断确认：部分续播 / 探测请求仍会出现 `range-not-covered`，需要继续以“播放器实际请求范围”为准校正起播最小集合
-- [ ] 确认等预加载完成后再点播放，不再重复下载起播前缀
-- [ ] 确认 direct file 场景下，点击播放后能直接从已缓存起点开始
+- [x] 确认等预加载完成后再点播放，不再重复下载起播前缀
+- [x] 确认 direct file 场景下，点击播放后能直接从已缓存起点开始
 - [x] 确认 HLS 场景下，点击播放后能直接从已缓存的 playlist / init / 首段 segment 开始
 
 验收标准：
@@ -272,10 +272,16 @@
 目标：把实现手段降级为实现细节，不让它反过来主导产品行为。
 
 - [x] 已有一层共享缓存写入入口
-- [ ] 评估 `StreamCacheDownloadService` 是否继续保留为独立服务
-- [ ] 如果该抽象继续增加复杂度，则下沉或内聚回 preload / cache proxy 主链路
-- [ ] 不再把“是否存在独立下载器”写成任务验收条件
-- [ ] 所有后续改动都以“缓存复用 + 生命周期控制”为验收口径
+- [x] 评估 `StreamCacheDownloadService` 是否继续保留为独立服务
+- [x] 如果该抽象继续增加复杂度，则下沉或内聚回 preload / cache proxy 主链路
+- [x] 不再把“是否存在独立下载器”写成任务验收条件
+- [x] 所有后续改动都以“缓存复用 + 生命周期控制”为验收口径
+
+当前结论：
+
+- 删除 `StreamCacheDownloadService`
+- 保留 `StreamCacheDownloadRequest` 作为缓存语义对象
+- preload 主链路直接围绕 `StreamPreloadService` + `HttpStreamProxyServer` + 共享 `CacheKey`
 
 验收标准：
 
@@ -315,7 +321,7 @@
 2. 再定位“起播为什么仍然等待”
 3. 再补 owner / scope / cancel 机制
 4. 再收口“只做够起播的准备”
-5. 最后决定 `StreamCacheDownloadService` 是否继续独立存在
+5. 最后确认不再保留独立 `StreamCacheDownloadService`，只保留缓存语义对象
 6. 手工回归必须穿插进行，不要等最后才看体感
 
 ## 11. 第一优先级 TODO
