@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:lin_player_player/lin_player_player.dart';
-import 'package:lin_player_server_api/network/lin_http_client.dart';
 import 'package:lin_player_server_api/services/http_stream_proxy.dart';
 
 class LocalHlsStreamProxy {
@@ -22,11 +21,10 @@ class LocalHlsStreamProxy {
     HttpStreamCacheKey? rootCacheKey,
     int? preferredVariantBitrate,
   }) async {
-    final baseKey = buildNetworkPlaybackCacheKey(
+    final baseKey = _playlistCacheKeyFor(
       remoteUri: remoteUri,
       httpHeaders: httpHeaders,
-      mediaSourceId: rootCacheKey?.mediaSourceId,
-      proxyUrl: rootCacheKey?.proxyUrl,
+      rootCacheKey: rootCacheKey,
     ).fingerprint;
     final normalizedPreferredBitrate =
         preferredVariantBitrate != null && preferredVariantBitrate > 0
@@ -134,36 +132,44 @@ class LocalHlsStreamProxy {
   Future<_FetchedHlsPlaylist?> _fetchPlaylist(
     _LocalHlsPlaylistEntry entry,
   ) async {
-    final client = LinHttpClientFactory.createHttpClient(
-      _overrideConfig(entry.rootCacheKey?.proxyUrl),
-    );
     try {
-      final request = await client.getUrl(entry.remoteUri);
-      request.followRedirects = true;
-      request.maxRedirects = 5;
-      entry.httpHeaders.forEach(request.headers.set);
-      final response = await request.close();
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        return null;
-      }
-      final bytes = await response.fold<List<int>>(
-        <int>[],
-        (acc, chunk) => <int>[...acc, ...chunk],
+      final proxyUri = await HttpStreamProxyServer.instance.registerStream(
+        remoteUri: entry.remoteUri,
+        httpHeaders: entry.httpHeaders,
+        fileName: _suggestFileName(
+          entry.remoteUri,
+          fallback: 'playlist.m3u8',
+        ),
+        cacheKey: _playlistCacheKeyFor(
+          remoteUri: entry.remoteUri,
+          httpHeaders: entry.httpHeaders,
+          rootCacheKey: entry.rootCacheKey,
+        ),
       );
-      var effective = entry.remoteUri;
+      final client = HttpClient()..findProxy = (_) => 'DIRECT';
       try {
-        for (final redirect in response.redirects) {
-          effective = effective.resolveUri(redirect.location);
+        final request = await client.getUrl(proxyUri);
+        final response = await request.close();
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          return null;
         }
-      } catch (_) {}
-      return _FetchedHlsPlaylist(
-        effectiveUri: effective,
-        text: utf8.decode(bytes, allowMalformed: true),
-      );
+        final bytes = await response.fold<List<int>>(
+          <int>[],
+          (acc, chunk) => <int>[...acc, ...chunk],
+        );
+        final rawEffectiveUri = response.headers
+            .value(HttpStreamProxyServer.effectiveRemoteUrlHeader);
+        final effectiveUri =
+            Uri.tryParse((rawEffectiveUri ?? '').trim()) ?? entry.remoteUri;
+        return _FetchedHlsPlaylist(
+          effectiveUri: effectiveUri,
+          text: utf8.decode(bytes, allowMalformed: true),
+        );
+      } finally {
+        client.close(force: true);
+      }
     } catch (_) {
       return null;
-    } finally {
-      client.close(force: true);
     }
   }
 
@@ -374,26 +380,25 @@ class LocalHlsStreamProxy {
     return proxied.toString();
   }
 
-  String _suggestFileName(Uri uri) {
+  HttpStreamCacheKey _playlistCacheKeyFor({
+    required Uri remoteUri,
+    required Map<String, String> httpHeaders,
+    required HttpStreamCacheKey? rootCacheKey,
+  }) {
+    return buildNetworkPlaybackCacheKey(
+      remoteUri: remoteUri,
+      httpHeaders: httpHeaders,
+      mediaSourceId: rootCacheKey?.mediaSourceId,
+      proxyUrl: rootCacheKey?.proxyUrl,
+    );
+  }
+
+  String _suggestFileName(Uri uri, {String fallback = 'segment.bin'}) {
     if (uri.pathSegments.isNotEmpty) {
       final last = uri.pathSegments.last.trim();
       if (last.isNotEmpty) return last;
     }
-    return 'segment.bin';
-  }
-
-  LinHttpClientConfig _overrideConfig(String? httpProxyUrl) {
-    final base = LinHttpClientFactory.config;
-    final proxy = (httpProxyUrl ?? '').trim();
-    final proxyUri = proxy.isEmpty ? null : Uri.tryParse(proxy);
-    final hasProxy = proxyUri != null &&
-        proxyUri.host.trim().isNotEmpty &&
-        proxyUri.port > 0 &&
-        proxyUri.port <= 65535;
-    if (!hasProxy) return base;
-    return base.copyWith(
-      proxyResolver: (_) => 'PROXY ${proxyUri.host}:${proxyUri.port}',
-    );
+    return fallback;
   }
 }
 

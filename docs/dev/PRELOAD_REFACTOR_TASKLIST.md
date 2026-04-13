@@ -1,5 +1,5 @@
 # 预加载重构任务清单
-> 更新日期：2026-04-06
+> 更新日期：2026-04-13
 >
 > 配套文档：`docs/dev/PRELOAD_ASSESSMENT.md`
 
@@ -194,7 +194,7 @@
 - [x] 明确三类触发场景：剧集详情页、电影详情页、下一集
 - [x] 明确本轮 HLS 范围：仅 direct HLS / 固定源链路 / 非 ABR 目标
 - [ ] 为 direct file / redirect file / body-link file 定义“起播最小可播集合”
-- [ ] 为 HLS 定义“起播最小可播集合”
+- [x] 为 HLS 定义“起播最小可播集合”：播放入口 playlist（master / media）+ 实际选中的 variant playlist（如有）+ init segment（如有）+ 起播点对应首段 segment（最多 3 段 / 约 3 秒）
 - [ ] 把预加载成功判定从“下载过”改成“起播可直接利用缓存”
 - [x] 为详情页当前项、详情页下一项、播放页当前项、播放页下一项定义 owner / scope
 
@@ -219,7 +219,7 @@
 - [x] 从真机诊断确认：部分续播 / 探测请求仍会出现 `range-not-covered`，需要继续以“播放器实际请求范围”为准校正起播最小集合
 - [ ] 确认等预加载完成后再点播放，不再重复下载起播前缀
 - [ ] 确认 direct file 场景下，点击播放后能直接从已缓存起点开始
-- [ ] 确认 HLS 场景下，点击播放后能直接从已缓存的 playlist / init / 首段 segment 开始
+- [x] 确认 HLS 场景下，点击播放后能直接从已缓存的 playlist / init / 首段 segment 开始
 
 验收标准：
 

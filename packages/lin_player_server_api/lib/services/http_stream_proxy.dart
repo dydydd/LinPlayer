@@ -23,6 +23,7 @@ class HttpStreamProxyServer {
   static const Duration _warmupStateTtl = Duration(seconds: 15);
   static const int _maxRecentDiagnostics = 96;
   static const String _cacheRootName = 'linplayer_http_stream_proxy_v2';
+  static const String effectiveRemoteUrlHeader = 'x-linplayer-remote-url';
 
   HttpServer? _server;
   Uri? _baseUri;
@@ -1077,6 +1078,7 @@ class HttpStreamProxyServer {
             endByte: headRange.endByte,
             hasRange: headRange.hasRange,
           );
+          _setEffectiveRemoteUrlHeader(response.headers, entry.remoteUri);
           diag.statusCode = response.statusCode;
           diag.cacheStatus = 'hit';
           diag.reason = 'head-metadata';
@@ -1146,6 +1148,12 @@ class HttpStreamProxyServer {
         range: request.headers.value(HttpHeaders.rangeHeader),
         ifRange: request.headers.value(HttpHeaders.ifRangeHeader),
       );
+      final effectiveRemoteUri = _effectiveRemoteUriFromResponse(
+        remote.response,
+        fallback: entry.remoteUri,
+      );
+      await entry.updateRemoteUri(effectiveRemoteUri);
+      _setEffectiveRemoteUrlHeader(response.headers, effectiveRemoteUri);
 
       response.statusCode = remote.response.statusCode;
       diag.statusCode = response.statusCode;
@@ -1361,6 +1369,7 @@ class HttpStreamProxyServer {
       var totalBytes = totalFromCache;
       var contentTypeMime = coverage.contentTypeMime;
       var acceptRanges = coverage.acceptRanges;
+      var effectiveRemoteUri = entry.remoteUri;
       var remoteBytes = 0;
       final needsRemoteTail = requestedLength != null
           ? cachedBytesToServe < requestedLength
@@ -1382,6 +1391,11 @@ class HttpStreamProxyServer {
               : 'bytes=$nextStart-$requestedEnd',
           ifRange: request.headers.value(HttpHeaders.ifRangeHeader),
         );
+        effectiveRemoteUri = _effectiveRemoteUriFromResponse(
+          remote.response,
+          fallback: entry.remoteUri,
+        );
+        await entry.updateRemoteUri(effectiveRemoteUri);
         final remoteStatus = remote.response.statusCode;
         if (range.hasRange && remoteStatus != HttpStatus.partialContent) {
           await remote.close();
@@ -1409,6 +1423,7 @@ class HttpStreamProxyServer {
 
       response.statusCode =
           range.hasRange ? HttpStatus.partialContent : HttpStatus.ok;
+      _setEffectiveRemoteUrlHeader(response.headers, effectiveRemoteUri);
       _applyCachedResponseHeaders(
         response.headers,
         remoteHeaders: remote?.response.headers ?? const <String, String>{},
@@ -2111,6 +2126,12 @@ class HttpStreamProxyServer {
     to.set(name, value);
   }
 
+  static void _setEffectiveRemoteUrlHeader(HttpHeaders headers, Uri remoteUri) {
+    final value = remoteUri.toString().trim();
+    if (value.isEmpty) return;
+    headers.set(effectiveRemoteUrlHeader, value);
+  }
+
   static void _applyCachedResponseHeaders(
     HttpHeaders target, {
     required Map<String, String> remoteHeaders,
@@ -2382,6 +2403,7 @@ class _HttpStreamProxyEntry {
       acceptRanges: acceptRanges,
       maxRanges: maxRanges,
       maxBytes: maxBytes,
+      fallbackBytesHint: bytes,
     );
   }
 
@@ -2401,6 +2423,7 @@ class _HttpStreamProxyEntry {
     required bool acceptRanges,
     required int maxRanges,
     required int maxBytes,
+    List<int>? fallbackBytesHint,
   }) async {
     touch();
     if (lengthBytes <= 0) {
@@ -2415,8 +2438,11 @@ class _HttpStreamProxyEntry {
     final finalPath =
         HttpStreamProxyServer._joinPath(cacheDirectory.path, finalName);
     final finalFile = File(finalPath);
-    List<int>? fallbackBytes;
-    if (Platform.isWindows) {
+    List<int>? fallbackBytes =
+        (fallbackBytesHint != null && fallbackBytesHint.isNotEmpty)
+            ? List<int>.from(fallbackBytesHint)
+            : null;
+    if (Platform.isWindows && fallbackBytes == null) {
       try {
         if (await pendingFile.exists()) {
           fallbackBytes = await pendingFile.readAsBytes();

@@ -1949,6 +1949,203 @@ void main() {
       expect(initBytes, <int>[0, 1, 2, 3]);
       expect(seg1Response.statusCode, HttpStatus.ok);
       expect(seg1Bytes, <int>[4, 5, 6, 7]);
+      expect(hits['/media.m3u8'], 1);
+      expect(hits['/init.mp4'], 1);
+      expect(hits['/seg1.ts'], 1);
+    },
+  );
+
+  test(
+    'Preloaded HLS master and selected variant playlists are reused by the local playback HLS proxy',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() async {
+        await server.close(force: true);
+      });
+
+      final hits = <String, int>{};
+      server.listen((HttpRequest request) async {
+        final path = request.uri.path;
+        hits[path] = (hits[path] ?? 0) + 1;
+
+        switch (path) {
+          case '/master.m3u8':
+            request.response.statusCode = HttpStatus.ok;
+            request.response.headers.contentType =
+                ContentType('application', 'vnd.apple.mpegurl');
+            request.response.write(
+              '#EXTM3U\n'
+              '#EXT-X-STREAM-INF:BANDWIDTH=1200000\n'
+              'low.m3u8\n'
+              '#EXT-X-STREAM-INF:BANDWIDTH=3000000\n'
+              'mid.m3u8\n'
+              '#EXT-X-STREAM-INF:BANDWIDTH=6000000\n'
+              'high.m3u8\n',
+            );
+            break;
+          case '/low.m3u8':
+            request.response.statusCode = HttpStatus.ok;
+            request.response.headers.contentType =
+                ContentType('application', 'vnd.apple.mpegurl');
+            request.response.write(
+              '#EXTM3U\n'
+              '#EXTINF:2.0,\n'
+              'low1.ts\n',
+            );
+            break;
+          case '/mid.m3u8':
+            request.response.statusCode = HttpStatus.ok;
+            request.response.headers.contentType =
+                ContentType('application', 'vnd.apple.mpegurl');
+            request.response.write(
+              '#EXTM3U\n'
+              '#EXT-X-MAP:URI="init.mp4"\n'
+              '#EXTINF:2.0,\n'
+              'seg1.ts\n'
+              '#EXTINF:2.0,\n'
+              'seg2.ts\n',
+            );
+            break;
+          case '/high.m3u8':
+            request.response.statusCode = HttpStatus.ok;
+            request.response.headers.contentType =
+                ContentType('application', 'vnd.apple.mpegurl');
+            request.response.write(
+              '#EXTM3U\n'
+              '#EXTINF:2.0,\n'
+              'high1.ts\n',
+            );
+            break;
+          case '/init.mp4':
+            request.response.statusCode = HttpStatus.ok;
+            request.response.headers.contentType = ContentType('video', 'mp4');
+            request.response.add(const <int>[0, 1, 2, 3]);
+            break;
+          case '/seg1.ts':
+            request.response.statusCode = HttpStatus.ok;
+            request.response.headers.contentType = ContentType('video', 'mp2t');
+            request.response.add(const <int>[4, 5, 6, 7]);
+            break;
+          case '/seg2.ts':
+            request.response.statusCode = HttpStatus.ok;
+            request.response.headers.contentType = ContentType('video', 'mp2t');
+            request.response.add(const <int>[8, 9, 10, 11]);
+            break;
+          case '/low1.ts':
+          case '/high1.ts':
+            request.response.statusCode = HttpStatus.ok;
+            request.response.headers.contentType = ContentType('video', 'mp2t');
+            request.response.add(const <int>[12, 13, 14, 15]);
+            break;
+          default:
+            request.response.statusCode = HttpStatus.notFound;
+        }
+
+        await request.response.close();
+      });
+
+      final url = 'http://127.0.0.1:${server.port}/master.m3u8';
+      final resolvedSource = ResolvedPlaybackSource(
+        itemId: 'episode-hls-master-reuse',
+        playSessionId: 'ps-hls-master-reuse',
+        mediaSourceId: 'ms-hls-master-reuse',
+        url: url,
+        httpHeaders: const <String, String>{'User-Agent': 'SourceUA/1.0'},
+        isExternal: false,
+        mediaTypeHint: ResolvedPlaybackMediaType.hls,
+        fromStrm: false,
+        redirectChain: <String>[url],
+        bitrate: 2600000,
+        sizeBytes: 4000000,
+      );
+
+      final preload = await StreamPreloadService.instance.preloadResolvedSource(
+        PreloadRequest(
+          resolvedSource: resolvedSource,
+          triggerSource: 'detail_current',
+        ),
+      );
+
+      expect(preload.status, StreamPreloadStatus.success);
+      expect(hits['/master.m3u8'], 1);
+      expect(hits['/mid.m3u8'], 1);
+      expect(hits.containsKey('/low.m3u8'), isFalse);
+      expect(hits.containsKey('/high.m3u8'), isFalse);
+      expect(hits['/init.mp4'], 1);
+      expect(hits['/seg1.ts'], 1);
+
+      final proxied = await LocalHttpStreamProxy.wrapPlaybackSource(
+        PlayableSource(
+          url: resolvedSource.url,
+          httpHeaders: resolvedSource.httpHeaders,
+          mediaTypeHint: StreamMediaType.hls,
+          fromStrm: false,
+          redirectChain: resolvedSource.redirectChain,
+          bitrateHint: resolvedSource.bitrate,
+        ),
+        cacheKey: buildResolvedPlaybackCacheKey(resolvedSource),
+      );
+      expect(proxied, isNotNull);
+
+      final client = HttpClient();
+      addTearDown(() {
+        client.close(force: true);
+      });
+
+      final masterResponse =
+          await (await client.getUrl(Uri.parse(proxied!.url))).close();
+      final masterText = utf8.decode(
+        await masterResponse.fold<List<int>>(
+          <int>[],
+          (acc, chunk) => <int>[...acc, ...chunk],
+        ),
+        allowMalformed: true,
+      );
+      final variantUrls =
+          RegExp(r'http://127\.0\.0\.1:\d+/hls/[^\s]+/index\.m3u8')
+              .allMatches(masterText)
+              .map((match) => match.group(0)!)
+              .toList(growable: false);
+      expect(variantUrls, hasLength(1));
+
+      final variantResponse =
+          await (await client.getUrl(Uri.parse(variantUrls.single))).close();
+      final variantText = utf8.decode(
+        await variantResponse.fold<List<int>>(
+          <int>[],
+          (acc, chunk) => <int>[...acc, ...chunk],
+        ),
+        allowMalformed: true,
+      );
+      final streamUrls = RegExp(r'http://127\.0\.0\.1:\d+/stream/[^\s]+')
+          .allMatches(variantText)
+          .map((match) => match.group(0)!)
+          .toList(growable: false);
+      expect(streamUrls.length, greaterThanOrEqualTo(2));
+
+      final initResponse =
+          await (await client.getUrl(Uri.parse(streamUrls[0]))).close();
+      final initBytes = await initResponse.fold<List<int>>(
+        <int>[],
+        (acc, chunk) => <int>[...acc, ...chunk],
+      );
+      final seg1Response =
+          await (await client.getUrl(Uri.parse(streamUrls[1]))).close();
+      final seg1Bytes = await seg1Response.fold<List<int>>(
+        <int>[],
+        (acc, chunk) => <int>[...acc, ...chunk],
+      );
+
+      expect(masterResponse.statusCode, HttpStatus.ok);
+      expect(variantResponse.statusCode, HttpStatus.ok);
+      expect(initResponse.statusCode, HttpStatus.ok);
+      expect(initBytes, <int>[0, 1, 2, 3]);
+      expect(seg1Response.statusCode, HttpStatus.ok);
+      expect(seg1Bytes, <int>[4, 5, 6, 7]);
+      expect(hits['/master.m3u8'], 1);
+      expect(hits['/mid.m3u8'], 1);
+      expect(hits.containsKey('/low.m3u8'), isFalse);
+      expect(hits.containsKey('/high.m3u8'), isFalse);
       expect(hits['/init.mp4'], 1);
       expect(hits['/seg1.ts'], 1);
     },

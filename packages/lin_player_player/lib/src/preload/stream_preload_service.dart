@@ -532,7 +532,8 @@ class StreamPreloadService {
         return result;
       }
       final refreshedOpenCircuit = _circuitStates[scopeKey];
-      if (refreshedOpenCircuit != null && refreshedOpenCircuit.isOpen(_clock())) {
+      if (refreshedOpenCircuit != null &&
+          refreshedOpenCircuit.isOpen(_clock())) {
         final result = StreamPreloadResult(
           StreamPreloadStatus.skippedDisabled,
           error: _PreloadFailureInfo(
@@ -999,6 +1000,12 @@ class StreamPreloadService {
     }
 
     final playlistUri = first.effectiveUri;
+    await _seedHlsAssetCache(
+      assetUri: playlistUri,
+      cacheHeaders: cacheDownloadRequest.resolvedSource.httpHeaders,
+      result: first,
+      cacheDownloadRequest: cacheDownloadRequest,
+    );
     return _prefetchHls(
       client: client,
       playlistUri: playlistUri,
@@ -1186,6 +1193,12 @@ class StreamPreloadService {
           ),
         );
       }
+      await _seedHlsAssetCache(
+        assetUri: parsed.variantPlaylistUri!,
+        cacheHeaders: cacheDownloadRequest.resolvedSource.httpHeaders,
+        result: variant,
+        cacheDownloadRequest: cacheDownloadRequest,
+      );
       parsed = _parseHls(
         text,
         base: variant.effectiveUri,
