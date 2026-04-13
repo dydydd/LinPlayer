@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:cronet_http/cronet_http.dart';
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform, kIsWeb;
+    show TargetPlatform, defaultTargetPlatform, kIsWeb, visibleForTesting;
 import 'package:http/http.dart' as http;
 import 'package:lin_player_server_api/network/lin_http_client.dart';
 
@@ -14,7 +14,8 @@ http.Client createEmbyHttpClient() {
   if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
     return LinHttpClientFactory.createClient();
   }
-  return _sharedAndroidClient ??= _buildAndroidClient();
+  final shared = _sharedAndroidClient ??= _buildAndroidClient();
+  return _SharedClientLease(shared);
 }
 
 String? describeEmbyHttpRoute(Uri uri) {
@@ -22,6 +23,11 @@ String? describeEmbyHttpRoute(Uri uri) {
     return 'platform-native(android)';
   }
   return LinHttpClientFactory.describeProxyRoute(uri);
+}
+
+@visibleForTesting
+http.Client debugWrapSharedEmbyClient(http.Client delegate) {
+  return _SharedClientLease(delegate);
 }
 
 http.Client _buildAndroidClient() {
@@ -41,6 +47,29 @@ http.Client _buildAndroidClient() {
     primary: primary,
     fallback: fallback,
   );
+}
+
+class _SharedClientLease extends http.BaseClient {
+  _SharedClientLease(this._delegate);
+
+  final http.Client _delegate;
+  bool _isClosed = false;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    if (_isClosed) {
+      throw http.ClientException(
+        'HTTP request failed. Client is already closed.',
+        request.url,
+      );
+    }
+    return _delegate.send(request);
+  }
+
+  @override
+  void close() {
+    _isClosed = true;
+  }
 }
 
 class _RetryOnCronetFailureClient extends http.BaseClient {
