@@ -17,6 +17,7 @@ import 'mobile_ui/show_detail/mobile_text_widgets.dart';
 import 'mobile_ui/show_detail/show_detail_mobile_view.dart';
 import 'plugins/plugin_slot_area.dart';
 import 'server_adapters/server_access.dart';
+import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/preload/playback_preload_coordinator.dart';
 import 'person_page.dart';
 import 'play_network_page.dart';
@@ -239,6 +240,11 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
         : PlaybackSourcePlayerCoreKind.mpv;
   }
 
+  bool get _preferBuiltInProxyForMpvPreload =>
+      widget.isTv &&
+      widget.appState.tvBuiltInProxyEnabled &&
+      BuiltInProxyService.instance.status.state == BuiltInProxyState.running;
+
   PreparedPlaybackPreload? _preparedMoviePreloadForPlayback(MediaItem item) {
     final prepared = _preparedMoviePreload;
     if (prepared == null) return null;
@@ -356,6 +362,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           audioStreamIndex: audioStreamIndex,
           subtitleStreamIndex: subtitleStreamIndex,
           preferredVideoVersion: widget.appState.preferredVideoVersion,
+          preferBuiltInProxy:
+              _moviePlaybackCoreKind == PlaybackSourcePlayerCoreKind.mpv &&
+                  _preferBuiltInProxyForMpvPreload,
           ownerKey: _preloadOwnerKey,
           scopeKey: 'detail_current',
         ),
@@ -5612,6 +5621,11 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         : PlaybackSourcePlayerCoreKind.mpv;
   }
 
+  bool get _preferBuiltInProxyForMpvPreload =>
+      widget.isTv &&
+      widget.appState.tvBuiltInProxyEnabled &&
+      BuiltInProxyService.instance.status.state == BuiltInProxyState.running;
+
   PreparedPlaybackPreload? _preparedEpisodePreloadForPlayback(String itemId) {
     final prepared = _preparedEpisodePreloads[itemId.trim()];
     if (prepared == null) return null;
@@ -5670,6 +5684,9 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
           audioStreamIndex: audioStreamIndex,
           subtitleStreamIndex: subtitleStreamIndex,
           preferredVideoVersion: widget.appState.preferredVideoVersion,
+          preferBuiltInProxy:
+              _episodePlaybackCoreKind == PlaybackSourcePlayerCoreKind.mpv &&
+                  _preferBuiltInProxyForMpvPreload,
           ownerKey: _preloadOwnerKey,
           scopeKey: preloadScopeKey,
         ),

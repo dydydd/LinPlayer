@@ -4989,6 +4989,14 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         _reportPlaybackStartBestEffort();
       }
     } catch (e) {
+      AppDiagnosticsLogger.instance.error(
+        'player_network_exo',
+        'Unhandled Exo playback initialization error',
+        data: <String, Object?>{
+          'itemId': widget.itemId,
+        },
+        error: e,
+      );
       _playError = e.toString();
       _resumeHintPosition = null;
       _showResumeHint = false;

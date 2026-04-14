@@ -6,6 +6,10 @@ import 'package:lin_player_state/lin_player_state.dart';
 import '../../server_adapters/server_access.dart';
 import '../built_in_proxy/built_in_proxy_service.dart';
 import '../playback_proxy/playback_proxy.dart';
+import '../stream_proxy/local_http_stream_proxy.dart';
+import '../stream_resolver/stream_models.dart';
+
+const Object _preparedPlaybackSourceUnset = Object();
 
 enum PlaybackPreloadTargetKind {
   currentItem,
@@ -66,6 +70,7 @@ class PreparedPlaybackPreload {
     this.selectedMediaSourceId,
     this.audioStreamIndex,
     this.subtitleStreamIndex,
+    this.playbackSource,
   })  : mediaSources = List<Map<String, dynamic>>.unmodifiable(
           mediaSources
               .map((entry) => Map<String, dynamic>.unmodifiable(entry))
@@ -89,6 +94,7 @@ class PreparedPlaybackPreload {
   final String? selectedMediaSourceId;
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
+  final PlayableSource? playbackSource;
 
   String? get effectivePlaySessionId {
     final prepared = (playSessionId ?? '').trim();
@@ -121,6 +127,34 @@ class PreparedPlaybackPreload {
     return true;
   }
 
+  bool matchesHttpProxyUrl(String? proxyUrl) {
+    return _normalizeProxyUrl(proxyUrl) == _normalizeProxyUrl(httpProxyUrl);
+  }
+
+  PreparedPlaybackPreload copyWith({
+    Object? playbackSource = _preparedPlaybackSourceUnset,
+  }) {
+    return PreparedPlaybackPreload(
+      targetKind: targetKind,
+      triggerSource: triggerSource,
+      resolvedSource: resolvedSource,
+      startPosition: startPosition,
+      playerCore: playerCore,
+      httpProxyUrl: httpProxyUrl,
+      ownerKey: ownerKey,
+      scopeKey: scopeKey,
+      playSessionId: playSessionId,
+      mediaSources: mediaSources,
+      selectedMediaSource: selectedMediaSource,
+      selectedMediaSourceId: selectedMediaSourceId,
+      audioStreamIndex: audioStreamIndex,
+      subtitleStreamIndex: subtitleStreamIndex,
+      playbackSource: identical(playbackSource, _preparedPlaybackSourceUnset)
+          ? this.playbackSource
+          : playbackSource as PlayableSource?,
+    );
+  }
+
   PreloadRequest toPreloadRequest() {
     return PreloadRequest(
       resolvedSource: resolvedSource,
@@ -140,6 +174,11 @@ class PreparedPlaybackPreload {
       PlaybackPreloadTargetKind.currentItem => 'target:current',
       PlaybackPreloadTargetKind.nextItem => 'target:next',
     };
+  }
+
+  static String? _normalizeProxyUrl(String? raw) {
+    final value = (raw ?? '').trim();
+    return value.isEmpty ? null : value;
   }
 }
 
@@ -164,7 +203,7 @@ class PlaybackPreloadCoordinator {
         preferredVideoVersion: request.preferredVideoVersion,
       ),
     );
-    return prepareResolved(
+    final prepared = prepareResolved(
       appState: request.appState,
       targetKind: request.targetKind,
       triggerSource: request.triggerSource,
@@ -181,6 +220,11 @@ class PlaybackPreloadCoordinator {
       audioStreamIndex: request.audioStreamIndex,
       subtitleStreamIndex: request.subtitleStreamIndex,
     );
+    try {
+      return await attachPlaybackSource(prepared);
+    } catch (_) {
+      return prepared;
+    }
   }
 
   static PreparedPlaybackPreload prepareResolved({
@@ -252,6 +296,48 @@ class PlaybackPreloadCoordinator {
     );
   }
 
+  static Future<PreparedPlaybackPreload> attachPlaybackSource(
+    PreparedPlaybackPreload prepared,
+  ) async {
+    final playbackSource = await buildPlaybackSource(
+      resolvedSource: prepared.resolvedSource,
+      httpProxyUrl: prepared.httpProxyUrl,
+    );
+    return prepared.copyWith(playbackSource: playbackSource);
+  }
+
+  static Future<PlayableSource> buildPlaybackSource({
+    required ResolvedPlaybackSource resolvedSource,
+    String? httpProxyUrl,
+  }) async {
+    final cacheKey = buildResolvedPlaybackCacheKey(
+      resolvedSource,
+      proxyUrl: _normalizeProxyUrl(httpProxyUrl ?? resolvedSource.proxyUrl),
+    );
+    final mediaType = switch (resolvedSource.mediaTypeHint) {
+      ResolvedPlaybackMediaType.hls => StreamMediaType.hls,
+      ResolvedPlaybackMediaType.dash => StreamMediaType.dash,
+      ResolvedPlaybackMediaType.file => StreamMediaType.file,
+      ResolvedPlaybackMediaType.unknown => StreamMediaType.unknown,
+    };
+    final candidate = PlayableSource(
+      url: resolvedSource.url,
+      httpHeaders: resolvedSource.httpHeaders,
+      mediaTypeHint: mediaType,
+      fromStrm: resolvedSource.fromStrm,
+      redirectChain: resolvedSource.redirectChain,
+      contentTypeHint: resolvedSource.contentTypeHint,
+      supportsByteRange: resolvedSource.supportsByteRange,
+      httpStatusHint: resolvedSource.httpStatusHint,
+      bitrateHint: resolvedSource.bitrate,
+    );
+    final proxied = await LocalHttpStreamProxy.wrapPlaybackSource(
+      candidate,
+      cacheKey: cacheKey,
+    );
+    return proxied ?? candidate;
+  }
+
   static String createOwnerToken(String namespace) {
     final normalized = _normalizeScopeToken(namespace) ?? 'preload';
     _nextOwnerTokenId += 1;
@@ -289,5 +375,10 @@ class PlaybackPreloadCoordinator {
     final value = (raw ?? '').trim();
     if (value.isEmpty) return null;
     return value.replaceAll(RegExp(r'\s+'), '_');
+  }
+
+  static String? _normalizeProxyUrl(String? raw) {
+    final value = (raw ?? '').trim();
+    return value.isEmpty ? null : value;
   }
 }

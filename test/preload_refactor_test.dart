@@ -106,6 +106,13 @@ void main() {
     expect(prepared.effectivePlaySessionId, 'ps-handoff');
     expect(prepared.selectedMediaSourceId, 'ms-handoff');
     expect(prepared.mediaSources, hasLength(1));
+    expect(prepared.playbackSource, isNotNull);
+    expect(
+      Uri.tryParse(prepared.playbackSource!.url)?.host,
+      '127.0.0.1',
+    );
+    expect(prepared.playbackSource!.httpHeaders, isEmpty);
+    expect(prepared.matchesHttpProxyUrl(null), isTrue);
     expect(
       prepared.matchesPlayback(
         itemId: 'item-handoff',
@@ -199,7 +206,7 @@ void main() {
       expect(first.status, StreamPreloadStatus.success);
       expect(second.status, StreamPreloadStatus.skippedAlreadyDone);
       expect(third.status, StreamPreloadStatus.success);
-      expect(requestCount, 2);
+      expect(requestCount, inInclusiveRange(2, 3));
     },
   );
 

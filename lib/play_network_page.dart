@@ -249,6 +249,34 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     return prepared;
   }
 
+  PlayableSource? _preparedPlaybackSourceForPlayback(
+    PreparedPlaybackPreload? prepared, {
+    required String? preloadProxyUrl,
+  }) {
+    if (prepared == null) return null;
+    final playbackSource = prepared.playbackSource;
+    if (playbackSource == null) return null;
+    if (!prepared.matchesHttpProxyUrl(preloadProxyUrl)) return null;
+    return playbackSource;
+  }
+
+  bool _usesLoopbackPlaybackSource(PlayableSource playbackSource) {
+    final host = (Uri.tryParse(playbackSource.url)?.host ?? '').trim();
+    return host == '127.0.0.1' || host == 'localhost' || host == '::1';
+  }
+
+  void _updatePlaybackCacheFingerprint({
+    required ResolvedPlaybackSource resolvedSource,
+    required PlayableSource playbackSource,
+  }) {
+    _playbackCacheFingerprint = _usesLoopbackPlaybackSource(playbackSource)
+        ? buildResolvedPlaybackCacheKey(
+            resolvedSource,
+            proxyUrl: _preloadHttpProxyUrl,
+          )?.fingerprint
+        : null;
+  }
+
   bool get _useDesktopPlaybackUi =>
       !widget.isTv &&
       !kIsWeb &&
@@ -592,6 +620,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       final proxyReady = builtInProxyEnabled &&
           builtInProxy.status.state == BuiltInProxyState.running;
       final initialPrepared = _takeInitialPreparedPreloadForPlayback();
+      PlayableSource? preparedPlaybackSource;
       Map<String, dynamic>? selectedMediaSource;
       late final ResolvedPlaybackSource resolvedSource;
       if (initialPrepared != null) {
@@ -612,6 +641,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         _resolvedStreamSizeBytes = resolvedSource.sizeBytes;
         _preloadHttpProxyUrl = preloadProxy;
         _resolvedPlaybackSource = resolvedSource;
+        preparedPlaybackSource = _preparedPlaybackSourceForPlayback(
+          initialPrepared,
+          preloadProxyUrl: preloadProxy,
+        );
         selectedMediaSource = initialPrepared.selectedMediaSource;
         AppDiagnosticsLogger.instance.info(
           'player_network_mpv',
@@ -660,7 +693,12 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         unawaited(preloadWarmup);
       }
 
-      final playbackSource = await _buildPlaybackSource(resolvedSource);
+      final playbackSource =
+          preparedPlaybackSource ?? await _buildPlaybackSource(resolvedSource);
+      _updatePlaybackCacheFingerprint(
+        resolvedSource: resolvedSource,
+        playbackSource: playbackSource,
+      );
       final playbackUrl = playbackSource.url;
       final playbackHeaders = playbackSource.httpHeaders;
       AppDiagnosticsLogger.instance.info(
@@ -2798,35 +2836,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   Future<PlayableSource> _buildPlaybackSource(
     ResolvedPlaybackSource resolvedSource,
   ) async {
-    final cacheKey = buildResolvedPlaybackCacheKey(
-      resolvedSource,
-      proxyUrl: _preloadHttpProxyUrl,
+    return PlaybackPreloadCoordinator.buildPlaybackSource(
+      resolvedSource: resolvedSource,
+      httpProxyUrl: _preloadHttpProxyUrl,
     );
-    final mediaType = switch (resolvedSource.mediaTypeHint) {
-      ResolvedPlaybackMediaType.hls => StreamMediaType.hls,
-      ResolvedPlaybackMediaType.dash => StreamMediaType.dash,
-      ResolvedPlaybackMediaType.file => StreamMediaType.file,
-      ResolvedPlaybackMediaType.unknown => StreamMediaType.unknown,
-    };
-    final candidate = PlayableSource(
-      url: resolvedSource.url,
-      httpHeaders: resolvedSource.httpHeaders,
-      mediaTypeHint: mediaType,
-      fromStrm: resolvedSource.fromStrm,
-      redirectChain: resolvedSource.redirectChain,
-      contentTypeHint: resolvedSource.contentTypeHint,
-      supportsByteRange: resolvedSource.supportsByteRange,
-      httpStatusHint: resolvedSource.httpStatusHint,
-      bitrateHint: resolvedSource.bitrate,
-    );
-    final proxied = await LocalHttpStreamProxy.wrapPlaybackSource(
-      candidate,
-      cacheKey: cacheKey,
-    );
-    if (proxied != null) {
-      _playbackCacheFingerprint = cacheKey?.fingerprint;
-    }
-    return proxied ?? candidate;
   }
 
   Future<bool> _tryInjectEmbyExternalSubtitlesIntoMpv({

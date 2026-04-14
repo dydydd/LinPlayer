@@ -1238,9 +1238,12 @@ void main() {
     request.headers.set(HttpHeaders.rangeHeader, 'bytes=0-3');
     final response = await request.close();
     await response.drain<void>();
+    final diagnostics = await _waitForProxyDiagnostics(
+      (text) => text.contains('miss=header-mismatch'),
+    );
 
     expect(
-      HttpStreamProxyServer.instance.buildDiagnosticsText(),
+      diagnostics,
       contains('miss=header-mismatch'),
     );
   });
