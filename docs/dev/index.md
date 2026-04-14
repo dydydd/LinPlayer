@@ -56,6 +56,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tool/fetch_tv_proxy_assets.p
 - 项目结构与各模块职责：`/dev/ARCHITECTURE`
 - 桌面端 UI 专项重构说明：`/dev/DESKTOP_UI_ARCHITECTURE`
 - 播放内核优化建议：`/dev/PLAYER_CORE_OPTIMIZATION`
+- 翻译服务设计与任务清单：`/dev/TRANSLATION_SERVICE_TASKLIST`
 - 预加载能力现状评估：`/dev/PRELOAD_ASSESSMENT`
 - 预加载重构任务清单：`/dev/PRELOAD_REFACTOR_TASKLIST`
 

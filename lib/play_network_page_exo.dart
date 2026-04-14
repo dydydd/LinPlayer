@@ -25,6 +25,7 @@ import 'services/playback/video_display_hint.dart';
 import 'services/preload/playback_preload_coordinator.dart';
 import 'services/stream_proxy/local_http_stream_proxy.dart';
 import 'services/stream_resolver/stream_models.dart';
+import 'services/subtitle_support.dart';
 import 'tv/tv_focusable.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
 import 'widgets/mobile_player_status_bars.dart';
@@ -1952,6 +1953,351 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     return _resolvedStreamHeaders;
   }
 
+  vp_android.VideoPlayerInstanceApi _exoApiForController(
+    VideoPlayerController controller,
+  ) {
+    return vp_android.VideoPlayerInstanceApi(
+      messageChannelSuffix: _videoPlayerId(controller).toString(),
+    );
+  }
+
+  Map<String, dynamic>? _currentSelectedMediaSource() {
+    final sources = _availableMediaSources;
+    if (sources.isEmpty) return null;
+
+    final currentMediaSourceId =
+        (_mediaSourceId ?? _selectedMediaSourceId ?? '').trim();
+    if (currentMediaSourceId.isNotEmpty) {
+      for (final source in sources) {
+        final id = (source['Id']?.toString() ?? '').trim();
+        if (id == currentMediaSourceId) {
+          return source;
+        }
+      }
+    }
+    return sources.first;
+  }
+
+  Future<void> _pickAndAddSubtitleSource(
+    VideoPlayerController controller,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: kSupportedExternalSubtitleExtensions,
+      withData: kIsWeb,
+    );
+    if (result == null || result.files.isEmpty) return;
+
+    final file = result.files.first;
+    final path = (file.path ?? '').trim();
+    if (!kIsWeb && path.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('无法读取字幕文件路径')),
+      );
+      return;
+    }
+
+    try {
+      final api = _exoApiForController(controller);
+      final source = path.isNotEmpty ? path : file.name;
+      await api.addSubtitleSource(
+        source,
+        externalSubtitleMimeTypeForPath(source),
+        null,
+        file.name,
+      );
+      if (!mounted) return;
+      setState(() => _selectedSubtitleStreamIndex = null);
+      _rememberSeriesSubtitleStreamIndex(null);
+      _maybeWarnTextureSubtitleLimit(
+        codec: subtitleExtensionForPath(source),
+        label: file.name,
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('添加字幕失败：$e')));
+    }
+  }
+
+  void _rememberSeriesSubtitleStreamIndex(int? subtitleStreamIndex) {
+    final sid = (widget.seriesId ?? '').trim();
+    final serverId = widget.server?.id ?? widget.appState.activeServerId;
+    if (serverId == null || serverId.isEmpty || sid.isEmpty) return;
+    unawaited(
+      widget.appState.setSeriesSubtitleStreamIndex(
+        serverId: serverId,
+        seriesId: sid,
+        subtitleStreamIndex: subtitleStreamIndex,
+      ),
+    );
+  }
+
+  void _maybeWarnTextureSubtitleLimit({
+    String? codec,
+    String? mimeType,
+    String? label,
+  }) {
+    if (!_isAndroid || _viewType != VideoViewType.textureView) return;
+    if (!isComplexSubtitleFormat(codec: codec, mimeType: mimeType)) return;
+
+    final reason = _danmakuEnabled ? '当前弹幕会强制纹理渲染' : '当前为纹理渲染';
+    final title = (label ?? '').trim();
+    final suffix = title.isEmpty ? '' : '：$title';
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            '$reason$suffix，ASS/PGS/SUP 等复杂字幕会降级显示；如需完整效果请关闭弹幕或改用 mpv',
+          ),
+          duration: const Duration(milliseconds: 2200),
+        ),
+      );
+  }
+
+  Future<void> _tryInjectEmbyExternalSubtitlesIntoExo(
+    VideoPlayerController controller,
+  ) async {
+    if (!_isAndroid) return;
+
+    final mediaSource = _currentSelectedMediaSource();
+    if (mediaSource == null) return;
+
+    final currentMediaSourceId =
+        (_mediaSourceId ?? _selectedMediaSourceId ?? '').trim();
+    if (currentMediaSourceId.isEmpty) return;
+
+    final access = _serverAccess;
+    if (access == null) return;
+
+    final subtitleStreams = _streamsOfType(mediaSource, 'Subtitle');
+    if (subtitleStreams.isEmpty) return;
+
+    final externalSubtitleStreams = subtitleStreams
+        .where(_isEmbyExternalSubtitleStream)
+        .where(
+          (stream) => isSupportedExternalSubtitleCodec(
+            (stream['Codec']?.toString() ?? '').trim(),
+          ),
+        )
+        .toList(growable: false);
+    if (externalSubtitleStreams.isEmpty) return;
+
+    final api = _exoApiForController(controller);
+    final existingSignatures = <String>{};
+
+    try {
+      final currentTracks = await api.getSubtitleTracks();
+      for (final track in currentTracks.exoPlayerTracks ??
+          const <vp_android.ExoPlayerSubtitleTrackData>[]) {
+        existingSignatures.add(
+          _subtitleTrackSignature(
+            label: track.label,
+            language: track.language,
+            codec: _normalizedExoTrackCodec(track),
+          ),
+        );
+      }
+    } catch (_) {
+      // Best effort: injection can continue without the dedupe snapshot.
+    }
+
+    for (final stream in externalSubtitleStreams) {
+      final index = _asInt(stream['Index']);
+      if (index == null || index < 0) continue;
+
+      final codec = (stream['Codec']?.toString() ?? '').trim();
+      final format = preferredSubtitleExtensionForCodec(codec);
+      final url = _buildEmbySubtitleStreamUrl(
+        access.auth,
+        deliveryUrl: stream['DeliveryUrl']?.toString(),
+        itemId: widget.itemId,
+        mediaSourceId: currentMediaSourceId,
+        subtitleStreamIndex: index,
+        format: format,
+      );
+      if (url == null) continue;
+
+      final label = (stream['DisplayTitle']?.toString() ??
+              stream['Title']?.toString() ??
+              stream['Language']?.toString() ??
+              'Subtitle $index')
+          .trim();
+      final language = (stream['Language']?.toString() ?? '').trim();
+      final normalizedCodec = normalizeSubtitleCodec(codec);
+      final signature = _subtitleTrackSignature(
+        label: label,
+        language: language,
+        codec: normalizedCodec,
+      );
+      if (existingSignatures.contains(signature)) continue;
+
+      try {
+        await api.addSubtitleSource(
+          url,
+          externalSubtitleMimeTypeForCodec(codec) ??
+              externalSubtitleMimeTypeForPath(url),
+          language.isEmpty ? null : language,
+          label.isEmpty ? null : label,
+        );
+        existingSignatures.add(signature);
+      } catch (_) {
+        // Ignore failures: subtitles are optional.
+      }
+    }
+  }
+
+  int? _tryMapExoSubtitleTrackToEmbyStreamIndex(
+    vp_android.ExoPlayerSubtitleTrackData track,
+  ) {
+    final mediaSource = _currentSelectedMediaSource();
+    if (mediaSource == null) return null;
+
+    final subtitleStreams = _streamsOfType(mediaSource, 'Subtitle');
+    if (subtitleStreams.isEmpty) return null;
+
+    final trackTitle = (track.label ?? '').trim();
+    final trackLang = (track.language ?? '').trim();
+    final trackCodec = _normalizedExoTrackCodec(track);
+    if (trackTitle.isEmpty && trackLang.isEmpty && trackCodec.isEmpty) {
+      return null;
+    }
+
+    int? bestIndex;
+    var bestScore = 0;
+
+    for (final stream in subtitleStreams) {
+      final index = _asInt(stream['Index']);
+      if (index == null || index < 0) continue;
+
+      final streamTitle = (stream['DisplayTitle']?.toString() ??
+              stream['Title']?.toString() ??
+              stream['Language']?.toString() ??
+              '')
+          .trim();
+      final streamLang = (stream['Language']?.toString() ?? '').trim();
+      final streamCodec =
+          normalizeSubtitleCodec((stream['Codec']?.toString() ?? '').trim());
+
+      var score = 0;
+      if (trackTitle.isNotEmpty &&
+          streamTitle.isNotEmpty &&
+          trackTitle == streamTitle) {
+        score += 3;
+      }
+      if (trackLang.isNotEmpty &&
+          streamLang.isNotEmpty &&
+          trackLang == streamLang) {
+        score += 2;
+      }
+      if (trackCodec.isNotEmpty &&
+          streamCodec.isNotEmpty &&
+          trackCodec == streamCodec) {
+        score += 1;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = index;
+      }
+    }
+
+    if (bestScore >= 4) return bestIndex;
+    return null;
+  }
+
+  String _normalizedExoTrackCodec(vp_android.ExoPlayerSubtitleTrackData track) {
+    final codec = normalizeSubtitleCodec((track.codec ?? '').trim());
+    if (codec.isNotEmpty) return codec;
+    return normalizeSubtitleCodec((track.mimeType ?? '').trim());
+  }
+
+  static bool _isEmbyExternalSubtitleStream(Map<String, dynamic> stream) {
+    if (stream['IsExternal'] == true) return true;
+    final method = (stream['DeliveryMethod']?.toString() ?? '').trim();
+    return method.toLowerCase() == 'external';
+  }
+
+  static String _subtitleTrackSignature({
+    String? label,
+    String? language,
+    String? codec,
+  }) {
+    return '${(label ?? '').trim()}|${(language ?? '').trim()}|${(codec ?? '').trim()}';
+  }
+
+  static String _normalizeApiPrefix(String value) {
+    var v = value.trim();
+    while (v.startsWith('/')) {
+      v = v.substring(1);
+    }
+    while (v.endsWith('/')) {
+      v = v.substring(0, v.length - 1);
+    }
+    return v;
+  }
+
+  static String _apiUrlWithPrefix(
+    String baseUrl,
+    String apiPrefix,
+    String path,
+  ) {
+    var base = baseUrl.trim();
+    while (base.endsWith('/')) {
+      base = base.substring(0, base.length - 1);
+    }
+    final fixedPrefix = _normalizeApiPrefix(apiPrefix);
+    final prefixPart = fixedPrefix.isEmpty ? '' : '/$fixedPrefix';
+
+    final trimmedPath = path.trim();
+    final fixedPath =
+        trimmedPath.startsWith('/') ? trimmedPath : '/$trimmedPath';
+
+    return '$base$prefixPart$fixedPath';
+  }
+
+  static String _appendApiKeyIfMissing(String url, String token) {
+    final trimmedToken = token.trim();
+    if (trimmedToken.isEmpty) return url;
+
+    final uri = Uri.tryParse(url);
+    if (uri == null) return url;
+    if (uri.queryParameters.containsKey('api_key')) return url;
+
+    final next = Map<String, String>.from(uri.queryParameters);
+    next['api_key'] = trimmedToken;
+    return uri.replace(queryParameters: next).toString();
+  }
+
+  String? _buildEmbySubtitleStreamUrl(
+    ServerAuthSession auth, {
+    String? deliveryUrl,
+    required String itemId,
+    required String mediaSourceId,
+    required int subtitleStreamIndex,
+    required String format,
+  }) {
+    final id = itemId.trim();
+    final mediaSource = mediaSourceId.trim();
+    if (id.isEmpty || mediaSource.isEmpty) return null;
+
+    final candidate = (deliveryUrl ?? '').trim();
+    if (candidate.isNotEmpty) {
+      try {
+        final resolved = Uri.parse(auth.baseUrl).resolve(candidate).toString();
+        return _appendApiKeyIfMissing(resolved, auth.token);
+      } catch (_) {
+        // Fallback to the constructed URL below.
+      }
+    }
+
+    final resolvedFormat = format.trim().isEmpty ? 'srt' : format.trim();
+    final path =
+        'Videos/$id/$mediaSource/Subtitles/$subtitleStreamIndex/Stream.$resolvedFormat';
+    final url = _apiUrlWithPrefix(auth.baseUrl, auth.apiPrefix, path);
+    return _appendApiKeyIfMissing(url, auth.token);
+  }
+
   Future<void> _ensureDanmakuVisible() async {
     if (!_isAndroid) return;
     if (_viewType == VideoViewType.textureView) return;
@@ -2014,6 +2360,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     );
     _controller = controller;
     await controller.initialize();
+    await _tryInjectEmbyExternalSubtitlesIntoExo(controller);
     await _applyExoSubtitleOptions();
     await _maybeAutoSelectSubtitleTrack(controller);
 
@@ -2462,11 +2809,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     if (controller == null || !controller.value.isInitialized) {
       return const <vp_android.ExoPlayerSubtitleTrackData>[];
     }
-    // ignore: invalid_use_of_visible_for_testing_member
-    final playerId = _videoPlayerId(controller);
-    final api = vp_android.VideoPlayerInstanceApi(
-      messageChannelSuffix: playerId.toString(),
-    );
+    final api = _exoApiForController(controller);
     final data = await api.getSubtitleTracks();
     return data.exoPlayerTracks ??
         const <vp_android.ExoPlayerSubtitleTrackData>[];
@@ -2731,6 +3074,13 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         return ListView(
           padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
           children: [
+            if (_isAndroid && _viewType == VideoViewType.textureView) ...[
+              const MobilePlayerOptionTile(
+                title: '复杂字幕将降级显示',
+                subtitle: '当前为纹理渲染，ASS/SSA/PGS/SUP 等字幕会退化；关闭弹幕或改用 mpv 可获得更完整效果',
+              ),
+              const SizedBox(height: 8),
+            ],
             MobilePlayerOptionTile(
               title: '关闭字幕',
               selected: !tracks.any((track) => track.isSelected),
@@ -2741,12 +3091,12 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                   ? null
                   : () {
                       unawaited(() async {
-                        // ignore: invalid_use_of_visible_for_testing_member
-                        final api = vp_android.VideoPlayerInstanceApi(
-                          messageChannelSuffix:
-                              _videoPlayerId(controller).toString(),
-                        );
+                        final api = _exoApiForController(controller);
                         await api.deselectSubtitleTrack();
+                        _selectedSubtitleStreamIndex = -1;
+                        _rememberSeriesSubtitleStreamIndex(
+                          _selectedSubtitleStreamIndex,
+                        );
                         if (!mounted) return;
                         setState(() {});
                       }());
@@ -2766,14 +3116,20 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                     ? null
                     : () {
                         unawaited(() async {
-                          // ignore: invalid_use_of_visible_for_testing_member
-                          final api = vp_android.VideoPlayerInstanceApi(
-                            messageChannelSuffix:
-                                _videoPlayerId(controller).toString(),
-                          );
+                          final api = _exoApiForController(controller);
                           await api.selectSubtitleTrack(
                             track.groupIndex,
                             track.trackIndex,
+                          );
+                          _selectedSubtitleStreamIndex =
+                              _tryMapExoSubtitleTrackToEmbyStreamIndex(track);
+                          _rememberSeriesSubtitleStreamIndex(
+                            _selectedSubtitleStreamIndex,
+                          );
+                          _maybeWarnTextureSubtitleLimit(
+                            codec: track.codec,
+                            mimeType: track.mimeType,
+                            label: track.label,
                           );
                           if (!mounted) return;
                           setState(() {});
@@ -2782,6 +3138,16 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
               ),
               const SizedBox(height: 8),
             ],
+            MobilePlayerOptionTile(
+              title: '导入本地字幕',
+              subtitle:
+                  '支持 SRT / ASS / SSA / VTT / TTML / SUP / PGS / IDX / SUB',
+              leading:
+                  const Icon(Icons.upload_file_outlined, color: Colors.white),
+              onTap: !controlsEnabled || controller == null
+                  ? null
+                  : () => unawaited(_pickAndAddSubtitleSource(controller)),
+            ),
           ],
         );
       },
@@ -2955,11 +3321,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       _tvSubtitleTracksError = null;
     });
     try {
-      // ignore: invalid_use_of_visible_for_testing_member
-      final playerId = controller.playerId;
-      final api = vp_android.VideoPlayerInstanceApi(
-        messageChannelSuffix: playerId.toString(),
-      );
+      final api = _exoApiForController(controller);
       final data = await api.getSubtitleTracks();
       if (!mounted) return;
       setState(() {
@@ -2986,16 +3348,21 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     if (!_isAndroid) return;
 
     try {
-      // ignore: invalid_use_of_visible_for_testing_member
-      final playerId = controller.playerId;
-      final api = vp_android.VideoPlayerInstanceApi(
-        messageChannelSuffix: playerId.toString(),
-      );
+      final api = _exoApiForController(controller);
       if (track == null) {
         await api.deselectSubtitleTrack();
+        _selectedSubtitleStreamIndex = -1;
       } else {
         await api.selectSubtitleTrack(track.groupIndex, track.trackIndex);
+        _selectedSubtitleStreamIndex =
+            _tryMapExoSubtitleTrackToEmbyStreamIndex(track);
+        _maybeWarnTextureSubtitleLimit(
+          codec: track.codec,
+          mimeType: track.mimeType,
+          label: track.label,
+        );
       }
+      _rememberSeriesSubtitleStreamIndex(_selectedSubtitleStreamIndex);
     } catch (_) {}
 
     if (!mounted) return;
@@ -4390,6 +4757,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       _controller = controller;
       await controller.initialize();
       await _applyOrientationForMode();
+      await _tryInjectEmbyExternalSubtitlesIntoExo(controller);
       await _applyExoSubtitleOptions();
       await _maybeAutoSelectSubtitleTrack(controller);
       final resumeImmediately =
@@ -5263,13 +5631,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   Future<void> _applyExoSubtitleOptions() async {
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) return;
-
-    // ignore: invalid_use_of_visible_for_testing_member
-    final playerId = controller.playerId;
-
-    final api = vp_android.VideoPlayerInstanceApi(
-      messageChannelSuffix: playerId.toString(),
-    );
+    final api = _exoApiForController(controller);
 
     try {
       await api.setSubtitleDelay((_subtitleDelaySeconds * 1000).round());
@@ -5293,12 +5655,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     final prefRaw = widget.appState.preferredSubtitleLang.trim();
     final shouldOff =
         _selectedSubtitleStreamIndex == -1 || isSubtitleOffPreference(prefRaw);
-
-    // ignore: invalid_use_of_visible_for_testing_member
-    final playerId = controller.playerId;
-    final api = vp_android.VideoPlayerInstanceApi(
-      messageChannelSuffix: playerId.toString(),
-    );
+    final api = _exoApiForController(controller);
 
     if (shouldOff) {
       try {
@@ -5317,6 +5674,34 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     }
 
     if (tracks.isEmpty) return;
+
+    final selectedStreamIndex = _selectedSubtitleStreamIndex;
+    if (selectedStreamIndex != null && selectedStreamIndex >= 0) {
+      for (final track in tracks) {
+        if (_tryMapExoSubtitleTrackToEmbyStreamIndex(track) !=
+            selectedStreamIndex) {
+          continue;
+        }
+        if (track.isSelected) {
+          _maybeWarnTextureSubtitleLimit(
+            codec: track.codec,
+            mimeType: track.mimeType,
+            label: track.label,
+          );
+          return;
+        }
+        try {
+          await api.selectSubtitleTrack(track.groupIndex, track.trackIndex);
+          _maybeWarnTextureSubtitleLimit(
+            codec: track.codec,
+            mimeType: track.mimeType,
+            label: track.label,
+          );
+        } catch (_) {}
+        return;
+      }
+    }
+
     if (tracks.any((t) => t.isSelected)) return;
 
     final isDefaultPref = prefRaw.isEmpty || prefRaw.toLowerCase() == 'default';
@@ -5353,6 +5738,11 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     if (picked == null) return;
     try {
       await api.selectSubtitleTrack(picked.groupIndex, picked.trackIndex);
+      _maybeWarnTextureSubtitleLimit(
+        codec: picked.codec,
+        mimeType: picked.mimeType,
+        label: picked.label,
+      );
     } catch (_) {}
   }
 
@@ -5364,11 +5754,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
     _subtitlePollInFlight = true;
     try {
-      // ignore: invalid_use_of_visible_for_testing_member
-      final playerId = controller.playerId;
-      final api = vp_android.VideoPlayerInstanceApi(
-        messageChannelSuffix: playerId.toString(),
-      );
+      final api = _exoApiForController(controller);
       final text = await api.getSubtitleText();
       if (!mounted) return;
       if (text != _subtitleText) {

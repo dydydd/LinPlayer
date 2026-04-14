@@ -519,11 +519,14 @@ public abstract class VideoPlayer implements VideoPlayerInstanceApi {
   private static String guessSubtitleMimeType(@NonNull String uriOrPath) {
     final String lower = uriOrPath.toLowerCase();
     if (lower.endsWith(".srt")) return "application/x-subrip";
-    if (lower.endsWith(".vtt")) return "text/vtt";
+    if (lower.endsWith(".vtt") || lower.endsWith(".webvtt")) return "text/vtt";
     if (lower.endsWith(".ass") || lower.endsWith(".ssa")) return "text/x-ssa";
-    if (lower.endsWith(".ttml") || lower.endsWith(".xml")) return "application/ttml+xml";
+    if (lower.endsWith(".ttml") || lower.endsWith(".xml") || lower.endsWith(".dfxp")) {
+      return "application/ttml+xml";
+    }
     if (lower.endsWith(".sup") || lower.endsWith(".pgs")) return "application/pgs";
-    if (lower.endsWith(".sub")) return "application/vobsub";
+    if (lower.endsWith(".sub") || lower.endsWith(".idx")) return "application/vobsub";
+    if (lower.endsWith(".dvb")) return "application/dvbsubs";
     return null;
   }
 
