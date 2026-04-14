@@ -69,8 +69,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   static const String _kLocalPlaybackProgressPrefix =
       'networkPlaybackProgress_v1:';
   static const Duration _kLateResumeAutoSeekGrace = Duration(seconds: 3);
-  static const Duration _kStartupPreloadBarrierMaxWait =
-      Duration(milliseconds: 1200);
 
   ServerAccess? _serverAccess;
   VideoPlayerController? _controller;
@@ -1645,62 +1643,57 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     );
   }
 
-  Future<String> _awaitStartupPreloadBarrier({
+  String _observeStartupPreloadWarmup({
     required Future<StreamPreloadResult?>? preloadWarmup,
     required bool usesLoopbackProxy,
     required bool hadPreparedHandoff,
     required Duration startPosition,
-  }) async {
+  }) {
     if (preloadWarmup == null) return 'not-requested';
-    if (!usesLoopbackProxy) return 'non-loopback';
-
-    final shouldWait = hadPreparedHandoff || startPosition > Duration.zero;
-    if (!shouldWait) return 'background';
-
+    final shouldTrackStartup = usesLoopbackProxy &&
+        (hadPreparedHandoff || startPosition > Duration.zero);
+    final immediateStatus = shouldTrackStartup
+        ? 'background'
+        : (usesLoopbackProxy ? 'passive' : 'non-loopback');
     final stopwatch = Stopwatch()..start();
-    try {
-      final result =
-          await preloadWarmup.timeout(_kStartupPreloadBarrierMaxWait);
-      final status = result?.status.name ?? 'completed';
-      AppDiagnosticsLogger.instance.info(
-        'player_network_exo',
-        'Startup preload barrier completed',
-        data: <String, Object?>{
-          'itemId': widget.itemId,
-          'status': status,
-          'waitMs': stopwatch.elapsedMilliseconds,
-          'startMs': startPosition.inMilliseconds,
-          'hadPreparedHandoff': hadPreparedHandoff,
-        },
-      );
-      return status;
-    } on TimeoutException {
-      AppDiagnosticsLogger.instance.info(
-        'player_network_exo',
-        'Startup preload barrier timed out',
-        data: <String, Object?>{
-          'itemId': widget.itemId,
-          'waitMs': stopwatch.elapsedMilliseconds,
-          'startMs': startPosition.inMilliseconds,
-          'hadPreparedHandoff': hadPreparedHandoff,
-        },
-      );
-      return 'timeout';
-    } catch (error, stackTrace) {
-      AppDiagnosticsLogger.instance.warn(
-        'player_network_exo',
-        'Startup preload barrier failed',
-        data: <String, Object?>{
-          'itemId': widget.itemId,
-          'waitMs': stopwatch.elapsedMilliseconds,
-          'startMs': startPosition.inMilliseconds,
-          'hadPreparedHandoff': hadPreparedHandoff,
-          'error': AppDiagnosticsLogger.summarizeError(error),
-          'stack': AppDiagnosticsLogger.summarizeStackTrace(stackTrace),
-        },
-      );
-      return 'error';
-    }
+
+    unawaited(() async {
+      try {
+        final result = await preloadWarmup;
+        final status = result?.status.name ?? 'completed';
+        if (!shouldTrackStartup) return;
+        AppDiagnosticsLogger.instance.info(
+          'player_network_exo',
+          'Startup preload warmup completed',
+          data: <String, Object?>{
+            'itemId': widget.itemId,
+            'status': status,
+            'waitMs': stopwatch.elapsedMilliseconds,
+            'startMs': startPosition.inMilliseconds,
+            'hadPreparedHandoff': hadPreparedHandoff,
+            'usesLoopbackProxy': usesLoopbackProxy,
+          },
+        );
+      } catch (error, stackTrace) {
+        AppDiagnosticsLogger.instance.warn(
+          'player_network_exo',
+          shouldTrackStartup
+              ? 'Startup preload warmup failed'
+              : 'Playback preload warmup failed',
+          data: <String, Object?>{
+            'itemId': widget.itemId,
+            'waitMs': stopwatch.elapsedMilliseconds,
+            'startMs': startPosition.inMilliseconds,
+            'hadPreparedHandoff': hadPreparedHandoff,
+            'usesLoopbackProxy': usesLoopbackProxy,
+            'error': AppDiagnosticsLogger.summarizeError(error),
+            'stack': AppDiagnosticsLogger.summarizeStackTrace(stackTrace),
+          },
+        );
+      }
+    }());
+
+    return immediateStatus;
   }
 
   void _maybePreloadNextEpisode(Duration pos) {
@@ -4897,15 +4890,12 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         triggerSource:
             preloadStart > Duration.zero ? 'playback_resume' : 'playback_start',
       );
-      if (preloadWarmup != null) {
-        unawaited(preloadWarmup);
-      }
       final playbackSourceStopwatch = Stopwatch()..start();
       final playbackSource =
           preparedPlaybackSource ?? await _buildPlaybackSource(resolvedSource);
       playbackSourceStopwatch.stop();
       final usesLoopbackProxy = _usesLoopbackPlaybackSource(playbackSource);
-      final startupPreloadBarrierStatus = await _awaitStartupPreloadBarrier(
+      final startupPreloadWarmupStatus = _observeStartupPreloadWarmup(
         preloadWarmup: preloadWarmup,
         usesLoopbackProxy: usesLoopbackProxy,
         hadPreparedHandoff: initialPrepared != null,
@@ -4933,7 +4923,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           'usesLoopbackProxy': usesLoopbackProxy,
           'reusedPreparedPlaybackSource': preparedPlaybackSource != null,
           'playbackSourceBuildMs': playbackSourceStopwatch.elapsedMilliseconds,
-          'startupPreloadBarrier': startupPreloadBarrierStatus,
+          'startupPreloadWarmup': startupPreloadWarmupStatus,
         },
       );
       final controller = VideoPlayerController.networkUrl(

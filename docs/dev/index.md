@@ -60,6 +60,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tool/fetch_tv_proxy_assets.p
 - 预加载能力现状评估：`/dev/PRELOAD_ASSESSMENT`
 - 预加载重构任务清单：`/dev/PRELOAD_REFACTOR_TASKLIST`
 
+> 预加载当前口径：`EXO` 基线仍未恢复，`MPV` 前半段仍疑似未真正复用预加载；排查与验收请优先看 `PRELOAD_REFACTOR_TASKLIST`。
+
 ## 插件文档
 
 - 宿主开发清单：`/dev/PLUGIN_HOST_V1`
