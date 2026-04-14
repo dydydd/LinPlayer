@@ -68,6 +68,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     with WidgetsBindingObserver, RouteAware {
   static const String _kLocalPlaybackProgressPrefix =
       'networkPlaybackProgress_v1:';
+  static const Duration _kLateResumeAutoSeekGrace = Duration(seconds: 3);
 
   ServerAccess? _serverAccess;
   VideoPlayerController? _controller;
@@ -116,6 +117,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       <String, PreparedPlaybackPreload>{};
   bool _allowRoutePop = false;
   bool _exitInProgress = false;
+  int _initSession = 0;
 
   static const Duration _gestureOverlayAutoHideDelay =
       Duration(milliseconds: 800);
@@ -4636,6 +4638,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   }
 
   Future<void> _init() async {
+    final initSession = ++_initSession;
     _allowRoutePop = false;
     _exitInProgress = false;
     _uiTimer?.cancel();
@@ -4788,15 +4791,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       final cloudStart = _overrideStartPosition ??
           widget.startPosition ??
           initialPrepared?.startPosition;
-      final remoteStart = await remoteStartFuture;
       final localStart = await localStartFuture;
-      Duration? start = cloudStart;
-      if (remoteStart != null && (start == null || remoteStart > start)) {
-        start = remoteStart;
-      }
-      if (localStart != null && (start == null || localStart > start)) {
-        start = localStart;
-      }
+      final start = _pickLaterStart(cloudStart, localStart);
       await _applyOrientationForMode(
         mediaSource: selectedMediaSource,
       );
@@ -4978,6 +4974,16 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       _loadIntroTimestampsBestEffort();
 
       await _ensurePlaybackAutoStarts(controller);
+      unawaited(
+        _maybeApplyLateServerResume(
+          initSession: initSession,
+          controller: controller,
+          remoteStartFuture: remoteStartFuture,
+          initialStart: start,
+          initialWarmupStart: preloadStart,
+          resumeImmediately: resumeImmediately,
+        ),
+      );
       if (!_deferProgressReporting) {
         // ignore: unawaited_futures
         _reportPlaybackStartBestEffort();
@@ -5009,6 +5015,73 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     if (serverId == null || serverId.isEmpty || sid.isEmpty) return null;
     return widget.appState
         .seriesMediaSourceIndex(serverId: serverId, seriesId: sid);
+  }
+
+  Duration? _pickLaterStart(Duration? current, Duration? candidate) {
+    if (candidate == null || candidate <= Duration.zero) return current;
+    if (current == null || candidate > current) return candidate;
+    return current;
+  }
+
+  Future<void> _maybeApplyLateServerResume({
+    required int initSession,
+    required VideoPlayerController controller,
+    required Future<Duration?> remoteStartFuture,
+    required Duration? initialStart,
+    required Duration initialWarmupStart,
+    required bool resumeImmediately,
+  }) async {
+    Duration? remoteStart;
+    try {
+      remoteStart = await remoteStartFuture;
+    } catch (_) {
+      remoteStart = null;
+    }
+    if (!mounted || initSession != _initSession) return;
+    if (_controller != controller || !controller.value.isInitialized) return;
+    if (_playError != null ||
+        remoteStart == null ||
+        remoteStart <= Duration.zero) {
+      return;
+    }
+
+    final baselineStart = initialStart ?? Duration.zero;
+    if (remoteStart <= baselineStart ||
+        _seekCloseEnough(remoteStart, baselineStart)) {
+      return;
+    }
+
+    if (!_seekCloseEnough(initialWarmupStart, remoteStart)) {
+      final lateWarmup = _startCurrentItemPreloadWarmup(
+        startPosition: remoteStart,
+        triggerSource: 'playback_server_resume',
+      );
+      if (lateWarmup != null) {
+        unawaited(lateWarmup);
+      }
+    }
+
+    final total = controller.value.duration;
+    final target = total > Duration.zero
+        ? _safeSeekTarget(remoteStart, total)
+        : remoteStart;
+    if (target <= Duration.zero) return;
+    if (_seekCloseEnough(controller.value.position, target)) return;
+
+    final canAutoSeekLate = resumeImmediately &&
+        baselineStart <= Duration.zero &&
+        controller.value.position <= _kLateResumeAutoSeekGrace;
+    if (canAutoSeekLate) {
+      await _resumeToPositionAfterStart(controller, target);
+      return;
+    }
+
+    _resumeHintTimer?.cancel();
+    _resumeHintTimer = null;
+    _resumeHintPosition = target;
+    _showResumeHint = true;
+    _startResumeHintTimer();
+    if (mounted) setState(() {});
   }
 
   Future<PlaybackSourceBuildResult> _buildResolvedPlaybackSource() async {

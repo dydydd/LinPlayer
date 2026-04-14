@@ -72,6 +72,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     with WidgetsBindingObserver, RouteAware {
   static const String _kLocalPlaybackProgressPrefix =
       'networkPlaybackProgress_v1:';
+  static const Duration _kResumeSeekTolerance = Duration(seconds: 1);
+  static const Duration _kLateResumeAutoSeekGrace = Duration(seconds: 3);
 
   final PlayerService _playerService = getPlayerService();
   MediaKitThumbnailGenerator? _thumbnailer;
@@ -177,6 +179,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       <String, PreparedPlaybackPreload>{};
   bool _allowRoutePop = false;
   bool _exitInProgress = false;
+  int _initSession = 0;
 
   static const Duration _gestureOverlayAutoHideDelay =
       Duration(milliseconds: 800);
@@ -482,6 +485,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   }
 
   Future<void> _init() async {
+    final initSession = ++_initSession;
     _allowRoutePop = false;
     _exitInProgress = false;
     if (_preloadOwnerKey.isNotEmpty) {
@@ -641,15 +645,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       final cloudStart = _overrideStartPosition ??
           widget.startPosition ??
           initialPrepared?.startPosition;
-      final remoteStart = await remoteStartFuture;
       final localStart = await localStartFuture;
-      Duration? start = cloudStart;
-      if (remoteStart != null && (start == null || remoteStart > start)) {
-        start = remoteStart;
-      }
-      if (localStart != null && (start == null || localStart > start)) {
-        start = localStart;
-      }
+      final start = _pickLaterStart(cloudStart, localStart);
       await _applyOrientationForMode(
         mediaSource: selectedMediaSource,
       );
@@ -856,6 +853,16 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         setState(() => _playError = message);
       });
       await _ensurePlaybackAutoStarts();
+      unawaited(
+        _maybeApplyLateServerResume(
+          initSession: initSession,
+          remoteStartFuture: remoteStartFuture,
+          initialStart: start,
+          initialWarmupStart: preloadStart,
+          resumeImmediately: resumeImmediately,
+          skipAutoResume: skipAutoResume,
+        ),
+      );
       _applyDanmakuPauseState(_buffering || !_playerService.isPlaying);
       if (!_deferProgressReporting) {
         // ignore: unawaited_futures
@@ -2667,6 +2674,96 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     if (serverId == null || serverId.isEmpty || sid.isEmpty) return null;
     return widget.appState
         .seriesMediaSourceIndex(serverId: serverId, seriesId: sid);
+  }
+
+  Duration? _pickLaterStart(Duration? current, Duration? candidate) {
+    if (candidate == null || candidate <= Duration.zero) return current;
+    if (current == null || candidate > current) return candidate;
+    return current;
+  }
+
+  bool _resumeCloseEnough(Duration position, Duration target) {
+    return (position - target).inMilliseconds.abs() <=
+        _kResumeSeekTolerance.inMilliseconds;
+  }
+
+  Future<void> _maybeApplyLateServerResume({
+    required int initSession,
+    required Future<Duration?> remoteStartFuture,
+    required Duration? initialStart,
+    required Duration initialWarmupStart,
+    required bool resumeImmediately,
+    required bool skipAutoResume,
+  }) async {
+    Duration? remoteStart;
+    try {
+      remoteStart = await remoteStartFuture;
+    } catch (_) {
+      remoteStart = null;
+    }
+    if (!mounted || initSession != _initSession) return;
+    if (_playError != null || !_playerService.isInitialized) return;
+    if (skipAutoResume || remoteStart == null || remoteStart <= Duration.zero) {
+      return;
+    }
+
+    final baselineStart = initialStart ?? Duration.zero;
+    if (remoteStart <= baselineStart ||
+        _resumeCloseEnough(remoteStart, baselineStart)) {
+      return;
+    }
+
+    if (!_resumeCloseEnough(initialWarmupStart, remoteStart)) {
+      final lateWarmup = _startCurrentItemPreloadWarmup(
+        startPosition: remoteStart,
+        triggerSource: 'playback_server_resume',
+      );
+      if (lateWarmup != null) {
+        unawaited(lateWarmup);
+      }
+    }
+
+    final total = _playerService.duration;
+    final target = total > Duration.zero
+        ? _safeSeekTarget(remoteStart, total)
+        : remoteStart;
+    if (target <= Duration.zero) return;
+    if (_resumeCloseEnough(_playerService.position, target)) return;
+
+    final canAutoSeekLate = resumeImmediately &&
+        baselineStart <= Duration.zero &&
+        _playerService.position <= _kLateResumeAutoSeekGrace;
+    if (canAutoSeekLate) {
+      await _resumePlaybackAfterSwitch(target);
+      if (!mounted || initSession != _initSession) return;
+      if (_playError != null || !_playerService.isInitialized) return;
+      final applied = _playerService.position;
+      _lastPosition = applied;
+      _syncDanmakuCursor(applied);
+      if (_resumeCloseEnough(applied, target)) {
+        final shouldStartReporting = _deferProgressReporting;
+        _deferProgressReporting = false;
+        if (applied > Duration.zero) {
+          _startOverHintPosition = applied;
+          _showStartOverHint = true;
+          _startStartOverHintTimer();
+        }
+        if (shouldStartReporting) {
+          // ignore: unawaited_futures
+          _reportPlaybackStartBestEffort();
+          _maybeReportPlaybackProgress(_lastPosition, force: true);
+        }
+        if (mounted) setState(() {});
+        return;
+      }
+    }
+
+    _resumeHintTimer?.cancel();
+    _resumeHintTimer = null;
+    _resumeHintPosition = target;
+    _showResumeHint = true;
+    _startResumeHintTimer();
+    if (mounted) setState(() {});
   }
 
   String? _resolvePreloadHttpProxyUrl(
