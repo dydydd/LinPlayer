@@ -1058,6 +1058,14 @@ class HttpStreamProxyServer {
       final cacheRange = _parseCacheableRange(
         request.headers.value(HttpHeaders.rangeHeader),
       );
+      final playbackRange = method == 'GET'
+          ? (cacheRange ??
+              const _CacheableRangeRequest(
+                startByte: 0,
+                endByte: null,
+                hasRange: false,
+              ))
+          : null;
       if (method == 'HEAD') {
         final headRange = cacheRange ??
             const _CacheableRangeRequest(
@@ -1088,20 +1096,20 @@ class HttpStreamProxyServer {
         }
       }
 
-      if (method == 'GET' && cacheRange != null) {
-        var coverage = entry.cachedCoverageStartingAt(cacheRange.startByte);
+      if (playbackRange != null) {
+        var coverage = entry.cachedCoverageStartingAt(playbackRange.startByte);
         if (coverage == null || coverage.lengthBytes <= 0) {
           final waited = await _awaitWarmupProgress(entry);
           diag.waitedWarmup = waited;
-          coverage = entry.cachedCoverageStartingAt(cacheRange.startByte);
+          coverage = entry.cachedCoverageStartingAt(playbackRange.startByte);
         }
         if (coverage == null || coverage.lengthBytes <= 0) {
           final waited = await _awaitInFlightCacheWrite(
             entry,
-            requestedStartByte: cacheRange.startByte,
+            requestedStartByte: playbackRange.startByte,
           );
           diag.waitedCacheFill = waited;
-          coverage = entry.cachedCoverageStartingAt(cacheRange.startByte);
+          coverage = entry.cachedCoverageStartingAt(playbackRange.startByte);
         }
         if (coverage != null && coverage.lengthBytes > 0) {
           final served = await _tryServeCachedRange(
@@ -1109,7 +1117,7 @@ class HttpStreamProxyServer {
             response: response,
             entry: entry,
             coverage: coverage,
-            range: cacheRange,
+            range: playbackRange,
           );
           if (served.served) {
             diag.statusCode = served.statusCode;
@@ -1127,17 +1135,17 @@ class HttpStreamProxyServer {
         } else {
           diag.missReason = _classifyCacheMiss(
             entry,
-            requestedStartByte: cacheRange.startByte,
+            requestedStartByte: playbackRange.startByte,
           );
         }
       }
 
-      if (method == 'GET' && cacheRange != null) {
+      if (playbackRange != null) {
         inFlightCacheWrite = _beginInFlightCacheWrite(
           entry: entry,
-          startByte: cacheRange.startByte,
+          startByte: playbackRange.startByte,
           plannedEndByteExclusive:
-              cacheRange.endByte == null ? null : cacheRange.endByte! + 1,
+              playbackRange.endByte == null ? null : playbackRange.endByte! + 1,
         );
       }
 
@@ -1163,7 +1171,7 @@ class HttpStreamProxyServer {
         final relay = await _relayRemoteDirect(
           entry: entry,
           response: response,
-          requestRange: cacheRange,
+          requestRange: playbackRange,
           remote: remote.response,
           abortRemote: remote.close,
         );

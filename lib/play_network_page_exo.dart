@@ -285,6 +285,34 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     return prepared;
   }
 
+  PlayableSource? _preparedPlaybackSourceForPlayback(
+    PreparedPlaybackPreload? prepared, {
+    required String? preloadProxyUrl,
+  }) {
+    if (prepared == null) return null;
+    final playbackSource = prepared.playbackSource;
+    if (playbackSource == null) return null;
+    if (!prepared.matchesHttpProxyUrl(preloadProxyUrl)) return null;
+    return playbackSource;
+  }
+
+  bool _usesLoopbackPlaybackSource(PlayableSource playbackSource) {
+    final host = (Uri.tryParse(playbackSource.url)?.host ?? '').trim();
+    return host == '127.0.0.1' || host == 'localhost' || host == '::1';
+  }
+
+  void _updatePlaybackCacheFingerprint({
+    required ResolvedPlaybackSource resolvedSource,
+    required PlayableSource playbackSource,
+  }) {
+    _playbackCacheFingerprint = _usesLoopbackPlaybackSource(playbackSource)
+        ? buildResolvedPlaybackCacheKey(
+            resolvedSource,
+            proxyUrl: _preloadHttpProxyUrl,
+          )?.fingerprint
+        : null;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -4739,6 +4767,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         throw Exception('Exo 内核仅支持 Android');
       }
       final initialPrepared = _takeInitialPreparedPreloadForPlayback();
+      PlayableSource? preparedPlaybackSource;
       Map<String, dynamic>? selectedMediaSource;
       late final ResolvedPlaybackSource resolvedSource;
       if (initialPrepared != null) {
@@ -4759,6 +4788,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
             resolvedSource.mediaSourceId;
         _preloadHttpProxyUrl = preloadProxy;
         _resolvedPlaybackSource = resolvedSource;
+        preparedPlaybackSource = _preparedPlaybackSourceForPlayback(
+          initialPrepared,
+          preloadProxyUrl: preloadProxy,
+        );
         selectedMediaSource = initialPrepared.selectedMediaSource;
         AppDiagnosticsLogger.instance.info(
           'player_network_exo',
@@ -4805,7 +4838,12 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       if (preloadWarmup != null) {
         unawaited(preloadWarmup);
       }
-      final playbackSource = await _buildPlaybackSource(resolvedSource);
+      final playbackSource =
+          preparedPlaybackSource ?? await _buildPlaybackSource(resolvedSource);
+      _updatePlaybackCacheFingerprint(
+        resolvedSource: resolvedSource,
+        playbackSource: playbackSource,
+      );
       _resolvedStream = playbackSource.url;
       _resolvedStreamHeaders = playbackSource.httpHeaders;
       AppDiagnosticsLogger.instance.info(
@@ -4823,11 +4861,12 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           'preloadProxy': _preloadHttpProxyUrl ?? '',
           'usesLoopbackProxy':
               (Uri.tryParse(playbackSource.url)?.host ?? '') == '127.0.0.1',
+          'reusedPreparedPlaybackSource': preparedPlaybackSource != null,
         },
       );
       final controller = VideoPlayerController.networkUrl(
         Uri.parse(playbackSource.url),
-        httpHeaders: _embyHeaders(),
+        httpHeaders: playbackSource.httpHeaders,
         // Use platform view on Android to avoid color issues with some HDR/Dolby Vision sources.
         // (Texture-based rendering may show green/purple tint on certain P8 files.)
         viewType: _viewType,
@@ -5113,35 +5152,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   Future<PlayableSource> _buildPlaybackSource(
     ResolvedPlaybackSource resolvedSource,
   ) async {
-    final cacheKey = buildResolvedPlaybackCacheKey(
-      resolvedSource,
-      proxyUrl: _preloadHttpProxyUrl,
+    return PlaybackPreloadCoordinator.buildPlaybackSource(
+      resolvedSource: resolvedSource,
+      httpProxyUrl: _preloadHttpProxyUrl,
     );
-    final mediaType = switch (resolvedSource.mediaTypeHint) {
-      ResolvedPlaybackMediaType.hls => StreamMediaType.hls,
-      ResolvedPlaybackMediaType.dash => StreamMediaType.dash,
-      ResolvedPlaybackMediaType.file => StreamMediaType.file,
-      ResolvedPlaybackMediaType.unknown => StreamMediaType.unknown,
-    };
-    final candidate = PlayableSource(
-      url: resolvedSource.url,
-      httpHeaders: resolvedSource.httpHeaders,
-      mediaTypeHint: mediaType,
-      fromStrm: resolvedSource.fromStrm,
-      redirectChain: resolvedSource.redirectChain,
-      contentTypeHint: resolvedSource.contentTypeHint,
-      supportsByteRange: resolvedSource.supportsByteRange,
-      httpStatusHint: resolvedSource.httpStatusHint,
-      bitrateHint: resolvedSource.bitrate,
-    );
-    final proxied = await LocalHttpStreamProxy.wrapPlaybackSource(
-      candidate,
-      cacheKey: cacheKey,
-    );
-    if (proxied != null) {
-      _playbackCacheFingerprint = cacheKey?.fingerprint;
-    }
-    return proxied ?? candidate;
   }
 
   int _toTicks(Duration d) => d.inMicroseconds * 10;
