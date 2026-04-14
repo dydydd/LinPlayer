@@ -65,6 +65,7 @@ class MainActivity : FlutterActivity() {
                 "isAndroidTv" -> result.success(isAndroidTv())
                 "deviceName" -> result.success(deviceName())
                 "batteryLevel" -> result.success(batteryLevel())
+                "appRxBytes" -> result.success(appRxBytes())
                 "totalRxBytes" -> result.success(totalRxBytes())
                 "primaryAbi" -> result.success(primaryAbi())
                 "nativeLibraryDir" -> result.success(applicationInfo.nativeLibraryDir)
@@ -262,6 +263,13 @@ class MainActivity : FlutterActivity() {
 
     private fun totalRxBytes(): Long? {
         val v = TrafficStats.getTotalRxBytes()
+        if (v == TrafficStats.UNSUPPORTED.toLong()) return null
+        if (v < 0) return null
+        return v
+    }
+
+    private fun appRxBytes(): Long? {
+        val v = TrafficStats.getUidRxBytes(Process.myUid())
         if (v == TrafficStats.UNSUPPORTED.toLong()) return null
         if (v < 0) return null
         return v

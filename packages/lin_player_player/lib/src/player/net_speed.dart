@@ -1,5 +1,32 @@
 import 'package:flutter/material.dart';
 
+double? computeTrafficRateBytesPerSecond({
+  required int totalBytes,
+  required int? previousBytes,
+  required DateTime sampleAt,
+  required DateTime? previousAt,
+}) {
+  if (previousBytes == null || previousAt == null) return null;
+
+  final dtMs = sampleAt.difference(previousAt).inMilliseconds;
+  final delta = totalBytes - previousBytes;
+  if (dtMs <= 0 || delta < 0) return null;
+
+  return delta * 1000.0 / dtMs;
+}
+
+double smoothNetworkSpeedBytesPerSecond(
+  double next, {
+  double? previous,
+  double previousWeight = 0.7,
+}) {
+  if (previous == null || !previous.isFinite || previous < 0) return next;
+  if (!next.isFinite || next < 0) return previous;
+
+  final keep = previousWeight.clamp(0.0, 1.0);
+  return previous * keep + next * (1.0 - keep);
+}
+
 String formatBytesPerSecond(double bytesPerSecond) {
   if (!bytesPerSecond.isFinite || bytesPerSecond < 0) return '—';
   final v = bytesPerSecond;

@@ -81,8 +81,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   Duration _bufferSpeedSampleEnd = Duration.zero;
   double? _bufferSpeedX;
   double? _netSpeedBytesPerSecond;
-  int? _lastTotalRxBytes;
-  DateTime? _lastTotalRxAt;
+  int? _lastAppRxBytes;
+  DateTime? _lastAppRxAt;
   bool _systemNetSpeedPollInFlight = false;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
@@ -2218,10 +2218,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     if (speed != null && speed.isFinite && speed > 0) {
       return formatBytesPerSecond(speed);
     }
-    final bufferSpeedX = _bufferSpeedX;
-    if (bufferSpeedX != null && bufferSpeedX.isFinite && bufferSpeedX > 0) {
-      return '缓冲 x${bufferSpeedX.toStringAsFixed(2)}';
-    }
     return '--';
   }
 
@@ -4244,6 +4240,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _bufferSpeedSampleEnd = Duration.zero;
     _bufferSpeedX = null;
     _netSpeedBytesPerSecond = null;
+    _lastAppRxBytes = null;
+    _lastAppRxAt = null;
     _nextDanmakuIndex = 0;
     _danmakuKey.currentState?.clear();
     _danmakuSources.clear();
@@ -4457,7 +4455,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
             _netSpeedBytesPerSecond = null;
             _lastBufferedAt = now;
             _bufferSpeedSampleEnd = bufferedEnd;
-            _pollSystemNetSpeedOrFallback();
+            _pollAppNetSpeedOrFallback();
           } else {
             final dtMs = now.difference(prevAt).inMilliseconds;
             if (dtMs >= refreshMs) {
@@ -4474,7 +4472,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
               if (bitrate != null && bitrate > 0 && x != null) {
                 fallbackSpeed = x * bitrate / 8.0;
               }
-              _pollSystemNetSpeedOrFallback(
+              _pollAppNetSpeedOrFallback(
                 fallbackBytesPerSecond: fallbackSpeed,
               );
             }
@@ -4489,12 +4487,12 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
             if (last == null ||
                 now.difference(last) >= const Duration(seconds: 1)) {
               _tvNetSpeedLastPollAt = now;
-              _pollSystemNetSpeedOrFallback();
+              _pollAppNetSpeedOrFallback();
             }
           } else {
             _netSpeedBytesPerSecond = null;
-            _lastTotalRxBytes = null;
-            _lastTotalRxAt = null;
+            _lastAppRxBytes = null;
+            _lastAppRxAt = null;
           }
         }
 
@@ -4703,35 +4701,27 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     return bitrate;
   }
 
-  void _pollSystemNetSpeedOrFallback({double? fallbackBytesPerSecond}) {
+  void _pollAppNetSpeedOrFallback({double? fallbackBytesPerSecond}) {
     if (_systemNetSpeedPollInFlight) return;
     _systemNetSpeedPollInFlight = true;
 
-    DeviceType.totalRxBytes().then((totalRx) {
+    DeviceType.appRxBytes().then((appRx) {
       if (!mounted) return;
       final sampleAt = DateTime.now();
 
-      double? systemSpeed;
-      if (totalRx != null) {
-        final prevBytes = _lastTotalRxBytes;
-        final prevAt = _lastTotalRxAt;
-        _lastTotalRxBytes = totalRx;
-        _lastTotalRxAt = sampleAt;
+      final appRate = appRx == null
+          ? null
+          : computeTrafficRateBytesPerSecond(
+              totalBytes: appRx,
+              previousBytes: _lastAppRxBytes,
+              sampleAt: sampleAt,
+              previousAt: _lastAppRxAt,
+            );
+      _lastAppRxBytes = appRx;
+      _lastAppRxAt = appRx == null ? null : sampleAt;
 
-        if (prevBytes != null && prevAt != null) {
-          final dtMs = sampleAt.difference(prevAt).inMilliseconds;
-          final delta = totalRx - prevBytes;
-          if (dtMs > 0 && delta >= 0) {
-            systemSpeed = delta * 1000.0 / dtMs;
-          }
-        }
-      } else {
-        _lastTotalRxBytes = null;
-        _lastTotalRxAt = null;
-      }
-
-      final next = (systemSpeed != null && systemSpeed.isFinite)
-          ? systemSpeed
+      final next = (appRate != null && appRate.isFinite && appRate >= 0)
+          ? appRate
           : (fallbackBytesPerSecond != null && fallbackBytesPerSecond.isFinite
               ? fallbackBytesPerSecond
               : null);
@@ -4743,13 +4733,15 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         return;
       }
 
-      final prev = _netSpeedBytesPerSecond;
-      final smoothed = prev == null ? next : (prev * 0.7 + next * 0.3);
+      final smoothed = smoothNetworkSpeedBytesPerSecond(
+        next,
+        previous: _netSpeedBytesPerSecond,
+      );
       setState(() => _netSpeedBytesPerSecond = smoothed);
     }).catchError((_) {
       if (!mounted) return;
-      _lastTotalRxBytes = null;
-      _lastTotalRxAt = null;
+      _lastAppRxBytes = null;
+      _lastAppRxAt = null;
 
       final next =
           (fallbackBytesPerSecond != null && fallbackBytesPerSecond.isFinite)
@@ -4762,8 +4754,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         return;
       }
 
-      final prev = _netSpeedBytesPerSecond;
-      final smoothed = prev == null ? next : (prev * 0.7 + next * 0.3);
+      final smoothed = smoothNetworkSpeedBytesPerSecond(
+        next,
+        previous: _netSpeedBytesPerSecond,
+      );
       setState(() => _netSpeedBytesPerSecond = smoothed);
     }).whenComplete(() {
       _systemNetSpeedPollInFlight = false;

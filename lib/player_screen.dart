@@ -132,8 +132,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   Timer? _netSpeedTimer;
   bool _netSpeedPollInFlight = false;
   double? _netSpeedBytesPerSecond;
-  int? _lastTotalRxBytes;
-  DateTime? _lastTotalRxAt;
+  int? _lastAppRxBytes;
+  DateTime? _lastAppRxAt;
   bool _exitInProgress = false;
   bool _allowRoutePop = false;
 
@@ -298,8 +298,8 @@ class _PlayerScreenState extends State<PlayerScreen>
 
     if (!_isNetworkPlayback) return;
     if (!_playerService.isInitialized || _playerService.isExternalPlayback) {
-      _lastTotalRxBytes = null;
-      _lastTotalRxAt = null;
+      _lastAppRxBytes = null;
+      _lastAppRxAt = null;
       if (_netSpeedBytesPerSecond != null && mounted) {
         setState(() => _netSpeedBytesPerSecond = null);
       }
@@ -322,8 +322,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   Future<void> _pollNetSpeed() async {
     if (_netSpeedPollInFlight) return;
     if (!_playerService.isInitialized || _playerService.isExternalPlayback) {
-      _lastTotalRxBytes = null;
-      _lastTotalRxAt = null;
+      _lastAppRxBytes = null;
+      _lastAppRxAt = null;
       if (_netSpeedBytesPerSecond != null && mounted) {
         setState(() => _netSpeedBytesPerSecond = null);
       }
@@ -332,32 +332,23 @@ class _PlayerScreenState extends State<PlayerScreen>
 
     _netSpeedPollInFlight = true;
     try {
-      final totalRx = await DeviceType.totalRxBytes();
-      final sampleAt = DateTime.now();
-      if (totalRx != null) {
-        final prevBytes = _lastTotalRxBytes;
-        final prevAt = _lastTotalRxAt;
-        _lastTotalRxBytes = totalRx;
-        _lastTotalRxAt = sampleAt;
-
-        if (prevBytes != null && prevAt != null) {
-          final dtMs = sampleAt.difference(prevAt).inMilliseconds;
-          final delta = totalRx - prevBytes;
-          if (dtMs > 0 && delta >= 0) {
-            final next = delta * 1000.0 / dtMs;
-            final prev = _netSpeedBytesPerSecond;
-            final smoothed = prev == null ? next : (prev * 0.7 + next * 0.3);
-            if (mounted) {
-              setState(() => _netSpeedBytesPerSecond = smoothed);
-            }
-            return;
-          }
-        }
-      }
-
       final rate = await _playerService.queryNetworkInputRateBytesPerSecond();
+      final appRx = await DeviceType.appRxBytes();
+      final sampleAt = DateTime.now();
+      final appRate = appRx == null
+          ? null
+          : computeTrafficRateBytesPerSecond(
+              totalBytes: appRx,
+              previousBytes: _lastAppRxBytes,
+              sampleAt: sampleAt,
+              previousAt: _lastAppRxAt,
+            );
+      _lastAppRxBytes = appRx;
+      _lastAppRxAt = appRx == null ? null : sampleAt;
+
       if (!mounted) return;
-      final next = (rate != null && rate.isFinite) ? rate : null;
+      final next =
+          (rate != null && rate.isFinite && rate >= 0) ? rate : appRate;
       if (next == null) {
         if (_netSpeedBytesPerSecond != null) {
           setState(() => _netSpeedBytesPerSecond = null);
@@ -365,8 +356,10 @@ class _PlayerScreenState extends State<PlayerScreen>
         return;
       }
 
-      final prev = _netSpeedBytesPerSecond;
-      final smoothed = prev == null ? next : (prev * 0.7 + next * 0.3);
+      final smoothed = smoothNetworkSpeedBytesPerSecond(
+        next,
+        previous: _netSpeedBytesPerSecond,
+      );
       setState(() => _netSpeedBytesPerSecond = smoothed);
     } finally {
       _netSpeedPollInFlight = false;
@@ -1686,6 +1679,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     _netSpeedTimer = null;
     _netSpeedPollInFlight = false;
     _netSpeedBytesPerSecond = null;
+    _lastAppRxBytes = null;
+    _lastAppRxAt = null;
     try {
       await _playerService.dispose();
     } catch (_) {}
@@ -3045,7 +3040,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                                               onHorizontalDragUpdate:
                                                   (_gesturesEnabled &&
                                                           _gestureSeekEnabled)
-                                                      ? (d) => _onSeekDragUpdate(
+                                                      ? (d) =>
+                                                          _onSeekDragUpdate(
                                                             d,
                                                             width: w,
                                                             duration: _duration,
@@ -3067,7 +3063,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                                               onVerticalDragUpdate:
                                                   (_gesturesEnabled &&
                                                           sideDragEnabled)
-                                                      ? (d) => _onSideDragUpdate(
+                                                      ? (d) =>
+                                                          _onSideDragUpdate(
                                                             d,
                                                             height: h,
                                                           )
@@ -3092,11 +3089,10 @@ class _PlayerScreenState extends State<PlayerScreen>
                                                             height: h,
                                                           )
                                                       : null,
-                                              onLongPressEnd:
-                                                  (_gesturesEnabled &&
-                                                          _gestureLongPressEnabled)
-                                                      ? _onLongPressEnd
-                                                      : null,
+                                              onLongPressEnd: (_gesturesEnabled &&
+                                                      _gestureLongPressEnabled)
+                                                  ? _onLongPressEnd
+                                                  : null,
                                               child: const SizedBox.expand(),
                                             ),
                                           );
@@ -3156,8 +3152,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                             alignment: Alignment.topCenter,
                             child: SafeArea(
                               bottom: false,
-                              minimum:
-                                  const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                              minimum: const EdgeInsets.fromLTRB(12, 12, 12, 0),
                               child: AnimatedSlide(
                                 offset: _controlsVisible
                                     ? Offset.zero
@@ -3186,8 +3181,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                             alignment: Alignment.bottomCenter,
                             child: SafeArea(
                               top: false,
-                              minimum:
-                                  const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                              minimum: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                               child: AnimatedSlide(
                                 offset: _controlsVisible
                                     ? Offset.zero
@@ -3216,436 +3210,471 @@ class _PlayerScreenState extends State<PlayerScreen>
                         ),
                       ],
                     )
-              : Column(
-                  children: [
-                    wrapVideo(
-                      Container(
-                        color: Colors.black,
-                        child: _playerService.isInitialized
-                            ? Stack(
-                                fit: StackFit.expand,
-                                children: [
-                                  Video(
-                                    key: ValueKey(_playerService.controller),
-                                    controller: _playerService.controller,
-                                    controls: NoVideoControls,
-                                    subtitleViewConfiguration:
-                                        _subtitleViewConfiguration,
-                                  ),
-                                  Positioned.fill(
-                                    child: DanmakuStage(
-                                      key: _danmakuKey,
-                                      enabled: _danmakuEnabled,
-                                      opacity: _danmakuOpacity,
-                                      scale: _danmakuScale,
-                                      speed: _danmakuSpeed,
-                                      timeScale:
-                                          _playerService.player.state.rate,
-                                      bold: _danmakuBold,
-                                      scrollMaxLines: _danmakuMaxLines,
-                                      topMaxLines: _danmakuTopMaxLines,
-                                      bottomMaxLines: _danmakuBottomMaxLines,
-                                      preventOverlap: _danmakuPreventOverlap,
-                                    ),
-                                  ),
-                                  if (_screenBrightness < 0.999)
-                                    Positioned.fill(
-                                      child: IgnorePointer(
-                                        child: ColoredBox(
-                                          color: Colors.black.withValues(
-                                            alpha: (1.0 - _screenBrightness)
-                                                .clamp(0.0, 0.8)
-                                                .toDouble(),
-                                          ),
+                  : Column(
+                      children: [
+                        wrapVideo(
+                          Container(
+                            color: Colors.black,
+                            child: _playerService.isInitialized
+                                ? Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      Video(
+                                        key:
+                                            ValueKey(_playerService.controller),
+                                        controller: _playerService.controller,
+                                        controls: NoVideoControls,
+                                        subtitleViewConfiguration:
+                                            _subtitleViewConfiguration,
+                                      ),
+                                      Positioned.fill(
+                                        child: DanmakuStage(
+                                          key: _danmakuKey,
+                                          enabled: _danmakuEnabled,
+                                          opacity: _danmakuOpacity,
+                                          scale: _danmakuScale,
+                                          speed: _danmakuSpeed,
+                                          timeScale:
+                                              _playerService.player.state.rate,
+                                          bold: _danmakuBold,
+                                          scrollMaxLines: _danmakuMaxLines,
+                                          topMaxLines: _danmakuTopMaxLines,
+                                          bottomMaxLines:
+                                              _danmakuBottomMaxLines,
+                                          preventOverlap:
+                                              _danmakuPreventOverlap,
                                         ),
                                       ),
-                                    ),
-                                  if (_buffering)
-                                    Positioned.fill(
-                                      child: ColoredBox(
-                                        color: Colors.black54,
-                                        child: Center(
-                                          child: Column(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              const CircularProgressIndicator(),
-                                              if ((widget.appState
-                                                          ?.showBufferSpeed ??
-                                                      false) &&
-                                                  _isNetworkPlayback)
-                                                Padding(
-                                                  padding:
-                                                      const EdgeInsets.only(
-                                                          top: 12),
-                                                  child: Text(
-                                                    '网速：${_netSpeedBytesPerSecond == null ? '—' : formatBytesPerSecond(_netSpeedBytesPerSecond!)}',
-                                                    style: const TextStyle(
-                                                      color: Colors.white,
+                                      if (_screenBrightness < 0.999)
+                                        Positioned.fill(
+                                          child: IgnorePointer(
+                                            child: ColoredBox(
+                                              color: Colors.black.withValues(
+                                                alpha: (1.0 - _screenBrightness)
+                                                    .clamp(0.0, 0.8)
+                                                    .toDouble(),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      if (_buffering)
+                                        Positioned.fill(
+                                          child: ColoredBox(
+                                            color: Colors.black54,
+                                            child: Center(
+                                              child: Column(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const CircularProgressIndicator(),
+                                                  if ((widget.appState
+                                                              ?.showBufferSpeed ??
+                                                          false) &&
+                                                      _isNetworkPlayback)
+                                                    Padding(
+                                                      padding:
+                                                          const EdgeInsets.only(
+                                                              top: 12),
+                                                      child: Text(
+                                                        '网速：${_netSpeedBytesPerSecond == null ? '—' : formatBytesPerSecond(_netSpeedBytesPerSecond!)}',
+                                                        style: const TextStyle(
+                                                          color: Colors.white,
+                                                        ),
+                                                      ),
                                                     ),
-                                                  ),
-                                                ),
-                                            ],
+                                                ],
+                                              ),
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                    ),
-                                  Positioned.fill(
-                                    child: LayoutBuilder(
-                                      builder: (ctx, constraints) {
-                                        final w = constraints.maxWidth;
-                                        final h = constraints.maxHeight;
-                                        final sideDragEnabled =
-                                            _gestureBrightnessEnabled ||
-                                                _gestureVolumeEnabled;
-                                        return Listener(
-                                          behavior: HitTestBehavior.translucent,
-                                          onPointerDown: (e) {
-                                            _onDesktopMouseSideButtonPointerDown(
-                                              e,
-                                              gesturesEnabled: _gesturesEnabled,
-                                            );
-                                            _onDesktopSecondarySpeedPointerDown(
-                                              e,
-                                              gesturesEnabled: _gesturesEnabled,
+                                      Positioned.fill(
+                                        child: LayoutBuilder(
+                                          builder: (ctx, constraints) {
+                                            final w = constraints.maxWidth;
+                                            final h = constraints.maxHeight;
+                                            final sideDragEnabled =
+                                                _gestureBrightnessEnabled ||
+                                                    _gestureVolumeEnabled;
+                                            return Listener(
+                                              behavior:
+                                                  HitTestBehavior.translucent,
+                                              onPointerDown: (e) {
+                                                _onDesktopMouseSideButtonPointerDown(
+                                                  e,
+                                                  gesturesEnabled:
+                                                      _gesturesEnabled,
+                                                );
+                                                _onDesktopSecondarySpeedPointerDown(
+                                                  e,
+                                                  gesturesEnabled:
+                                                      _gesturesEnabled,
+                                                );
+                                              },
+                                              onPointerUp:
+                                                  _onDesktopSecondarySpeedPointerUp,
+                                              onPointerCancel:
+                                                  _onDesktopSecondarySpeedPointerCancel,
+                                              child: GestureDetector(
+                                                behavior:
+                                                    HitTestBehavior.translucent,
+                                                onTap: _toggleControls,
+                                                onDoubleTapDown: _gesturesEnabled
+                                                    ? (d) =>
+                                                        _doubleTapDownPosition =
+                                                            d.localPosition
+                                                    : null,
+                                                onDoubleTap: _gesturesEnabled
+                                                    ? () {
+                                                        final pos =
+                                                            _doubleTapDownPosition ??
+                                                                Offset(
+                                                                    w / 2, 0);
+                                                        // ignore: unawaited_futures
+                                                        _handleDoubleTap(
+                                                            pos, w);
+                                                      }
+                                                    : null,
+                                                onHorizontalDragStart:
+                                                    (_gesturesEnabled &&
+                                                            _gestureSeekEnabled)
+                                                        ? _onSeekDragStart
+                                                        : null,
+                                                onHorizontalDragUpdate:
+                                                    (_gesturesEnabled &&
+                                                            _gestureSeekEnabled)
+                                                        ? (d) =>
+                                                            _onSeekDragUpdate(
+                                                              d,
+                                                              width: w,
+                                                              duration:
+                                                                  _duration,
+                                                            )
+                                                        : null,
+                                                onHorizontalDragEnd:
+                                                    (_gesturesEnabled &&
+                                                            _gestureSeekEnabled)
+                                                        ? _onSeekDragEnd
+                                                        : null,
+                                                onVerticalDragStart:
+                                                    (_gesturesEnabled &&
+                                                            sideDragEnabled)
+                                                        ? (d) =>
+                                                            _onSideDragStart(
+                                                              d,
+                                                              width: w,
+                                                            )
+                                                        : null,
+                                                onVerticalDragUpdate:
+                                                    (_gesturesEnabled &&
+                                                            sideDragEnabled)
+                                                        ? (d) =>
+                                                            _onSideDragUpdate(
+                                                              d,
+                                                              height: h,
+                                                            )
+                                                        : null,
+                                                onVerticalDragEnd:
+                                                    (_gesturesEnabled &&
+                                                            sideDragEnabled)
+                                                        ? _onSideDragEnd
+                                                        : null,
+                                                onLongPressStart:
+                                                    (_gesturesEnabled &&
+                                                            _gestureLongPressEnabled)
+                                                        ? _onLongPressStart
+                                                        : null,
+                                                onLongPressMoveUpdate:
+                                                    (_gesturesEnabled &&
+                                                            _gestureLongPressEnabled &&
+                                                            _longPressSlideEnabled)
+                                                        ? (d) =>
+                                                            _onLongPressMoveUpdate(
+                                                              d,
+                                                              height: h,
+                                                            )
+                                                        : null,
+                                                onLongPressEnd: (_gesturesEnabled &&
+                                                        _gestureLongPressEnabled)
+                                                    ? _onLongPressEnd
+                                                    : null,
+                                                child: const SizedBox.expand(),
+                                              ),
                                             );
                                           },
-                                          onPointerUp:
-                                              _onDesktopSecondarySpeedPointerUp,
-                                          onPointerCancel:
-                                              _onDesktopSecondarySpeedPointerCancel,
-                                          child: GestureDetector(
-                                            behavior:
-                                                HitTestBehavior.translucent,
-                                            onTap: _toggleControls,
-                                            onDoubleTapDown: _gesturesEnabled
-                                                ? (d) =>
-                                                    _doubleTapDownPosition =
-                                                        d.localPosition
-                                                : null,
-                                            onDoubleTap: _gesturesEnabled
-                                                ? () {
-                                                    final pos =
-                                                        _doubleTapDownPosition ??
-                                                            Offset(w / 2, 0);
-                                                    // ignore: unawaited_futures
-                                                    _handleDoubleTap(pos, w);
-                                                  }
-                                                : null,
-                                            onHorizontalDragStart:
-                                                (_gesturesEnabled &&
-                                                        _gestureSeekEnabled)
-                                                    ? _onSeekDragStart
-                                                    : null,
-                                            onHorizontalDragUpdate:
-                                                (_gesturesEnabled &&
-                                                        _gestureSeekEnabled)
-                                                    ? (d) => _onSeekDragUpdate(
-                                                          d,
-                                                          width: w,
-                                                          duration: _duration,
-                                                        )
-                                                    : null,
-                                            onHorizontalDragEnd:
-                                                (_gesturesEnabled &&
-                                                        _gestureSeekEnabled)
-                                                    ? _onSeekDragEnd
-                                                    : null,
-                                            onVerticalDragStart:
-                                                (_gesturesEnabled &&
-                                                        sideDragEnabled)
-                                                    ? (d) => _onSideDragStart(
-                                                          d,
-                                                          width: w,
-                                                        )
-                                                    : null,
-                                            onVerticalDragUpdate:
-                                                (_gesturesEnabled &&
-                                                        sideDragEnabled)
-                                                    ? (d) => _onSideDragUpdate(
-                                                          d,
-                                                          height: h,
-                                                        )
-                                                    : null,
-                                            onVerticalDragEnd:
-                                                (_gesturesEnabled &&
-                                                        sideDragEnabled)
-                                                    ? _onSideDragEnd
-                                                    : null,
-                                            onLongPressStart:
-                                                (_gesturesEnabled &&
-                                                        _gestureLongPressEnabled)
-                                                    ? _onLongPressStart
-                                                    : null,
-                                            onLongPressMoveUpdate:
-                                                (_gesturesEnabled &&
-                                                        _gestureLongPressEnabled &&
-                                                        _longPressSlideEnabled)
-                                                    ? (d) =>
-                                                        _onLongPressMoveUpdate(
-                                                          d,
-                                                          height: h,
-                                                        )
-                                                    : null,
-                                            onLongPressEnd: (_gesturesEnabled &&
-                                                    _gestureLongPressEnabled)
-                                                ? _onLongPressEnd
-                                                : null,
-                                            child: const SizedBox.expand(),
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                  ),
-                                  if (_gestureOverlayText != null)
-                                    Center(
-                                      child: IgnorePointer(
-                                        child: Material(
-                                          color: Colors.black54,
-                                          borderRadius:
-                                              BorderRadius.circular(12),
-                                          child: Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 14,
-                                              vertical: 10,
-                                            ),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Icon(
-                                                  _gestureOverlayIcon ??
-                                                      Icons.info_outline,
-                                                  size: 20,
-                                                  color: Colors.white,
+                                        ),
+                                      ),
+                                      if (_gestureOverlayText != null)
+                                        Center(
+                                          child: IgnorePointer(
+                                            child: Material(
+                                              color: Colors.black54,
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                              child: Padding(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 14,
+                                                  vertical: 10,
                                                 ),
-                                                const SizedBox(width: 8),
-                                                Text(
-                                                  _gestureOverlayText!,
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 13,
-                                                  ),
+                                                child: Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Icon(
+                                                      _gestureOverlayIcon ??
+                                                          Icons.info_outline,
+                                                      size: 20,
+                                                      color: Colors.white,
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Text(
+                                                      _gestureOverlayText!,
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 13,
+                                                      ),
+                                                    ),
+                                                  ],
                                                 ),
-                                              ],
+                                              ),
                                             ),
                                           ),
                                         ),
-                                      ),
-                                    ),
-                                  Align(
-                                    alignment: Alignment.bottomCenter,
-                                    child: SafeArea(
-                                      top: false,
-                                      minimum: const EdgeInsets.fromLTRB(
-                                          12, 0, 12, 12),
-                                      child: AnimatedOpacity(
-                                        opacity: _controlsVisible ? 1 : 0,
-                                        duration:
-                                            const Duration(milliseconds: 200),
-                                        child: IgnorePointer(
-                                          ignoring: !_controlsVisible,
-                                          child: Listener(
-                                            onPointerDown: (_) =>
-                                                _showControls(),
-                                            child: Focus(
-                                              canRequestFocus: false,
-                                              onKeyEvent: (node, event) {
-                                                if (!_remoteEnabled) {
-                                                  return KeyEventResult.ignored;
-                                                }
-                                                if (event is! KeyDownEvent) {
-                                                  return KeyEventResult.ignored;
-                                                }
-                                                if (event.logicalKey ==
-                                                    LogicalKeyboardKey
-                                                        .arrowDown) {
-                                                  final moved =
-                                                      FocusScope.of(context)
-                                                          .focusInDirection(
-                                                    TraversalDirection.down,
-                                                  );
-                                                  if (moved) {
+                                      Align(
+                                        alignment: Alignment.bottomCenter,
+                                        child: SafeArea(
+                                          top: false,
+                                          minimum: const EdgeInsets.fromLTRB(
+                                              12, 0, 12, 12),
+                                          child: AnimatedOpacity(
+                                            opacity: _controlsVisible ? 1 : 0,
+                                            duration: const Duration(
+                                                milliseconds: 200),
+                                            child: IgnorePointer(
+                                              ignoring: !_controlsVisible,
+                                              child: Listener(
+                                                onPointerDown: (_) =>
+                                                    _showControls(),
+                                                child: Focus(
+                                                  canRequestFocus: false,
+                                                  onKeyEvent: (node, event) {
+                                                    if (!_remoteEnabled) {
+                                                      return KeyEventResult
+                                                          .ignored;
+                                                    }
+                                                    if (event
+                                                        is! KeyDownEvent) {
+                                                      return KeyEventResult
+                                                          .ignored;
+                                                    }
+                                                    if (event.logicalKey ==
+                                                        LogicalKeyboardKey
+                                                            .arrowDown) {
+                                                      final moved =
+                                                          FocusScope.of(context)
+                                                              .focusInDirection(
+                                                        TraversalDirection.down,
+                                                      );
+                                                      if (moved) {
+                                                        return KeyEventResult
+                                                            .handled;
+                                                      }
+                                                      _hideControlsForRemote();
+                                                      return KeyEventResult
+                                                          .handled;
+                                                    }
                                                     return KeyEventResult
-                                                        .handled;
-                                                  }
-                                                  _hideControlsForRemote();
-                                                  return KeyEventResult.handled;
-                                                }
-                                                return KeyEventResult.ignored;
-                                              },
-                                              child: PlaybackControls(
-                                                enabled: _playerService
-                                                        .isInitialized &&
-                                                    _playError == null,
-                                                playPauseFocusNode:
-                                                    _tvPlayPauseFocusNode,
-                                                position: _position,
-                                                buffered: _lastBuffer,
-                                                duration: _duration,
-                                                isPlaying:
-                                                    _playerService.isPlaying,
-                                                playbackRate: _playerService
-                                                    .player.state.rate,
-                                                onSetPlaybackRate:
-                                                    (rate) async {
-                                                  _showControls();
-                                                  if (!_playerService
-                                                      .isInitialized) {
-                                                    return;
-                                                  }
-                                                  await _playerService.player
-                                                      .setRate(rate);
-                                                  if (mounted) setState(() {});
-                                                },
-                                                heatmap: _danmakuHeatmap,
-                                                showHeatmap:
-                                                    _danmakuShowHeatmap &&
-                                                        _danmakuHeatmap
-                                                            .isNotEmpty,
-                                                seekBackwardSeconds:
-                                                    _seekBackSeconds,
-                                                seekForwardSeconds:
-                                                    _seekForwardSeconds,
-                                                showSystemTime: widget.appState
-                                                        ?.showSystemTimeInControls ??
-                                                    false,
-                                                showBattery: widget.appState
-                                                        ?.showBatteryInControls ??
-                                                    false,
-                                                showBufferSpeed: widget.appState
-                                                        ?.showBufferSpeed ??
-                                                    false,
-                                                buffering: _buffering,
-                                                bufferSpeedX: _bufferSpeedX,
-                                                netSpeedBytesPerSecond:
-                                                    _netSpeedBytesPerSecond,
-                                                onRequestThumbnail:
-                                                    _thumbnailer == null
-                                                        ? null
-                                                        : (pos) => _thumbnailer!
-                                                                .getThumbnail(
-                                                              pos,
-                                                            ),
-                                                onSwitchCore: (!kIsWeb &&
-                                                        defaultTargetPlatform ==
-                                                            TargetPlatform
-                                                                .android &&
-                                                        widget.appState != null)
-                                                    ? _switchCore
-                                                    : null,
-                                                onScrubStart: _onScrubStart,
-                                                onScrubEnd: _onScrubEnd,
-                                                onSeek: (pos) async {
-                                                  await _playerService.seek(
-                                                    pos,
-                                                    flushBuffer:
-                                                        _flushBufferOnSeek,
-                                                  );
-                                                  _position = pos;
-                                                  _syncDanmakuCursor(pos);
-                                                  if (mounted) setState(() {});
-                                                },
-                                                onPlay: () {
-                                                  _showControls();
-                                                  return _playerService.play();
-                                                },
-                                                onPause: () {
-                                                  _showControls();
-                                                  return _playerService.pause();
-                                                },
-                                                onSeekBackward: () async {
-                                                  _showControls();
-                                                  final target = _position -
-                                                      Duration(
-                                                          seconds:
-                                                              _seekBackSeconds);
-                                                  final pos =
-                                                      target < Duration.zero
-                                                          ? Duration.zero
-                                                          : target;
-                                                  await _playerService.seek(
-                                                    pos,
-                                                    flushBuffer:
-                                                        _flushBufferOnSeek,
-                                                  );
-                                                  _position = pos;
-                                                  _syncDanmakuCursor(pos);
-                                                  if (mounted) setState(() {});
-                                                },
-                                                onSeekForward: () async {
-                                                  _showControls();
-                                                  final d = _duration;
-                                                  final target = _position +
-                                                      Duration(
-                                                          seconds:
-                                                              _seekForwardSeconds);
-                                                  final pos =
-                                                      (d > Duration.zero &&
-                                                              target > d)
-                                                          ? d
-                                                          : target;
-                                                  await _playerService.seek(
-                                                    pos,
-                                                    flushBuffer:
-                                                        _flushBufferOnSeek,
-                                                  );
-                                                  _position = pos;
-                                                  _syncDanmakuCursor(pos);
-                                                  if (mounted) setState(() {});
-                                                },
+                                                        .ignored;
+                                                  },
+                                                  child: PlaybackControls(
+                                                    enabled: _playerService
+                                                            .isInitialized &&
+                                                        _playError == null,
+                                                    playPauseFocusNode:
+                                                        _tvPlayPauseFocusNode,
+                                                    position: _position,
+                                                    buffered: _lastBuffer,
+                                                    duration: _duration,
+                                                    isPlaying: _playerService
+                                                        .isPlaying,
+                                                    playbackRate: _playerService
+                                                        .player.state.rate,
+                                                    onSetPlaybackRate:
+                                                        (rate) async {
+                                                      _showControls();
+                                                      if (!_playerService
+                                                          .isInitialized) {
+                                                        return;
+                                                      }
+                                                      await _playerService
+                                                          .player
+                                                          .setRate(rate);
+                                                      if (mounted) {
+                                                        setState(() {});
+                                                      }
+                                                    },
+                                                    heatmap: _danmakuHeatmap,
+                                                    showHeatmap:
+                                                        _danmakuShowHeatmap &&
+                                                            _danmakuHeatmap
+                                                                .isNotEmpty,
+                                                    seekBackwardSeconds:
+                                                        _seekBackSeconds,
+                                                    seekForwardSeconds:
+                                                        _seekForwardSeconds,
+                                                    showSystemTime: widget
+                                                            .appState
+                                                            ?.showSystemTimeInControls ??
+                                                        false,
+                                                    showBattery: widget.appState
+                                                            ?.showBatteryInControls ??
+                                                        false,
+                                                    showBufferSpeed: widget
+                                                            .appState
+                                                            ?.showBufferSpeed ??
+                                                        false,
+                                                    buffering: _buffering,
+                                                    bufferSpeedX: _bufferSpeedX,
+                                                    netSpeedBytesPerSecond:
+                                                        _netSpeedBytesPerSecond,
+                                                    onRequestThumbnail:
+                                                        _thumbnailer == null
+                                                            ? null
+                                                            : (pos) =>
+                                                                _thumbnailer!
+                                                                    .getThumbnail(
+                                                                  pos,
+                                                                ),
+                                                    onSwitchCore: (!kIsWeb &&
+                                                            defaultTargetPlatform ==
+                                                                TargetPlatform
+                                                                    .android &&
+                                                            widget.appState !=
+                                                                null)
+                                                        ? _switchCore
+                                                        : null,
+                                                    onScrubStart: _onScrubStart,
+                                                    onScrubEnd: _onScrubEnd,
+                                                    onSeek: (pos) async {
+                                                      await _playerService.seek(
+                                                        pos,
+                                                        flushBuffer:
+                                                            _flushBufferOnSeek,
+                                                      );
+                                                      _position = pos;
+                                                      _syncDanmakuCursor(pos);
+                                                      if (mounted) {
+                                                        setState(() {});
+                                                      }
+                                                    },
+                                                    onPlay: () {
+                                                      _showControls();
+                                                      return _playerService
+                                                          .play();
+                                                    },
+                                                    onPause: () {
+                                                      _showControls();
+                                                      return _playerService
+                                                          .pause();
+                                                    },
+                                                    onSeekBackward: () async {
+                                                      _showControls();
+                                                      final target = _position -
+                                                          Duration(
+                                                              seconds:
+                                                                  _seekBackSeconds);
+                                                      final pos =
+                                                          target < Duration.zero
+                                                              ? Duration.zero
+                                                              : target;
+                                                      await _playerService.seek(
+                                                        pos,
+                                                        flushBuffer:
+                                                            _flushBufferOnSeek,
+                                                      );
+                                                      _position = pos;
+                                                      _syncDanmakuCursor(pos);
+                                                      if (mounted) {
+                                                        setState(() {});
+                                                      }
+                                                    },
+                                                    onSeekForward: () async {
+                                                      _showControls();
+                                                      final d = _duration;
+                                                      final target = _position +
+                                                          Duration(
+                                                              seconds:
+                                                                  _seekForwardSeconds);
+                                                      final pos =
+                                                          (d > Duration.zero &&
+                                                                  target > d)
+                                                              ? d
+                                                              : target;
+                                                      await _playerService.seek(
+                                                        pos,
+                                                        flushBuffer:
+                                                            _flushBufferOnSeek,
+                                                      );
+                                                      _position = pos;
+                                                      _syncDanmakuCursor(pos);
+                                                      if (mounted) {
+                                                        setState(() {});
+                                                      }
+                                                    },
+                                                  ),
+                                                ),
                                               ),
                                             ),
                                           ),
                                         ),
                                       ),
+                                    ],
+                                  )
+                                : _playError != null
+                                    ? Center(
+                                        child: Text(
+                                          '播放失败：$_playError',
+                                          style: const TextStyle(
+                                              color: Colors.redAccent),
+                                        ),
+                                      )
+                                    : const Center(child: Text('选择一个视频播放')),
+                          ),
+                        ),
+                        if (!_fullScreen) const SizedBox(height: 8),
+                        if (!_fullScreen)
+                          const Padding(
+                            padding: EdgeInsets.all(8.0),
+                            child: Text(
+                              '播放列表',
+                              style: TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        if (!_fullScreen)
+                          Expanded(
+                            child: ListView.builder(
+                              itemCount: _playlist.length,
+                              itemBuilder: (context, index) {
+                                final file = _playlist[index];
+                                final isPlaying =
+                                    index == _currentlyPlayingIndex;
+                                return ListTile(
+                                  leading: Icon(isPlaying
+                                      ? Icons.play_circle_filled
+                                      : Icons.movie),
+                                  title: Text(
+                                    file.name,
+                                    style: TextStyle(
+                                      color: isPlaying ? Colors.blue : null,
                                     ),
                                   ),
-                                ],
-                              )
-                            : _playError != null
-                                ? Center(
-                                    child: Text(
-                                      '播放失败：$_playError',
-                                      style: const TextStyle(
-                                          color: Colors.redAccent),
-                                    ),
-                                  )
-                                : const Center(child: Text('选择一个视频播放')),
-                      ),
+                                  onTap: () => _playFile(file, index),
+                                );
+                              },
+                            ),
+                          ),
+                      ],
                     ),
-                    if (!_fullScreen) const SizedBox(height: 8),
-                    if (!_fullScreen)
-                      const Padding(
-                        padding: EdgeInsets.all(8.0),
-                        child: Text(
-                          '播放列表',
-                          style: TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    if (!_fullScreen)
-                      Expanded(
-                        child: ListView.builder(
-                          itemCount: _playlist.length,
-                          itemBuilder: (context, index) {
-                            final file = _playlist[index];
-                            final isPlaying = index == _currentlyPlayingIndex;
-                            return ListTile(
-                              leading: Icon(isPlaying
-                                  ? Icons.play_circle_filled
-                                  : Icons.movie),
-                              title: Text(
-                                file.name,
-                                style: TextStyle(
-                                  color: isPlaying ? Colors.blue : null,
-                                ),
-                              ),
-                              onTap: () => _playFile(file, index),
-                            );
-                          },
-                        ),
-                      ),
-                  ],
-                ),
         ),
       ),
     );
@@ -6192,7 +6221,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   String _mobileTopTitleText() {
-    if (_currentlyPlayingIndex >= 0 && _currentlyPlayingIndex < _playlist.length) {
+    if (_currentlyPlayingIndex >= 0 &&
+        _currentlyPlayingIndex < _playlist.length) {
       return _playlist[_currentlyPlayingIndex].name;
     }
     return '本地播放';
@@ -6233,9 +6263,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   void _stepMobilePlaybackRate(double delta) {
-    final current = _playerService.isInitialized
-        ? _playerService.player.state.rate
-        : 1.0;
+    final current =
+        _playerService.isInitialized ? _playerService.player.state.rate : 1.0;
     unawaited(_setMobilePlaybackRate(current + delta));
   }
 
@@ -6478,9 +6507,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           const SizedBox(height: 8),
           MobilePlayerOptionTile(
             title: '选择文件夹',
-            subtitle: hasFolder
-                ? '当前：$currentFolderName'
-                : '自动扫描同目录视频并生成选集',
+            subtitle: hasFolder ? '当前：$currentFolderName' : '自动扫描同目录视频并生成选集',
             leading:
                 const Icon(Icons.folder_copy_outlined, color: Colors.white),
             onTap: () {
@@ -6729,8 +6756,8 @@ class _PlayerScreenState extends State<PlayerScreen>
           title: '手动匹配弹幕',
           leading: const Icon(Icons.search, color: Colors.white),
           onTap: controlsEnabled && hasCurrent
-              ? () =>
-                  unawaited(_manualMatchOnlineDanmakuForCurrent(showToast: true))
+              ? () => unawaited(
+                  _manualMatchOnlineDanmakuForCurrent(showToast: true))
               : null,
         ),
         const SizedBox(height: 12),
@@ -6900,8 +6927,8 @@ class _PlayerScreenState extends State<PlayerScreen>
           child = _buildMobileCorePanel(controlsEnabled: controlsEnabled);
           break;
         case _MobilePlayerPanel.superResolution:
-          child =
-              _buildMobileSuperResolutionPanel(controlsEnabled: controlsEnabled);
+          child = _buildMobileSuperResolutionPanel(
+              controlsEnabled: controlsEnabled);
           break;
         case _MobilePlayerPanel.danmaku:
           child = _buildMobileDanmakuPanel(controlsEnabled: controlsEnabled);
@@ -6983,7 +7010,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                   ),
                   const SizedBox(height: 10),
                   TextButton.icon(
-                    onPressed: () => _openMobilePanel(_MobilePlayerPanel.playlist),
+                    onPressed: () =>
+                        _openMobilePanel(_MobilePlayerPanel.playlist),
                     icon: const Icon(Icons.format_list_numbered),
                     label: const Text('查看本地媒体面板'),
                   ),

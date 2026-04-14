@@ -98,14 +98,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   bool _buffering = false;
   double? _bufferingPct;
   Duration _lastBuffer = Duration.zero;
-  DateTime? _lastBufferAt;
-  Duration _lastBufferSample = Duration.zero;
-  double? _bufferSpeedX;
   Timer? _netSpeedTimer;
   bool _netSpeedPollInFlight = false;
   double? _netSpeedBytesPerSecond;
-  int? _lastTotalRxBytes;
-  DateTime? _lastTotalRxAt;
+  int? _lastAppRxBytes;
+  DateTime? _lastAppRxAt;
   bool _appliedAudioPref = false;
   bool _appliedSubtitlePref = false;
   PageRoute<dynamic>? _route;
@@ -475,13 +472,12 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _lastVideoParams = null;
     _lastOrientationKey = null;
     _lastBuffer = Duration.zero;
-    _lastBufferAt = null;
-    _lastBufferSample = Duration.zero;
-    _bufferSpeedX = null;
     _netSpeedTimer?.cancel();
     _netSpeedTimer = null;
     _netSpeedPollInFlight = false;
     _netSpeedBytesPerSecond = null;
+    _lastAppRxBytes = null;
+    _lastAppRxAt = null;
     _appliedAudioPref = false;
     _appliedSubtitlePref = false;
     _playSessionId = null;
@@ -707,9 +703,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       _bufferingSub = _playerService.player.stream.buffering.listen((value) {
         if (!mounted) return;
         _buffering = value;
-        _bufferSpeedX = null;
-        _lastBufferAt = null;
-        _lastBufferSample = _lastBuffer;
         _applyDanmakuPauseState(_buffering || !_playerService.isPlaying);
         setState(() {});
       });
@@ -720,35 +713,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       });
       _bufferSub = _playerService.player.stream.buffer.listen((value) {
         _lastBuffer = value;
-
-        final show = widget.appState.showBufferSpeed;
-        if (!show || !_buffering) return;
-
-        final now = DateTime.now();
-        final refreshSeconds = widget.appState.bufferSpeedRefreshSeconds
-            .clamp(0.2, 3.0)
-            .toDouble();
-        final refreshMs = (refreshSeconds * 1000).round();
-
-        final prevAt = _lastBufferAt;
-        if (prevAt == null) {
-          _bufferSpeedX = null;
-          _lastBufferAt = now;
-          _lastBufferSample = value;
-          if (mounted) setState(() {});
-          return;
+        if (mounted && _buffering) {
+          setState(() {});
         }
-
-        final dtMs = now.difference(prevAt).inMilliseconds;
-        if (dtMs < refreshMs) return;
-
-        final deltaMs = (value - _lastBufferSample).inMilliseconds;
-        _lastBufferAt = now;
-        _lastBufferSample = value;
-        _bufferSpeedX = (dtMs > 0 && deltaMs >= 0) ? (deltaMs / dtMs) : null;
-
-        if (!mounted) return;
-        setState(() {});
       });
       _posSub = _playerService.player.stream.position.listen((pos) {
         if (!mounted) return;
@@ -3665,8 +3632,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _netSpeedTimer = null;
 
     if (!_playerService.isInitialized || _playerService.isExternalPlayback) {
-      _lastTotalRxBytes = null;
-      _lastTotalRxAt = null;
+      _lastAppRxBytes = null;
+      _lastAppRxAt = null;
       if (_netSpeedBytesPerSecond != null && mounted) {
         setState(() => _netSpeedBytesPerSecond = null);
       }
@@ -3689,8 +3656,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   Future<void> _pollNetSpeed() async {
     if (_netSpeedPollInFlight) return;
     if (!_playerService.isInitialized || _playerService.isExternalPlayback) {
-      _lastTotalRxBytes = null;
-      _lastTotalRxAt = null;
+      _lastAppRxBytes = null;
+      _lastAppRxAt = null;
       if (_netSpeedBytesPerSecond != null && mounted) {
         setState(() => _netSpeedBytesPerSecond = null);
       }
@@ -3699,32 +3666,23 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
     _netSpeedPollInFlight = true;
     try {
-      final totalRx = await DeviceType.totalRxBytes();
-      final sampleAt = DateTime.now();
-      if (totalRx != null) {
-        final prevBytes = _lastTotalRxBytes;
-        final prevAt = _lastTotalRxAt;
-        _lastTotalRxBytes = totalRx;
-        _lastTotalRxAt = sampleAt;
-
-        if (prevBytes != null && prevAt != null) {
-          final dtMs = sampleAt.difference(prevAt).inMilliseconds;
-          final delta = totalRx - prevBytes;
-          if (dtMs > 0 && delta >= 0) {
-            final next = delta * 1000.0 / dtMs;
-            final prev = _netSpeedBytesPerSecond;
-            final smoothed = prev == null ? next : (prev * 0.7 + next * 0.3);
-            if (mounted) {
-              setState(() => _netSpeedBytesPerSecond = smoothed);
-            }
-            return;
-          }
-        }
-      }
-
       final rate = await _playerService.queryNetworkInputRateBytesPerSecond();
+      final appRx = await DeviceType.appRxBytes();
+      final sampleAt = DateTime.now();
+      final appRate = appRx == null
+          ? null
+          : computeTrafficRateBytesPerSecond(
+              totalBytes: appRx,
+              previousBytes: _lastAppRxBytes,
+              sampleAt: sampleAt,
+              previousAt: _lastAppRxAt,
+            );
+      _lastAppRxBytes = appRx;
+      _lastAppRxAt = appRx == null ? null : sampleAt;
+
       if (!mounted) return;
-      final next = (rate != null && rate.isFinite) ? rate : null;
+      final next =
+          (rate != null && rate.isFinite && rate >= 0) ? rate : appRate;
       if (next == null) {
         if (_netSpeedBytesPerSecond != null) {
           setState(() => _netSpeedBytesPerSecond = null);
@@ -3732,8 +3690,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         return;
       }
 
-      final prev = _netSpeedBytesPerSecond;
-      final smoothed = prev == null ? next : (prev * 0.7 + next * 0.3);
+      final smoothed = smoothNetworkSpeedBytesPerSecond(
+        next,
+        previous: _netSpeedBytesPerSecond,
+      );
       setState(() => _netSpeedBytesPerSecond = smoothed);
     } finally {
       _netSpeedPollInFlight = false;
@@ -6941,10 +6901,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     final speed = _netSpeedBytesPerSecond;
     if (speed != null && speed.isFinite && speed > 0) {
       return formatBytesPerSecond(speed);
-    }
-    final bufferSpeedX = _bufferSpeedX;
-    if (bufferSpeedX != null && bufferSpeedX.isFinite && bufferSpeedX > 0) {
-      return '缓冲 x${bufferSpeedX.toStringAsFixed(2)}';
     }
     return '--';
   }
