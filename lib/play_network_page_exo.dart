@@ -69,6 +69,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   static const String _kLocalPlaybackProgressPrefix =
       'networkPlaybackProgress_v1:';
   static const Duration _kLateResumeAutoSeekGrace = Duration(seconds: 3);
+  static const Duration _kStartupPreloadBarrierMaxWait =
+      Duration(milliseconds: 1200);
 
   ServerAccess? _serverAccess;
   VideoPlayerController? _controller;
@@ -1597,13 +1599,13 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     await controller.seekTo(target);
   }
 
-  Future<void> _preloadCurrentItemBestEffort({
+  Future<StreamPreloadResult?> _preloadCurrentItemBestEffort({
     required Duration startPosition,
     required String triggerSource,
   }) async {
-    if (!widget.appState.preloadEnabled) return;
+    if (!widget.appState.preloadEnabled) return null;
     final resolvedSource = _resolvedPlaybackSource;
-    if (resolvedSource == null) return;
+    if (resolvedSource == null) return null;
     final effectiveStart =
         startPosition < Duration.zero ? Duration.zero : startPosition;
 
@@ -1623,15 +1625,16 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       ),
     );
 
-    if (!mounted) return;
+    if (!mounted) return result;
     if (result.disabledNow) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('预加载失败，当前源将暂时跳过')),
       );
     }
+    return result;
   }
 
-  Future<void>? _startCurrentItemPreloadWarmup({
+  Future<StreamPreloadResult?>? _startCurrentItemPreloadWarmup({
     required Duration startPosition,
     required String triggerSource,
   }) {
@@ -1640,6 +1643,64 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       startPosition: startPosition,
       triggerSource: triggerSource,
     );
+  }
+
+  Future<String> _awaitStartupPreloadBarrier({
+    required Future<StreamPreloadResult?>? preloadWarmup,
+    required bool usesLoopbackProxy,
+    required bool hadPreparedHandoff,
+    required Duration startPosition,
+  }) async {
+    if (preloadWarmup == null) return 'not-requested';
+    if (!usesLoopbackProxy) return 'non-loopback';
+
+    final shouldWait = hadPreparedHandoff || startPosition > Duration.zero;
+    if (!shouldWait) return 'background';
+
+    final stopwatch = Stopwatch()..start();
+    try {
+      final result =
+          await preloadWarmup.timeout(_kStartupPreloadBarrierMaxWait);
+      final status = result?.status.name ?? 'completed';
+      AppDiagnosticsLogger.instance.info(
+        'player_network_exo',
+        'Startup preload barrier completed',
+        data: <String, Object?>{
+          'itemId': widget.itemId,
+          'status': status,
+          'waitMs': stopwatch.elapsedMilliseconds,
+          'startMs': startPosition.inMilliseconds,
+          'hadPreparedHandoff': hadPreparedHandoff,
+        },
+      );
+      return status;
+    } on TimeoutException {
+      AppDiagnosticsLogger.instance.info(
+        'player_network_exo',
+        'Startup preload barrier timed out',
+        data: <String, Object?>{
+          'itemId': widget.itemId,
+          'waitMs': stopwatch.elapsedMilliseconds,
+          'startMs': startPosition.inMilliseconds,
+          'hadPreparedHandoff': hadPreparedHandoff,
+        },
+      );
+      return 'timeout';
+    } catch (error, stackTrace) {
+      AppDiagnosticsLogger.instance.warn(
+        'player_network_exo',
+        'Startup preload barrier failed',
+        data: <String, Object?>{
+          'itemId': widget.itemId,
+          'waitMs': stopwatch.elapsedMilliseconds,
+          'startMs': startPosition.inMilliseconds,
+          'hadPreparedHandoff': hadPreparedHandoff,
+          'error': AppDiagnosticsLogger.summarizeError(error),
+          'stack': AppDiagnosticsLogger.summarizeStackTrace(stackTrace),
+        },
+      );
+      return 'error';
+    }
   }
 
   void _maybePreloadNextEpisode(Duration pos) {
@@ -4761,6 +4822,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         _serverProgressSync?.fetchServerProgressDurationBestEffort() ??
             Future<Duration?>.value(null);
     final localStartFuture = _readLocalProgressDuration();
+    final startupStopwatch = Stopwatch()..start();
 
     try {
       if (!_isAndroid) {
@@ -4838,8 +4900,17 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       if (preloadWarmup != null) {
         unawaited(preloadWarmup);
       }
+      final playbackSourceStopwatch = Stopwatch()..start();
       final playbackSource =
           preparedPlaybackSource ?? await _buildPlaybackSource(resolvedSource);
+      playbackSourceStopwatch.stop();
+      final usesLoopbackProxy = _usesLoopbackPlaybackSource(playbackSource);
+      final startupPreloadBarrierStatus = await _awaitStartupPreloadBarrier(
+        preloadWarmup: preloadWarmup,
+        usesLoopbackProxy: usesLoopbackProxy,
+        hadPreparedHandoff: initialPrepared != null,
+        startPosition: preloadStart,
+      );
       _updatePlaybackCacheFingerprint(
         resolvedSource: resolvedSource,
         playbackSource: playbackSource,
@@ -4859,9 +4930,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
               playbackSource.httpHeaders),
           'mediaType': resolvedSource.mediaTypeHint.name,
           'preloadProxy': _preloadHttpProxyUrl ?? '',
-          'usesLoopbackProxy':
-              (Uri.tryParse(playbackSource.url)?.host ?? '') == '127.0.0.1',
+          'usesLoopbackProxy': usesLoopbackProxy,
           'reusedPreparedPlaybackSource': preparedPlaybackSource != null,
+          'playbackSourceBuildMs': playbackSourceStopwatch.elapsedMilliseconds,
+          'startupPreloadBarrier': startupPreloadBarrierStatus,
         },
       );
       final controller = VideoPlayerController.networkUrl(
@@ -4872,7 +4944,19 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         viewType: _viewType,
       );
       _controller = controller;
+      final controllerInitializeStopwatch = Stopwatch()..start();
       await controller.initialize();
+      controllerInitializeStopwatch.stop();
+      AppDiagnosticsLogger.instance.info(
+        'player_network_exo',
+        'Exo controller initialized',
+        data: <String, Object?>{
+          'itemId': widget.itemId,
+          'initMs': controllerInitializeStopwatch.elapsedMilliseconds,
+          'startupElapsedMs': startupStopwatch.elapsedMilliseconds,
+          'usesLoopbackProxy': usesLoopbackProxy,
+        },
+      );
       await _applyOrientationForMode();
       await _tryInjectEmbyExternalSubtitlesIntoExo(controller);
       await _applyExoSubtitleOptions();

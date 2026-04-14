@@ -74,6 +74,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       'networkPlaybackProgress_v1:';
   static const Duration _kResumeSeekTolerance = Duration(seconds: 1);
   static const Duration _kLateResumeAutoSeekGrace = Duration(seconds: 3);
+  static const Duration _kStartupPreloadBarrierMaxWait =
+      Duration(milliseconds: 1200);
 
   final PlayerService _playerService = getPlayerService();
   MediaKitThumbnailGenerator? _thumbnailer;
@@ -514,6 +516,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
   Future<void> _init() async {
     final initSession = ++_initSession;
+    final startupStopwatch = Stopwatch()..start();
     _allowRoutePop = false;
     _exitInProgress = false;
     if (_preloadOwnerKey.isNotEmpty) {
@@ -693,8 +696,17 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         unawaited(preloadWarmup);
       }
 
+      final playbackSourceStopwatch = Stopwatch()..start();
       final playbackSource =
           preparedPlaybackSource ?? await _buildPlaybackSource(resolvedSource);
+      playbackSourceStopwatch.stop();
+      final usesLoopbackProxy = _usesLoopbackPlaybackSource(playbackSource);
+      final startupPreloadBarrierStatus = await _awaitStartupPreloadBarrier(
+        preloadWarmup: preloadWarmup,
+        usesLoopbackProxy: usesLoopbackProxy,
+        hadPreparedHandoff: initialPrepared != null,
+        startPosition: preloadStart,
+      );
       _updatePlaybackCacheFingerprint(
         resolvedSource: resolvedSource,
         playbackSource: playbackSource,
@@ -714,8 +726,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
               AppDiagnosticsLogger.summarizeHeaderKeys(playbackHeaders),
           'mediaType': resolvedSource.mediaTypeHint.name,
           'preloadProxy': _preloadHttpProxyUrl ?? '',
-          'usesLoopbackProxy':
-              (Uri.tryParse(playbackUrl)?.host ?? '') == '127.0.0.1',
+          'usesLoopbackProxy': usesLoopbackProxy,
+          'playbackSourceBuildMs': playbackSourceStopwatch.elapsedMilliseconds,
+          'startupPreloadBarrier': startupPreloadBarrierStatus,
         },
       );
       final httpProxy = playbackUrl.isNotEmpty
@@ -735,6 +748,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
           httpProxy: httpProxy,
         );
       }
+      final playerInitializeStopwatch = Stopwatch()..start();
       await _playerService.initialize(
         null,
         networkUrl: playbackUrl,
@@ -747,6 +761,19 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         networkStreamSizeBytes: _resolvedStreamSizeBytes,
         externalMpvPath: widget.appState.externalMpvPath,
         httpProxy: httpProxy,
+        preferFastStartForLoopbackProxy: usesLoopbackProxy,
+      );
+      playerInitializeStopwatch.stop();
+      AppDiagnosticsLogger.instance.info(
+        'player_network_mpv',
+        'MPV player initialized',
+        data: <String, Object?>{
+          'itemId': widget.itemId,
+          'initMs': playerInitializeStopwatch.elapsedMilliseconds,
+          'startupElapsedMs': startupStopwatch.elapsedMilliseconds,
+          'usesLoopbackProxy': usesLoopbackProxy,
+          'fastStartLoopbackProfile': usesLoopbackProxy,
+        },
       );
       if (_playerService.isExternalPlayback) {
         _playError = _playerService.externalPlaybackMessage ?? '已使用外部播放器播放';
@@ -1053,13 +1080,13 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     await _playerService.seek(target, flushBuffer: _flushBufferOnSeek);
   }
 
-  Future<void> _preloadCurrentItemBestEffort({
+  Future<StreamPreloadResult?> _preloadCurrentItemBestEffort({
     required Duration startPosition,
     required String triggerSource,
   }) async {
-    if (!widget.appState.preloadEnabled) return;
+    if (!widget.appState.preloadEnabled) return null;
     final resolvedSource = _resolvedPlaybackSource;
-    if (resolvedSource == null) return;
+    if (resolvedSource == null) return null;
     final effectiveStart =
         startPosition < Duration.zero ? Duration.zero : startPosition;
 
@@ -1079,15 +1106,16 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       ),
     );
 
-    if (!mounted) return;
+    if (!mounted) return result;
     if (result.disabledNow) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('预加载失败，当前源将暂时跳过')),
       );
     }
+    return result;
   }
 
-  Future<void>? _startCurrentItemPreloadWarmup({
+  Future<StreamPreloadResult?>? _startCurrentItemPreloadWarmup({
     required Duration startPosition,
     required String triggerSource,
   }) {
@@ -1096,6 +1124,64 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       startPosition: startPosition,
       triggerSource: triggerSource,
     );
+  }
+
+  Future<String> _awaitStartupPreloadBarrier({
+    required Future<StreamPreloadResult?>? preloadWarmup,
+    required bool usesLoopbackProxy,
+    required bool hadPreparedHandoff,
+    required Duration startPosition,
+  }) async {
+    if (preloadWarmup == null) return 'not-requested';
+    if (!usesLoopbackProxy) return 'non-loopback';
+
+    final shouldWait = hadPreparedHandoff || startPosition > Duration.zero;
+    if (!shouldWait) return 'background';
+
+    final stopwatch = Stopwatch()..start();
+    try {
+      final result =
+          await preloadWarmup.timeout(_kStartupPreloadBarrierMaxWait);
+      final status = result?.status.name ?? 'completed';
+      AppDiagnosticsLogger.instance.info(
+        'player_network_mpv',
+        'Startup preload barrier completed',
+        data: <String, Object?>{
+          'itemId': widget.itemId,
+          'status': status,
+          'waitMs': stopwatch.elapsedMilliseconds,
+          'startMs': startPosition.inMilliseconds,
+          'hadPreparedHandoff': hadPreparedHandoff,
+        },
+      );
+      return status;
+    } on TimeoutException {
+      AppDiagnosticsLogger.instance.info(
+        'player_network_mpv',
+        'Startup preload barrier timed out',
+        data: <String, Object?>{
+          'itemId': widget.itemId,
+          'waitMs': stopwatch.elapsedMilliseconds,
+          'startMs': startPosition.inMilliseconds,
+          'hadPreparedHandoff': hadPreparedHandoff,
+        },
+      );
+      return 'timeout';
+    } catch (error, stackTrace) {
+      AppDiagnosticsLogger.instance.warn(
+        'player_network_mpv',
+        'Startup preload barrier failed',
+        data: <String, Object?>{
+          'itemId': widget.itemId,
+          'waitMs': stopwatch.elapsedMilliseconds,
+          'startMs': startPosition.inMilliseconds,
+          'hadPreparedHandoff': hadPreparedHandoff,
+          'error': AppDiagnosticsLogger.summarizeError(error),
+          'stack': AppDiagnosticsLogger.summarizeStackTrace(stackTrace),
+        },
+      );
+      return 'error';
+    }
   }
 
   void _maybePreloadNextEpisode(Duration pos) {

@@ -11,6 +11,8 @@ import 'src/external_player/external_mpv_launcher.dart';
 import 'package:lin_player_prefs/preferences.dart';
 
 class PlayerService {
+  static const int _loopbackFastStartCacheMb = 128;
+
   Player? _player;
   VideoController? _controller;
   StreamSubscription<String>? _errorSub;
@@ -62,6 +64,7 @@ class PlayerService {
     required bool unlimitedStreamCache,
     required int? networkStreamSizeBytes,
     required String? httpProxy,
+    required bool preferFastStartForLoopbackProxy,
   }) {
     final platform = defaultTargetPlatform;
     final isAndroid = !kIsWeb && platform == TargetPlatform.android;
@@ -72,7 +75,14 @@ class PlayerService {
             platform == TargetPlatform.macOS);
     final useGpuNext = isAndroid && (dolbyVisionMode || hdrMode);
 
-    final cacheMb = mpvCacheSizeMb.clamp(200, 2048);
+    var cacheMb = mpvCacheSizeMb.clamp(200, 2048).toInt();
+    if (isNetwork &&
+        preferFastStartForLoopbackProxy &&
+        cacheMb > _loopbackFastStartCacheMb) {
+      // The loopback proxy already provides a shared cache layer, so keeping
+      // MPV's network cache smaller reduces "pre-playback" over-buffering.
+      cacheMb = _loopbackFastStartCacheMb;
+    }
     final split = PlaybackBufferSplit.from(
       totalMb: cacheMb,
       backRatio: bufferBackRatio,
@@ -344,6 +354,7 @@ class PlayerService {
     bool hdrMode = false,
     String? externalMpvPath,
     String? httpProxy,
+    bool preferFastStartForLoopbackProxy = false,
   }) async {
     await dispose();
     _externalPlayback = false;
@@ -381,6 +392,7 @@ class PlayerService {
         unlimitedStreamCache: unlimitedStreamCache,
         networkStreamSizeBytes: networkStreamSizeBytes,
         httpProxy: httpProxy,
+        preferFastStartForLoopbackProxy: preferFastStartForLoopbackProxy,
       ),
     );
     final controller = VideoController(
@@ -466,6 +478,9 @@ class PlayerService {
               networkStreamSizeBytes: networkStreamSizeBytes,
               dolbyVisionMode: true,
               hdrMode: false,
+              externalMpvPath: externalMpvPath,
+              httpProxy: httpProxy,
+              preferFastStartForLoopbackProxy: preferFastStartForLoopbackProxy,
             );
           }
         }
@@ -496,6 +511,8 @@ class PlayerService {
               dolbyVisionMode: false,
               hdrMode: true,
               externalMpvPath: externalMpvPath,
+              httpProxy: httpProxy,
+              preferFastStartForLoopbackProxy: preferFastStartForLoopbackProxy,
             );
           }
         }
