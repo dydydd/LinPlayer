@@ -44,6 +44,7 @@ class ExoPlayNetworkPage extends StatefulWidget {
     this.mediaSourceId,
     this.audioStreamIndex,
     this.subtitleStreamIndex,
+    this.preparedPreload,
   });
 
   final String title;
@@ -57,6 +58,7 @@ class ExoPlayNetworkPage extends StatefulWidget {
   final String? mediaSourceId;
   final int? audioStreamIndex;
   final int? subtitleStreamIndex; // Emby MediaStream Index, -1 = off
+  final PreparedPlaybackPreload? preparedPreload;
 
   @override
   State<ExoPlayNetworkPage> createState() => _ExoPlayNetworkPageState();
@@ -109,6 +111,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   String? _preloadHttpProxyUrl;
   String? _playbackCacheFingerprint;
   String _preloadOwnerKey = '';
+  PreparedPlaybackPreload? _initialPreparedPreload;
+  final Map<String, PreparedPlaybackPreload> _preparedPreloadsByItemId =
+      <String, PreparedPlaybackPreload>{};
   bool _allowRoutePop = false;
   bool _exitInProgress = false;
 
@@ -247,6 +252,36 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   String? get _baseUrl => widget.server?.baseUrl ?? widget.appState.baseUrl;
   String? get _token => widget.server?.token ?? widget.appState.token;
   String? get _userId => widget.server?.userId ?? widget.appState.userId;
+  PreparedPlaybackPreload? _takeInitialPreparedPreloadForPlayback() {
+    final prepared = _initialPreparedPreload;
+    _initialPreparedPreload = null;
+    if (prepared == null) return null;
+    if (!prepared.matchesPlayback(
+      itemId: widget.itemId,
+      playerCore: PlaybackSourcePlayerCoreKind.exo,
+      selectedMediaSourceId: _selectedMediaSourceId,
+      audioStreamIndex: _selectedAudioStreamIndex,
+      subtitleStreamIndex: _selectedSubtitleStreamIndex,
+    )) {
+      return null;
+    }
+    return prepared;
+  }
+
+  PreparedPlaybackPreload? _preparedEpisodePreloadForPlayback(String itemId) {
+    final prepared = _preparedPreloadsByItemId[itemId.trim()];
+    if (prepared == null) return null;
+    if (!prepared.matchesPlayback(
+      itemId: itemId,
+      playerCore: PlaybackSourcePlayerCoreKind.exo,
+      selectedMediaSourceId: _selectedMediaSourceId,
+      audioStreamIndex: _selectedAudioStreamIndex,
+      subtitleStreamIndex: _selectedSubtitleStreamIndex,
+    )) {
+      return null;
+    }
+    return prepared;
+  }
 
   @override
   void initState() {
@@ -282,6 +317,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _danmakuBottomMaxLines = widget.appState.danmakuBottomMaxLines;
     _danmakuPreventOverlap = widget.appState.danmakuPreventOverlap;
     _danmakuShowHeatmap = widget.appState.danmakuShowHeatmap;
+    _initialPreparedPreload = widget.preparedPreload;
     _selectedMediaSourceId = widget.mediaSourceId;
     _selectedAudioStreamIndex = widget.audioStreamIndex;
     _selectedSubtitleStreamIndex = widget.subtitleStreamIndex;
@@ -790,6 +826,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           resumeImmediately: true,
           audioStreamIndex: _selectedAudioStreamIndex,
           subtitleStreamIndex: _selectedSubtitleStreamIndex,
+          preparedPreload: _preparedEpisodePreloadForPlayback(episode.id),
         ),
       ),
     );
@@ -1547,9 +1584,12 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         triggerSource: triggerSource,
         resolvedSource: resolvedSource,
         startPosition: effectiveStart,
+        playerCore: PlaybackSourcePlayerCoreKind.exo,
         httpProxyUrl: _preloadHttpProxyUrl,
         ownerKey: _preloadOwnerKey,
         scopeKey: 'playback_current',
+        audioStreamIndex: _selectedAudioStreamIndex,
+        subtitleStreamIndex: _selectedSubtitleStreamIndex,
       ),
     );
 
@@ -1590,9 +1630,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   Future<void> _preloadNextEpisodeBestEffort(ServerAccess access) async {
     final nextId = await _resolveNextEpisodeIdBestEffort(access);
     if (nextId == null || nextId.trim().isEmpty) return;
+    late final PreparedPlaybackPreload prepared;
     StreamPreloadResult result;
     try {
-      result = await PlaybackPreloadCoordinator.preloadItem(
+      prepared = await PlaybackPreloadCoordinator.prepareItem(
         PlaybackPreloadBuildRequest(
           access: access,
           appState: widget.appState,
@@ -1609,6 +1650,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           scopeKey: 'playback_next',
         ),
       );
+      _preparedPreloadsByItemId[nextId.trim()] = prepared;
+      result = await PlaybackPreloadCoordinator.preloadPrepared(prepared);
     } catch (_) {
       return;
     }
@@ -4656,6 +4699,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _cancelActivePlaybackCacheFills();
     _resolvedPlaybackSource = null;
     _preloadHttpProxyUrl = null;
+    _preparedPreloadsByItemId.clear();
     _controlsVisible = true;
     _isScrubbing = false;
     _subtitleText = '';
@@ -4691,21 +4735,59 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       if (!_isAndroid) {
         throw Exception('Exo 内核仅支持 Android');
       }
-      final resolvedPlayback = await _buildResolvedPlaybackSource();
-      final resolvedSource = resolvedPlayback.resolvedSource;
-      _playSessionId = resolvedPlayback.playbackInfo.playSessionId;
-      _mediaSourceId = resolvedSource.mediaSourceId;
-      _availableMediaSources = resolvedPlayback.mediaSources;
-      _selectedMediaSourceId = resolvedPlayback.selectedMediaSourceId;
-      _preloadHttpProxyUrl = PlaybackPreloadCoordinator.resolveHttpProxyUrl(
-        appState: widget.appState,
-        sourceUrl: resolvedSource.url,
-        preferBuiltInProxy: false,
-      );
-      _resolvedPlaybackSource = resolvedSource.copyWith(
-        proxyUrl: _preloadHttpProxyUrl,
-      );
-      final cloudStart = _overrideStartPosition ?? widget.startPosition;
+      final initialPrepared = _takeInitialPreparedPreloadForPlayback();
+      Map<String, dynamic>? selectedMediaSource;
+      late final ResolvedPlaybackSource resolvedSource;
+      if (initialPrepared != null) {
+        final preparedProxy = (initialPrepared.httpProxyUrl ?? '').trim();
+        final preloadProxy = preparedProxy.isNotEmpty
+            ? preparedProxy
+            : PlaybackPreloadCoordinator.resolveHttpProxyUrl(
+                appState: widget.appState,
+                sourceUrl: initialPrepared.resolvedSource.url,
+                preferBuiltInProxy: false,
+              );
+        resolvedSource =
+            initialPrepared.resolvedSource.copyWith(proxyUrl: preloadProxy);
+        _playSessionId = initialPrepared.effectivePlaySessionId;
+        _mediaSourceId = resolvedSource.mediaSourceId;
+        _availableMediaSources = initialPrepared.mediaSources;
+        _selectedMediaSourceId = initialPrepared.selectedMediaSourceId ??
+            resolvedSource.mediaSourceId;
+        _preloadHttpProxyUrl = preloadProxy;
+        _resolvedPlaybackSource = resolvedSource;
+        selectedMediaSource = initialPrepared.selectedMediaSource;
+        AppDiagnosticsLogger.instance.info(
+          'player_network_exo',
+          'Reused prepared playback handoff',
+          data: <String, Object?>{
+            'itemId': widget.itemId,
+            'resolved': AppDiagnosticsLogger.summarizeUrl(resolvedSource.url),
+            'mediaSourceId': resolvedSource.mediaSourceId,
+            'playSessionId': _playSessionId ?? '',
+            'triggerSource': initialPrepared.triggerSource,
+          },
+        );
+      } else {
+        final resolvedPlayback = await _buildResolvedPlaybackSource();
+        resolvedSource = resolvedPlayback.resolvedSource;
+        _playSessionId = resolvedPlayback.playbackInfo.playSessionId;
+        _mediaSourceId = resolvedSource.mediaSourceId;
+        _availableMediaSources = resolvedPlayback.mediaSources;
+        _selectedMediaSourceId = resolvedPlayback.selectedMediaSourceId;
+        _preloadHttpProxyUrl = PlaybackPreloadCoordinator.resolveHttpProxyUrl(
+          appState: widget.appState,
+          sourceUrl: resolvedSource.url,
+          preferBuiltInProxy: false,
+        );
+        _resolvedPlaybackSource = resolvedSource.copyWith(
+          proxyUrl: _preloadHttpProxyUrl,
+        );
+        selectedMediaSource = resolvedPlayback.selectedMediaSource;
+      }
+      final cloudStart = _overrideStartPosition ??
+          widget.startPosition ??
+          initialPrepared?.startPosition;
       final remoteStart = await remoteStartFuture;
       final localStart = await localStartFuture;
       Duration? start = cloudStart;
@@ -4716,7 +4798,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         start = localStart;
       }
       await _applyOrientationForMode(
-        mediaSource: resolvedPlayback.selectedMediaSource,
+        mediaSource: selectedMediaSource,
       );
       final preloadStart = start ?? Duration.zero;
       final preloadWarmup = _startCurrentItemPreloadWarmup(

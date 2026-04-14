@@ -224,10 +224,35 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
   bool _favoriteLoaded = false;
   bool _markBusy = false;
   late String _preloadOwnerKey;
+  PreparedPlaybackPreload? _preparedMoviePreload;
 
   String? get _baseUrl => widget.server?.baseUrl ?? widget.appState.baseUrl;
   String? get _token => widget.server?.token ?? widget.appState.token;
   String? get _userId => widget.server?.userId ?? widget.appState.userId;
+
+  PlaybackSourcePlayerCoreKind get _moviePlaybackCoreKind {
+    final useExoCore = !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        widget.appState.playerCore == PlayerCore.exo;
+    return useExoCore
+        ? PlaybackSourcePlayerCoreKind.exo
+        : PlaybackSourcePlayerCoreKind.mpv;
+  }
+
+  PreparedPlaybackPreload? _preparedMoviePreloadForPlayback(MediaItem item) {
+    final prepared = _preparedMoviePreload;
+    if (prepared == null) return null;
+    if (!prepared.matchesPlayback(
+      itemId: item.id,
+      playerCore: _moviePlaybackCoreKind,
+      selectedMediaSourceId: _selectedMediaSourceId,
+      audioStreamIndex: _selectedAudioStreamIndex,
+      subtitleStreamIndex: _selectedSubtitleStreamIndex,
+    )) {
+      return null;
+    }
+    return prepared;
+  }
 
   @override
   void initState() {
@@ -316,20 +341,15 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     int? subtitleStreamIndex,
   }) async {
     if (!widget.appState.preloadEnabled) return;
-
-    final useExoCore = !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android &&
-        widget.appState.playerCore == PlayerCore.exo;
+    late final PreparedPlaybackPreload prepared;
     StreamPreloadResult result;
     try {
-      result = await PlaybackPreloadCoordinator.preloadItem(
+      prepared = await PlaybackPreloadCoordinator.prepareItem(
         PlaybackPreloadBuildRequest(
           access: access,
           appState: widget.appState,
           itemId: itemId,
-          playerCore: useExoCore
-              ? PlaybackSourcePlayerCoreKind.exo
-              : PlaybackSourcePlayerCoreKind.mpv,
+          playerCore: _moviePlaybackCoreKind,
           targetKind: PlaybackPreloadTargetKind.currentItem,
           triggerSource: 'detail_current',
           selectedMediaSourceId: selectedMediaSourceId,
@@ -340,6 +360,10 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           scopeKey: 'detail_current',
         ),
       );
+      if (itemId.trim() == widget.itemId.trim()) {
+        _preparedMoviePreload = prepared;
+      }
+      result = await PlaybackPreloadCoordinator.preloadPrepared(prepared);
     } catch (_) {
       return;
     }
@@ -357,6 +381,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       _loading = true;
       _error = null;
     });
+    _preparedMoviePreload = null;
     final baseUrl = _baseUrl;
     final token = _token;
     final userId = _userId;
@@ -788,9 +813,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     final start = item.playbackPositionTicks > 0
         ? _ticksToDuration(item.playbackPositionTicks)
         : null;
-    final useExoCore = !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android &&
-        widget.appState.playerCore == PlayerCore.exo;
+    final preparedPreload = _preparedMoviePreloadForPlayback(item);
+    final useExoCore =
+        _moviePlaybackCoreKind == PlaybackSourcePlayerCoreKind.exo;
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => useExoCore
@@ -804,6 +829,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                 mediaSourceId: _selectedMediaSourceId,
                 audioStreamIndex: _selectedAudioStreamIndex,
                 subtitleStreamIndex: _selectedSubtitleStreamIndex,
+                preparedPreload: preparedPreload,
               )
             : PlayNetworkPage(
                 title: item.name,
@@ -815,6 +841,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                 mediaSourceId: _selectedMediaSourceId,
                 audioStreamIndex: _selectedAudioStreamIndex,
                 subtitleStreamIndex: _selectedSubtitleStreamIndex,
+                preparedPreload: preparedPreload,
               ),
       ),
     );
@@ -4834,48 +4861,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                             label: item.playbackPositionTicks > 0
                                 ? '继续播放（${_fmtClock(_ticksToDuration(item.playbackPositionTicks))}）'
                                 : '播放',
-                            onTap: () async {
-                              final start = item.playbackPositionTicks > 0
-                                  ? _ticksToDuration(item.playbackPositionTicks)
-                                  : null;
-                              final useExoCore = !kIsWeb &&
-                                  defaultTargetPlatform ==
-                                      TargetPlatform.android &&
-                                  widget.appState.playerCore == PlayerCore.exo;
-                              await Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => useExoCore
-                                      ? ExoPlayNetworkPage(
-                                          title: item.name,
-                                          itemId: item.id,
-                                          appState: widget.appState,
-                                          server: widget.server,
-                                          isTv: widget.isTv,
-                                          startPosition: start,
-                                          mediaSourceId: _selectedMediaSourceId,
-                                          audioStreamIndex:
-                                              _selectedAudioStreamIndex,
-                                          subtitleStreamIndex:
-                                              _selectedSubtitleStreamIndex,
-                                        )
-                                      : PlayNetworkPage(
-                                          title: item.name,
-                                          itemId: item.id,
-                                          appState: widget.appState,
-                                          server: widget.server,
-                                          isTv: widget.isTv,
-                                          startPosition: start,
-                                          mediaSourceId: _selectedMediaSourceId,
-                                          audioStreamIndex:
-                                              _selectedAudioStreamIndex,
-                                          subtitleStreamIndex:
-                                              _selectedSubtitleStreamIndex,
-                                        ),
-                                ),
-                              );
-                              if (!mounted) return;
-                              await _refreshProgressAfterReturn();
-                            },
+                            onTap: () => _playMovie(item),
                           ),
                         ],
                         if (isSeries && _seasons.isNotEmpty) ...[
@@ -5505,6 +5491,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   bool _localFavorite = false;
   bool _favoriteLoaded = false;
   String _preloadOwnerKey = '';
+  final Map<String, PreparedPlaybackPreload> _preparedEpisodePreloads =
+      <String, PreparedPlaybackPreload>{};
 
   Map<String, Object?> _buildDetailPluginParams(MediaItem item) {
     final yearText = _mediaYearText(item);
@@ -5615,6 +5603,30 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     return 'episode_detail_local_favorite_${serverKey}_${_episode.id}';
   }
 
+  PlaybackSourcePlayerCoreKind get _episodePlaybackCoreKind {
+    final useExoCore = !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        widget.appState.playerCore == PlayerCore.exo;
+    return useExoCore
+        ? PlaybackSourcePlayerCoreKind.exo
+        : PlaybackSourcePlayerCoreKind.mpv;
+  }
+
+  PreparedPlaybackPreload? _preparedEpisodePreloadForPlayback(String itemId) {
+    final prepared = _preparedEpisodePreloads[itemId.trim()];
+    if (prepared == null) return null;
+    if (!prepared.matchesPlayback(
+      itemId: itemId,
+      playerCore: _episodePlaybackCoreKind,
+      selectedMediaSourceId: _selectedMediaSourceId,
+      audioStreamIndex: _selectedAudioStreamIndex,
+      subtitleStreamIndex: _selectedSubtitleStreamIndex,
+    )) {
+      return null;
+    }
+    return prepared;
+  }
+
   Future<void> _preloadEpisodeBestEffort({
     required ServerAccess access,
     required String itemId,
@@ -5624,10 +5636,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     int? subtitleStreamIndex,
   }) async {
     if (!widget.appState.preloadEnabled) return;
-
-    final useExoCore = !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android &&
-        widget.appState.playerCore == PlayerCore.exo;
+    late final PreparedPlaybackPreload prepared;
     StreamPreloadResult result;
     try {
       final serverId = widget.server?.id ?? widget.appState.activeServerId;
@@ -5648,14 +5657,12 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       final targetKind = itemId.trim() == _episode.id.trim()
           ? PlaybackPreloadTargetKind.currentItem
           : PlaybackPreloadTargetKind.nextItem;
-      result = await PlaybackPreloadCoordinator.preloadItem(
+      prepared = await PlaybackPreloadCoordinator.prepareItem(
         PlaybackPreloadBuildRequest(
           access: access,
           appState: widget.appState,
           itemId: itemId,
-          playerCore: useExoCore
-              ? PlaybackSourcePlayerCoreKind.exo
-              : PlaybackSourcePlayerCoreKind.mpv,
+          playerCore: _episodePlaybackCoreKind,
           targetKind: targetKind,
           triggerSource: triggerSource,
           selectedMediaSourceId: selectedMediaSourceId,
@@ -5667,6 +5674,10 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
           scopeKey: preloadScopeKey,
         ),
       );
+      if (loadSeq == _loadSeq) {
+        _preparedEpisodePreloads[itemId.trim()] = prepared;
+      }
+      result = await PlaybackPreloadCoordinator.preloadPrepared(prepared);
     } catch (_) {
       return;
     }
@@ -5783,6 +5794,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     }
     _preloadOwnerKey =
         PlaybackPreloadCoordinator.createOwnerToken('detail_episode');
+    _preparedEpisodePreloads.clear();
     setState(() {
       _loading = true;
       _error = null;
@@ -6333,9 +6345,9 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
 
   Future<void> _playCurrentEpisode({Duration? startPosition}) async {
     final ep = _detail ?? _episode;
-    final useExoCore = !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android &&
-        widget.appState.playerCore == PlayerCore.exo;
+    final preparedPreload = _preparedEpisodePreloadForPlayback(ep.id);
+    final useExoCore =
+        _episodePlaybackCoreKind == PlaybackSourcePlayerCoreKind.exo;
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => useExoCore
@@ -6350,6 +6362,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                 mediaSourceId: _selectedMediaSourceId,
                 audioStreamIndex: _selectedAudioStreamIndex,
                 subtitleStreamIndex: _selectedSubtitleStreamIndex,
+                preparedPreload: preparedPreload,
               )
             : PlayNetworkPage(
                 title: ep.name,
@@ -6362,6 +6375,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                 mediaSourceId: _selectedMediaSourceId,
                 audioStreamIndex: _selectedAudioStreamIndex,
                 subtitleStreamIndex: _selectedSubtitleStreamIndex,
+                preparedPreload: preparedPreload,
               ),
       ),
     );

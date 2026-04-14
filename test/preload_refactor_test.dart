@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lin_player/server_adapters/server_access.dart';
 import 'package:lin_player/services/preload/playback_preload_coordinator.dart';
 import 'package:lin_player/services/stream_proxy/local_hls_stream_proxy.dart';
 import 'package:lin_player/services/stream_proxy/local_http_stream_proxy.dart';
@@ -67,6 +68,64 @@ void main() {
     expect(request.dedupeFingerprint, 'target:current');
     expect(request.ownerKey, ownerKey);
     expect(request.scopeKey, scopeKey);
+  });
+
+  test('PlaybackPreloadCoordinator.prepareItem keeps playback handoff metadata',
+      () async {
+    final adapter = _FakeAdapter(
+      playbackInfo: PlaybackInfoResult(
+        playSessionId: 'ps-handoff',
+        mediaSourceId: 'ms-handoff',
+        mediaSources: <dynamic>[
+          <String, dynamic>{
+            'Id': 'ms-handoff',
+            'Path': '/Videos/item-handoff/stream.mp4',
+            'Bitrate': 8000000,
+            'MediaStreams': <dynamic>[],
+          },
+        ],
+      ),
+      streamHeaders: const <String, String>{'X-Test': '1'},
+    );
+
+    final prepared = await PlaybackPreloadCoordinator.prepareItem(
+      PlaybackPreloadBuildRequest(
+        access: ServerAccess(adapter: adapter, auth: auth),
+        appState: AppState(),
+        itemId: 'item-handoff',
+        playerCore: PlaybackSourcePlayerCoreKind.exo,
+        targetKind: PlaybackPreloadTargetKind.currentItem,
+        triggerSource: 'detail_current',
+        selectedMediaSourceId: 'ms-handoff',
+        audioStreamIndex: 2,
+        subtitleStreamIndex: 5,
+      ),
+    );
+
+    expect(prepared.playerCore, PlaybackSourcePlayerCoreKind.exo);
+    expect(prepared.effectivePlaySessionId, 'ps-handoff');
+    expect(prepared.selectedMediaSourceId, 'ms-handoff');
+    expect(prepared.mediaSources, hasLength(1));
+    expect(
+      prepared.matchesPlayback(
+        itemId: 'item-handoff',
+        playerCore: PlaybackSourcePlayerCoreKind.exo,
+        selectedMediaSourceId: 'ms-handoff',
+        audioStreamIndex: 2,
+        subtitleStreamIndex: 5,
+      ),
+      isTrue,
+    );
+    expect(
+      prepared.matchesPlayback(
+        itemId: 'item-handoff',
+        playerCore: PlaybackSourcePlayerCoreKind.mpv,
+        selectedMediaSourceId: 'ms-handoff',
+        audioStreamIndex: 2,
+        subtitleStreamIndex: 5,
+      ),
+      isFalse,
+    );
   });
 
   test(

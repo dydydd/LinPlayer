@@ -51,23 +51,75 @@ class PlaybackPreloadBuildRequest {
 
 @immutable
 class PreparedPlaybackPreload {
-  const PreparedPlaybackPreload({
+  PreparedPlaybackPreload({
     required this.targetKind,
     required this.triggerSource,
     required this.resolvedSource,
     required this.startPosition,
+    this.playerCore = PlaybackSourcePlayerCoreKind.mpv,
     this.httpProxyUrl,
     this.ownerKey,
     this.scopeKey,
-  });
+    this.playSessionId,
+    List<Map<String, dynamic>> mediaSources = const <Map<String, dynamic>>[],
+    Map<String, dynamic>? selectedMediaSource,
+    this.selectedMediaSourceId,
+    this.audioStreamIndex,
+    this.subtitleStreamIndex,
+  })  : mediaSources = List<Map<String, dynamic>>.unmodifiable(
+          mediaSources
+              .map((entry) => Map<String, dynamic>.unmodifiable(entry))
+              .toList(growable: false),
+        ),
+        selectedMediaSource = selectedMediaSource == null
+            ? null
+            : Map<String, dynamic>.unmodifiable(selectedMediaSource);
 
   final PlaybackPreloadTargetKind targetKind;
   final String triggerSource;
   final ResolvedPlaybackSource resolvedSource;
   final Duration startPosition;
+  final PlaybackSourcePlayerCoreKind playerCore;
   final String? httpProxyUrl;
   final String? ownerKey;
   final String? scopeKey;
+  final String? playSessionId;
+  final List<Map<String, dynamic>> mediaSources;
+  final Map<String, dynamic>? selectedMediaSource;
+  final String? selectedMediaSourceId;
+  final int? audioStreamIndex;
+  final int? subtitleStreamIndex;
+
+  String? get effectivePlaySessionId {
+    final prepared = (playSessionId ?? '').trim();
+    if (prepared.isNotEmpty) return prepared;
+    final resolved = resolvedSource.playSessionId.trim();
+    return resolved.isEmpty ? null : resolved;
+  }
+
+  bool matchesPlayback({
+    required String itemId,
+    required PlaybackSourcePlayerCoreKind playerCore,
+    String? selectedMediaSourceId,
+    int? audioStreamIndex,
+    int? subtitleStreamIndex,
+  }) {
+    if (this.playerCore != playerCore) return false;
+    if (resolvedSource.itemId.trim() != itemId.trim()) return false;
+
+    final expectedMediaSource = (selectedMediaSourceId ?? '').trim();
+    final preparedMediaSource =
+        ((this.selectedMediaSourceId ?? resolvedSource.mediaSourceId)).trim();
+    if (expectedMediaSource.isNotEmpty &&
+        preparedMediaSource.isNotEmpty &&
+        expectedMediaSource != preparedMediaSource) {
+      return false;
+    }
+
+    if (this.audioStreamIndex != audioStreamIndex) return false;
+    if (this.subtitleStreamIndex != subtitleStreamIndex) return false;
+    return true;
+  }
 
   PreloadRequest toPreloadRequest() {
     return PreloadRequest(
@@ -118,9 +170,16 @@ class PlaybackPreloadCoordinator {
       triggerSource: request.triggerSource,
       resolvedSource: buildResult.resolvedSource,
       startPosition: request.startPosition,
+      playerCore: request.playerCore,
       preferBuiltInProxy: request.preferBuiltInProxy,
       ownerKey: request.ownerKey,
       scopeKey: request.scopeKey,
+      playSessionId: buildResult.playbackInfo.playSessionId,
+      mediaSources: buildResult.mediaSources,
+      selectedMediaSource: buildResult.selectedMediaSource,
+      selectedMediaSourceId: buildResult.selectedMediaSourceId,
+      audioStreamIndex: request.audioStreamIndex,
+      subtitleStreamIndex: request.subtitleStreamIndex,
     );
   }
 
@@ -130,10 +189,17 @@ class PlaybackPreloadCoordinator {
     required String triggerSource,
     required ResolvedPlaybackSource resolvedSource,
     Duration startPosition = Duration.zero,
+    PlaybackSourcePlayerCoreKind playerCore = PlaybackSourcePlayerCoreKind.mpv,
     String? httpProxyUrl,
     bool preferBuiltInProxy = false,
     String? ownerKey,
     String? scopeKey,
+    String? playSessionId,
+    List<Map<String, dynamic>> mediaSources = const <Map<String, dynamic>>[],
+    Map<String, dynamic>? selectedMediaSource,
+    String? selectedMediaSourceId,
+    int? audioStreamIndex,
+    int? subtitleStreamIndex,
   }) {
     final normalizedStart =
         startPosition < Duration.zero ? Duration.zero : startPosition;
@@ -153,9 +219,21 @@ class PlaybackPreloadCoordinator {
       triggerSource: normalizedTrigger,
       resolvedSource: resolvedSource.copyWith(proxyUrl: normalizedProxy),
       startPosition: normalizedStart,
+      playerCore: playerCore,
       httpProxyUrl: normalizedProxy,
       ownerKey: normalizedOwner,
       scopeKey: normalizedScope,
+      playSessionId:
+          (playSessionId ?? '').trim().isEmpty ? null : playSessionId!.trim(),
+      mediaSources: mediaSources,
+      selectedMediaSource: selectedMediaSource,
+      selectedMediaSourceId: (() {
+        final value =
+            ((selectedMediaSourceId ?? resolvedSource.mediaSourceId)).trim();
+        return value.isEmpty ? null : value;
+      })(),
+      audioStreamIndex: audioStreamIndex,
+      subtitleStreamIndex: subtitleStreamIndex,
     );
   }
 
