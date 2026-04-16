@@ -34,7 +34,7 @@
 ## 每夜版（nightly）
 
 - Release：[`nightly`](https://github.com/zzzwannasleep/LinPlayer/releases/tag/nightly)
-- 版本：`0.9.9+91`
+- 版本：`0.9.78+1`
 - 发布时间（UTC）：`2026-01-14 09:06:50 UTC`
 
 | 平台 | 直链 | 反代 |
