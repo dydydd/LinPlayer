@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -406,80 +405,14 @@ class _FallbackSearchPageState extends State<_FallbackSearchPage> {
   }) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final style = theme.extension<AppStyle>() ?? const AppStyle();
     final isDark = scheme.brightness == Brightness.dark;
 
-    final radius = switch (style.template) {
-      UiTemplate.neonHud => 12.0,
-      UiTemplate.pixelArcade => 10.0,
-      UiTemplate.mangaStoryboard => 10.0,
-      _ => 18.0,
-    };
-
-    final (Color bg, Color fg, BorderSide border) = switch (style.template) {
-      UiTemplate.neonHud => (
-          Colors.black.withValues(alpha: isDark ? 0.28 : 0.24),
-          Colors.white,
-          BorderSide(
-            color: scheme.primary.withValues(alpha: isDark ? 0.75 : 0.85),
-            width: 1.1,
-          ),
-        ),
-      UiTemplate.pixelArcade => (
-          Colors.black.withValues(alpha: isDark ? 0.30 : 0.24),
-          Colors.white,
-          BorderSide(
-            color: scheme.secondary.withValues(alpha: isDark ? 0.75 : 0.85),
-            width: 1.2,
-          ),
-        ),
-      UiTemplate.mangaStoryboard => (
-          Colors.white.withValues(alpha: isDark ? 0.24 : 0.88),
-          isDark ? Colors.white : Colors.black,
-          BorderSide(
-            color: (isDark ? Colors.white : Colors.black)
-                .withValues(alpha: isDark ? 0.55 : 0.85),
-            width: 1.2,
-          ),
-        ),
-      UiTemplate.stickerJournal => (
-          Color.lerp(Colors.black, scheme.secondary, 0.18)!.withValues(
-            alpha: isDark ? 0.30 : 0.24,
-          ),
-          Colors.white,
-          BorderSide(
-            color: scheme.secondary.withValues(alpha: isDark ? 0.50 : 0.70),
-            width: 1.0,
-          ),
-        ),
-      UiTemplate.candyGlass => (
-          Color.lerp(Colors.black, scheme.primary, 0.12)!.withValues(
-            alpha: isDark ? 0.28 : 0.22,
-          ),
-          Colors.white,
-          BorderSide.none,
-        ),
-      UiTemplate.washiWatercolor => (
-          Color.lerp(Colors.black, scheme.tertiary, 0.10)!.withValues(
-            alpha: isDark ? 0.26 : 0.20,
-          ),
-          Colors.white,
-          BorderSide.none,
-        ),
-      UiTemplate.proTool => (
-          Colors.black.withValues(alpha: isDark ? 0.28 : 0.22),
-          Colors.white,
-          BorderSide(
-            color: Colors.white.withValues(alpha: isDark ? 0.22 : 0.18),
-            width: 1.0,
-          ),
-        ),
-      UiTemplate.minimalCovers => (
-          Colors.black.withValues(alpha: isDark ? 0.26 : 0.20),
-          Colors.white,
-          BorderSide.none,
-        ),
-    };
+    const radius = 18.0;
+    final bg = Color.lerp(Colors.black, scheme.primary, 0.12)!.withValues(
+      alpha: isDark ? 0.28 : 0.22,
+    );
+    const fg = Colors.white;
+    const border = BorderSide.none;
 
     return Material(
       color: Colors.transparent,
@@ -503,8 +436,6 @@ class _FallbackSearchPageState extends State<_FallbackSearchPage> {
             style: theme.textTheme.labelMedium?.copyWith(
                   color: fg,
                   fontWeight: FontWeight.w700,
-                  letterSpacing:
-                      style.template == UiTemplate.neonHud ? 0.2 : null,
                 ) ??
                 TextStyle(
                   color: fg,

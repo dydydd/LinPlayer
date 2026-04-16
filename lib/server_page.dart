@@ -186,8 +186,6 @@ class _ServerPageState extends State<ServerPage> {
                       setThemeMode: widget.appState.setThemeMode,
                       useDynamicColor: () => widget.appState.useDynamicColor,
                       setUseDynamicColor: widget.appState.setUseDynamicColor,
-                      uiTemplate: () => widget.appState.uiTemplate,
-                      setUiTemplate: widget.appState.setUiTemplate,
                     ),
                     icon: const Icon(Icons.palette_outlined),
                   ),

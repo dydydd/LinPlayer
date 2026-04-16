@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'package:lin_player_prefs/preferences.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
 
 import 'net_speed.dart';
@@ -412,10 +411,9 @@ class _PlaybackControlsState extends State<PlaybackControls> {
   }
 
   double _tvProgressStepMs(int direction) {
-    final seconds = (direction < 0
-            ? widget.seekBackwardSeconds
-            : widget.seekForwardSeconds)
-        .clamp(1, 300);
+    final seconds =
+        (direction < 0 ? widget.seekBackwardSeconds : widget.seekForwardSeconds)
+            .clamp(1, 300);
     return (seconds * 1000).toDouble();
   }
 
@@ -453,9 +451,8 @@ class _PlaybackControlsState extends State<PlaybackControls> {
     final current = (_scrubMs ?? widget.position.inMilliseconds.toDouble())
         .clamp(0.0, maxMs.toDouble())
         .toDouble();
-    final next = (current + direction * step)
-        .clamp(0.0, maxMs.toDouble())
-        .toDouble();
+    final next =
+        (current + direction * step).clamp(0.0, maxMs.toDouble()).toDouble();
 
     if (_scrubMs == null) widget.onScrubStart?.call();
     if (!mounted) return;
@@ -556,74 +553,20 @@ class _PlaybackControlsState extends State<PlaybackControls> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final style = theme.extension<AppStyle>() ?? const AppStyle();
-    final template = style.template;
 
     const baseBg = Color(0x66000000);
     final bg = widget.backgroundColor ??
-        switch (template) {
-          UiTemplate.neonHud => Color.lerp(
-              baseBg,
-              scheme.primary.withValues(alpha: 0.85),
-              0.18,
-            )!,
-          UiTemplate.pixelArcade => Color.lerp(
-              baseBg,
-              scheme.secondary.withValues(alpha: 0.85),
-              0.14,
-            )!,
-          UiTemplate.stickerJournal => Color.lerp(
-              baseBg,
-              scheme.secondary.withValues(alpha: 0.75),
-              0.10,
-            )!,
-          UiTemplate.candyGlass => Color.lerp(
-              baseBg,
-              scheme.primary.withValues(alpha: 0.70),
-              0.10,
-            )!,
-          UiTemplate.washiWatercolor => Color.lerp(
-              baseBg,
-              scheme.tertiary.withValues(alpha: 0.70),
-              0.08,
-            )!,
-          UiTemplate.mangaStoryboard => const Color(0x78000000),
-          UiTemplate.proTool => baseBg,
-          UiTemplate.minimalCovers => const Color(0x70000000),
-        };
+        Color.lerp(
+          baseBg,
+          scheme.primary.withValues(alpha: 0.70),
+          0.10,
+        )!;
 
-    final radius = switch (template) {
-      UiTemplate.pixelArcade => 10.0,
-      UiTemplate.neonHud => 12.0,
-      UiTemplate.mangaStoryboard => 10.0,
-      UiTemplate.proTool => 12.0,
-      _ => 12.0,
-    };
+    const radius = 12.0;
 
-    final accent = switch (template) {
-      UiTemplate.neonHud => scheme.primary,
-      UiTemplate.pixelArcade => scheme.secondary,
-      UiTemplate.stickerJournal => scheme.secondary,
-      UiTemplate.candyGlass => scheme.primary,
-      UiTemplate.washiWatercolor => scheme.primary,
-      _ => Colors.white,
-    };
+    final accent = scheme.primary;
 
-    final borderSide = switch (template) {
-      UiTemplate.neonHud => BorderSide(
-          color: scheme.primary.withValues(alpha: 0.75),
-          width: math.max(1.0, style.borderWidth),
-        ),
-      UiTemplate.pixelArcade => BorderSide(
-          color: scheme.secondary.withValues(alpha: 0.75),
-          width: math.max(1.2, style.borderWidth + 0.6),
-        ),
-      UiTemplate.mangaStoryboard => BorderSide(
-          color: Colors.white.withValues(alpha: 0.55),
-          width: math.max(1.1, style.borderWidth + 0.6),
-        ),
-      _ => BorderSide.none,
-    };
+    const borderSide = BorderSide.none;
 
     final shape = RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(radius),
@@ -834,8 +777,10 @@ class _PlaybackControlsState extends State<PlaybackControls> {
                                                   .toDouble()
                                                   .clamp(1, double.infinity),
                                               secondaryTrackValue: math
-                                                  .max(0, widget.buffered
-                                                      .inMilliseconds)
+                                                  .max(
+                                                      0,
+                                                      widget.buffered
+                                                          .inMilliseconds)
                                                   .clamp(0, maxMs)
                                                   .toDouble(),
                                               onChangeStart: !enabled
@@ -863,8 +808,7 @@ class _PlaybackControlsState extends State<PlaybackControls> {
                                               onChangeEnd: !enabled
                                                   ? null
                                                   : (v) async {
-                                                      widget.onScrubEnd
-                                                          ?.call();
+                                                      widget.onScrubEnd?.call();
                                                       setState(
                                                         () => _scrubMs = null,
                                                       );
@@ -971,26 +915,7 @@ class _PlaybackControlsState extends State<PlaybackControls> {
                                               color: const Color(0xAA000000),
                                               borderRadius:
                                                   BorderRadius.circular(6),
-                                              border: switch (template) {
-                                                UiTemplate.neonHud =>
-                                                  Border.all(
-                                                    color: accent.withValues(
-                                                        alpha: 0.65),
-                                                  ),
-                                                UiTemplate.pixelArcade =>
-                                                  Border.all(
-                                                    color: accent.withValues(
-                                                        alpha: 0.65),
-                                                    width: 1.2,
-                                                  ),
-                                                UiTemplate.mangaStoryboard =>
-                                                  Border.all(
-                                                    color: Colors.white
-                                                        .withValues(
-                                                            alpha: 0.35),
-                                                  ),
-                                                _ => null,
-                                              },
+                                              border: null,
                                             ),
                                             child: Padding(
                                               padding:

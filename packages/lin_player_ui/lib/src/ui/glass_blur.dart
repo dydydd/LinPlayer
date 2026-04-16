@@ -2,24 +2,6 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
-import 'package:lin_player_prefs/preferences.dart';
-import 'app_style.dart';
-
-bool _usesGlassSurfaces(UiTemplate template) {
-  switch (template) {
-    case UiTemplate.candyGlass:
-    case UiTemplate.stickerJournal:
-    case UiTemplate.neonHud:
-    case UiTemplate.washiWatercolor:
-      return true;
-    case UiTemplate.minimalCovers:
-    case UiTemplate.pixelArcade:
-    case UiTemplate.mangaStoryboard:
-    case UiTemplate.proTool:
-      return false;
-  }
-}
-
 BorderRadius _borderRadiusOf(ShapeBorder? shape, TextDirection textDirection) {
   if (shape is RoundedRectangleBorder) {
     return shape.borderRadius.resolve(textDirection);
@@ -44,9 +26,7 @@ class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Widget build(BuildContext context) {
-    final style = Theme.of(context).extension<AppStyle>() ?? const AppStyle();
-    final shouldBlur = enableBlur && _usesGlassSurfaces(style.template);
-    if (!shouldBlur) return child;
+    if (!enableBlur) return child;
 
     return ClipRect(
       child: Stack(
@@ -79,9 +59,7 @@ class GlassNavigationBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final style = Theme.of(context).extension<AppStyle>() ?? const AppStyle();
-    final shouldBlur = enableBlur && _usesGlassSurfaces(style.template);
-    if (!shouldBlur) return child;
+    if (!enableBlur) return child;
 
     return ClipRect(
       child: Stack(
@@ -129,9 +107,6 @@ class GlassCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final style = theme.extension<AppStyle>() ?? const AppStyle();
-    final shouldBlur = enableBlur && _usesGlassSurfaces(style.template);
-
     final card = Card(
       margin: margin,
       clipBehavior: clipBehavior,
@@ -143,7 +118,7 @@ class GlassCard extends StatelessWidget {
       child: child,
     );
 
-    if (!shouldBlur) return card;
+    if (!enableBlur) return card;
 
     final borderRadius = _borderRadiusOf(
       shape ?? theme.cardTheme.shape,

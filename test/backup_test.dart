@@ -19,7 +19,6 @@ void main() {
     expect(appState.themeMode, ThemeMode.dark);
     expect(appState.uiScaleFactor, closeTo(1.25, 0.0001));
     expect(appState.useDynamicColor, isFalse);
-    expect(appState.uiTemplate, UiTemplate.washiWatercolor);
     expect(appState.preferHardwareDecode, isFalse);
     expect(appState.playerCore, PlayerCore.exo);
     expect(appState.preferredAudioLang, 'jpn');
@@ -64,7 +63,6 @@ void main() {
 
     expect(reloaded.themeMode, ThemeMode.dark);
     expect(reloaded.uiScaleFactor, closeTo(1.25, 0.0001));
-    expect(reloaded.uiTemplate, UiTemplate.washiWatercolor);
     expect(reloaded.showHomeLibraryQuickAccess, isFalse);
     expect(reloaded.showHomeRandomRecommendations, isFalse);
     expect(reloaded.autoUpdateEnabled, isTrue);
@@ -97,7 +95,6 @@ void main() {
     expect(restored.themeMode, ThemeMode.dark);
     expect(restored.uiScaleFactor, closeTo(1.25, 0.0001));
     expect(restored.useDynamicColor, isFalse);
-    expect(restored.uiTemplate, UiTemplate.washiWatercolor);
     expect(restored.autoUpdateEnabled, isTrue);
     expect(restored.showHomeLibraryQuickAccess, isFalse);
     expect(restored.showHomeRandomRecommendations, isFalse);

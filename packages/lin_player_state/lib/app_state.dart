@@ -134,8 +134,6 @@ class AppState extends ChangeNotifier {
   static const _kDesktopUiLanguageKey = 'desktopUiLanguage_v1';
   static const _kDynamicColorKey = 'dynamicColor_v1';
   static const _kCompactModeKey = 'compactMode_v1';
-  static const _kUiTemplateKey = 'uiTemplate_v1';
-  static const _kLegacyThemeTemplateKey = 'themeTemplate_v1';
   static const _kPreferHardwareDecodeKey = 'preferHardwareDecode_v1';
   static const _kPlayerCoreKey = 'playerCore_v1';
   static const _kPreferredAudioLangKey = 'preferredAudioLang_v1';
@@ -265,7 +263,6 @@ class AppState extends ChangeNotifier {
   String _desktopUiLanguage = 'zhCn';
   bool _useDynamicColor = true;
   bool _compactMode = _defaultCompactModeForPlatform();
-  UiTemplate _uiTemplate = UiTemplate.candyGlass;
   bool _preferHardwareDecode = true;
   PlayerCore _playerCore = PlayerCore.mpv;
   String _preferredAudioLang = '';
@@ -800,17 +797,6 @@ class AppState extends ChangeNotifier {
   String get desktopUiLanguage => _desktopUiLanguage;
   bool get useDynamicColor => _useDynamicColor;
   bool get compactMode => _compactMode;
-  UiTemplate get uiTemplate => _uiTemplate;
-  Color get themeSeedColor => _uiTemplate.seed;
-  Color get themeSecondarySeedColor => _uiTemplate.secondarySeed;
-
-  bool get prefersFancyBackground =>
-      _uiTemplate == UiTemplate.candyGlass ||
-      _uiTemplate == UiTemplate.stickerJournal ||
-      _uiTemplate == UiTemplate.neonHud ||
-      _uiTemplate == UiTemplate.washiWatercolor ||
-      _uiTemplate == UiTemplate.mangaStoryboard;
-
   bool get preferHardwareDecode => _preferHardwareDecode;
   PlayerCore get playerCore => _playerCore;
   String get preferredAudioLang => _preferredAudioLang;
@@ -988,13 +974,6 @@ class AppState extends ChangeNotifier {
     _useDynamicColor = prefs.getBool(_kDynamicColorKey) ?? true;
     _compactMode =
         prefs.getBool(_kCompactModeKey) ?? _defaultCompactModeForPlatform();
-    final storedTemplateId = prefs.getString(_kUiTemplateKey) ??
-        prefs.getString(_kLegacyThemeTemplateKey);
-    _uiTemplate = uiTemplateFromId(storedTemplateId);
-    if (!prefs.containsKey(_kUiTemplateKey) &&
-        prefs.containsKey(_kLegacyThemeTemplateKey)) {
-      await prefs.setString(_kUiTemplateKey, _uiTemplate.id);
-    }
     _preferHardwareDecode = prefs.getBool(_kPreferHardwareDecodeKey) ?? true;
     _playerCore = playerCoreFromId(prefs.getString(_kPlayerCoreKey));
     _preferredAudioLang = prefs.getString(_kPreferredAudioLangKey) ?? '';
@@ -1312,9 +1291,6 @@ class AppState extends ChangeNotifier {
         'desktopUiLanguage': _desktopUiLanguage,
         'useDynamicColor': _useDynamicColor,
         'compactMode': _compactMode,
-        'uiTemplate': _uiTemplate.id,
-        // Legacy alias for older builds/backups.
-        'themeTemplate': _uiTemplate.id,
         'preferHardwareDecode': _preferHardwareDecode,
         'playerCore': _playerCore.id,
         'preferredAudioLang': _preferredAudioLang,
@@ -1650,9 +1626,6 @@ class AppState extends ChangeNotifier {
       data['compactMode'],
       fallback: _defaultCompactModeForPlatform(),
     );
-    final nextUiTemplate = uiTemplateFromId(
-      (data['uiTemplate'] ?? data['themeTemplate'])?.toString(),
-    );
     final nextPreferHardware =
         _readBool(data['preferHardwareDecode'], fallback: true);
     final nextPlayerCore = playerCoreFromId(data['playerCore']?.toString());
@@ -1895,7 +1868,6 @@ class AppState extends ChangeNotifier {
     _desktopUiLanguage = nextDesktopUiLanguage;
     _useDynamicColor = nextUseDynamic;
     _compactMode = nextCompactMode;
-    _uiTemplate = nextUiTemplate;
     _preferHardwareDecode = nextPreferHardware;
     _playerCore = nextPlayerCore;
     _preferredAudioLang = nextPreferredAudioLang;
@@ -2013,7 +1985,6 @@ class AppState extends ChangeNotifier {
     await prefs.setString(_kDesktopUiLanguageKey, _desktopUiLanguage);
     await prefs.setBool(_kDynamicColorKey, _useDynamicColor);
     await prefs.setBool(_kCompactModeKey, _compactMode);
-    await prefs.setString(_kUiTemplateKey, _uiTemplate.id);
     await prefs.setBool(_kPreferHardwareDecodeKey, _preferHardwareDecode);
     await prefs.setString(_kPlayerCoreKey, _playerCore.id);
     await prefs.setString(_kPreferredAudioLangKey, _preferredAudioLang);
@@ -4210,20 +4181,6 @@ class AppState extends ChangeNotifier {
     _useDynamicColor = enabled;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kDynamicColorKey, enabled);
-    notifyListeners();
-  }
-
-  Future<void> setUiTemplate(UiTemplate template) async {
-    if (_uiTemplate == template) return;
-    _uiTemplate = template;
-    if (template == UiTemplate.proTool) {
-      _compactMode = true;
-    }
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kUiTemplateKey, template.id);
-    if (template == UiTemplate.proTool) {
-      await prefs.setBool(_kCompactModeKey, _compactMode);
-    }
     notifyListeners();
   }
 

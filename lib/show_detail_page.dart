@@ -4655,42 +4655,11 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     final hero = heroBackdrop.isNotEmpty ? heroBackdrop : heroPrimary;
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final style = theme.extension<AppStyle>() ?? const AppStyle();
-    final template = style.template;
     final isDark = scheme.brightness == Brightness.dark;
-
-    const grayscale = ColorFilter.matrix(<double>[
-      0.2126, 0.7152, 0.0722, 0, 0, //
-      0.2126, 0.7152, 0.0722, 0, 0, //
-      0.2126, 0.7152, 0.0722, 0, 0, //
-      0, 0, 0, 1, 0, //
-    ]);
-
-    final heroFilter = switch (template) {
-      UiTemplate.mangaStoryboard => grayscale,
-      UiTemplate.neonHud => ColorFilter.mode(
-          scheme.primary.withValues(alpha: isDark ? 0.18 : 0.12),
-          BlendMode.overlay,
-        ),
-      UiTemplate.pixelArcade => ColorFilter.mode(
-          scheme.secondary.withValues(alpha: isDark ? 0.18 : 0.12),
-          BlendMode.overlay,
-        ),
-      UiTemplate.candyGlass => ColorFilter.mode(
-          scheme.secondary.withValues(alpha: isDark ? 0.10 : 0.08),
-          BlendMode.softLight,
-        ),
-      UiTemplate.stickerJournal => ColorFilter.mode(
-          scheme.secondary.withValues(alpha: isDark ? 0.10 : 0.08),
-          BlendMode.softLight,
-        ),
-      UiTemplate.washiWatercolor => ColorFilter.mode(
-          scheme.tertiary.withValues(alpha: isDark ? 0.10 : 0.08),
-          BlendMode.softLight,
-        ),
-      UiTemplate.proTool => null,
-      UiTemplate.minimalCovers => null,
-    };
+    final heroFilter = ColorFilter.mode(
+      scheme.secondary.withValues(alpha: isDark ? 0.10 : 0.08),
+      BlendMode.softLight,
+    );
 
     final scrimBottom = Colors.black.withValues(alpha: 0.72);
 
@@ -4722,16 +4691,13 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     );
 
     // ignore: dead_code
-    Widget heroImage = hero.isEmpty
+    final heroImage = hero.isEmpty
         ? const ColoredBox(color: Colors.black26)
         : LinNetworkImage(
             imageUrl: hero,
             fit: BoxFit.cover,
             errorWidget: const ColoredBox(color: Colors.black26),
           );
-    if (heroFilter != null) {
-      heroImage = ColorFiltered(colorFilter: heroFilter, child: heroImage);
-    }
 
     return Scaffold(
       body: Stack(
@@ -4751,7 +4717,10 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                     background: Stack(
                       fit: StackFit.expand,
                       children: [
-                        heroImage,
+                        ColorFiltered(
+                          colorFilter: heroFilter,
+                          child: heroImage,
+                        ),
                         DecoratedBox(
                           decoration: BoxDecoration(
                             gradient: LinearGradient(

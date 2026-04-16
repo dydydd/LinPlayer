@@ -507,8 +507,6 @@ class _HomePageState extends State<HomePage> {
         setThemeMode: widget.appState.setThemeMode,
         useDynamicColor: () => widget.appState.useDynamicColor,
         setUseDynamicColor: widget.appState.setUseDynamicColor,
-        uiTemplate: () => widget.appState.uiTemplate,
-        setUiTemplate: widget.appState.setUiTemplate,
       );
 
   Future<void> _openServerPage() async {
@@ -535,15 +533,8 @@ class _HomePageState extends State<HomePage> {
             defaultTargetPlatform == TargetPlatform.android &&
             widget.appState.playerCore == PlayerCore.exo;
         final useMobileSettingsPage = !kIsWeb && !isDesktop;
-        final template = widget.appState.uiTemplate;
-        final usesGlassSurfaces = template == UiTemplate.candyGlass ||
-            template == UiTemplate.stickerJournal ||
-            template == UiTemplate.neonHud ||
-            template == UiTemplate.washiWatercolor;
-        final useRail = widget.desktopLayout ||
-            (isDesktop &&
-                (template == UiTemplate.proTool ||
-                    template == UiTemplate.neonHud));
+        const usesGlassSurfaces = true;
+        final useRail = widget.desktopLayout;
         final pages = [
           _HomeBody(
             appState: widget.appState,
@@ -779,7 +770,6 @@ class _HomePageState extends State<HomePage> {
             selectedIndex: _index,
             onSelected: _setPageIndex,
             enableBlur: enableBlur,
-            template: template,
             visibility: homeChromeVisibility,
           ),
         );
@@ -1536,21 +1526,13 @@ class _FloatingBottomNav extends StatelessWidget {
     required this.selectedIndex,
     required this.onSelected,
     required this.enableBlur,
-    required this.template,
     this.visibility = 1,
   });
 
   final int selectedIndex;
   final ValueChanged<int> onSelected;
   final bool enableBlur;
-  final UiTemplate template;
   final double visibility;
-
-  bool get _usesGlassSurfaces =>
-      template == UiTemplate.candyGlass ||
-      template == UiTemplate.stickerJournal ||
-      template == UiTemplate.neonHud ||
-      template == UiTemplate.washiWatercolor;
 
   @override
   Widget build(BuildContext context) {
@@ -1584,7 +1566,7 @@ class _FloatingBottomNav extends StatelessWidget {
         ),
       );
 
-      if (_usesGlassSurfaces && enableBlur) {
+      if (enableBlur) {
         final content = child;
         child = ClipOval(
           child: Stack(
@@ -1814,7 +1796,6 @@ class _HomeBody extends StatelessWidget {
                   for (final sec in sections)
                     if (sec.items.isNotEmpty) ...[
                       _HomeSectionHeader(
-                        template: appState.uiTemplate,
                         title: sec.displayName,
                         count: sec.key.startsWith('lib_')
                             ? appState.getTotal(sec.key.substring(4))
@@ -2289,7 +2270,6 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection>
               return Column(
                 children: [
                   _HomeSectionHeader(
-                    template: widget.appState.uiTemplate,
                     title: '继续观看',
                     count: items.length,
                     onTap: () {
@@ -2635,7 +2615,6 @@ class _LibraryQuickAccessSectionState
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _HomeSectionHeader(
-              template: widget.appState.uiTemplate,
               title: '媒体库',
               count: 0,
               onTap: () {
@@ -3128,13 +3107,11 @@ class _BannerNavButton extends StatelessWidget {
 
 class _HomeSectionHeader extends StatelessWidget {
   const _HomeSectionHeader({
-    required this.template,
     required this.title,
     required this.count,
     required this.onTap,
   });
 
-  final UiTemplate template;
   final String title;
   final int count;
   final VoidCallback onTap;
@@ -3149,179 +3126,40 @@ class _HomeSectionHeader extends StatelessWidget {
         .toString()
         .replaceAllMapped(RegExp(r'(\\d)(?=(\\d{3})+$)'), (m) => '${m[1]},');
 
-    final borderRadius = BorderRadius.circular(
-      switch (template) {
-        UiTemplate.pixelArcade => 10,
-        UiTemplate.neonHud => 12,
-        UiTemplate.mangaStoryboard => 12,
-        UiTemplate.stickerJournal => 16,
-        _ => 12,
-      },
-    );
+    final borderRadius = BorderRadius.circular(12);
 
     final titleStyle = theme.textTheme.titleMedium?.copyWith(
-      fontWeight: switch (template) {
-        UiTemplate.neonHud => FontWeight.w700,
-        UiTemplate.mangaStoryboard => FontWeight.w700,
-        _ => FontWeight.w700,
-      },
-      letterSpacing: template == UiTemplate.neonHud ? 0.25 : null,
+      fontWeight: FontWeight.w700,
     );
 
-    Widget? leading = switch (template) {
-      UiTemplate.candyGlass => Container(
-          width: 10,
-          height: 18,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                scheme.primary.withValues(alpha: isDark ? 0.95 : 1.0),
-                scheme.secondary.withValues(alpha: isDark ? 0.85 : 0.95),
-              ],
-            ),
-          ),
+    final Widget leading = Container(
+      width: 10,
+      height: 18,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            scheme.primary.withValues(alpha: isDark ? 0.95 : 1.0),
+            scheme.secondary.withValues(alpha: isDark ? 0.85 : 0.95),
+          ],
         ),
-      UiTemplate.stickerJournal => Icon(
-          Icons.local_offer_outlined,
-          size: 18,
-          color: scheme.secondary.withValues(alpha: isDark ? 0.9 : 1.0),
-        ),
-      UiTemplate.neonHud => Container(
-          width: 14,
-          height: 14,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(
-              color: scheme.primary.withValues(alpha: isDark ? 0.8 : 0.95),
-              width: 1.4,
-            ),
-          ),
-        ),
-      UiTemplate.pixelArcade => Container(
-          width: 14,
-          height: 14,
-          decoration: BoxDecoration(
-            color: scheme.secondary.withValues(alpha: isDark ? 0.55 : 0.75),
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(
-              color: scheme.secondary.withValues(alpha: isDark ? 0.85 : 0.95),
-              width: 1.4,
-            ),
-          ),
-        ),
-      UiTemplate.mangaStoryboard => Container(
-          width: 6,
-          height: 18,
-          decoration: BoxDecoration(
-            color: scheme.onSurface.withValues(alpha: isDark ? 0.55 : 0.85),
-            borderRadius: BorderRadius.circular(3),
-          ),
-        ),
-      UiTemplate.washiWatercolor => Container(
-          width: 10,
-          height: 18,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                scheme.tertiary.withValues(alpha: isDark ? 0.7 : 0.85),
-                scheme.primary.withValues(alpha: isDark ? 0.6 : 0.75),
-              ],
-            ),
-          ),
-        ),
-      _ => null,
-    };
+      ),
+    );
 
     Widget countWidget;
     if (count <= 0) {
       countWidget = const SizedBox.shrink();
     } else {
       final text = formatCount(count);
-      countWidget = switch (template) {
-        UiTemplate.stickerJournal => Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: scheme.secondaryContainer
-                  .withValues(alpha: isDark ? 0.55 : 0.8),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: scheme.secondary.withValues(alpha: isDark ? 0.35 : 0.55),
-              ),
-            ),
-            child: Text(
-              text,
-              style: theme.textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w700,
-                color: scheme.onSecondaryContainer,
-              ),
-            ),
-          ),
-        UiTemplate.neonHud => Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: scheme.surface.withValues(alpha: isDark ? 0.35 : 0.55),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: scheme.primary.withValues(alpha: isDark ? 0.65 : 0.8),
-                width: 1.1,
-              ),
-            ),
-            child: Text(
-              text,
-              style: theme.textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.25,
-              ),
-            ),
-          ),
-        UiTemplate.pixelArcade => Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: scheme.surface.withValues(alpha: isDark ? 0.5 : 0.7),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: scheme.secondary.withValues(alpha: isDark ? 0.65 : 0.8),
-                width: 1.4,
-              ),
-            ),
-            child: Text(
-              text,
-              style: theme.textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        UiTemplate.mangaStoryboard => Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: scheme.surface.withValues(alpha: isDark ? 0.55 : 0.85),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: scheme.onSurface.withValues(alpha: isDark ? 0.65 : 0.85),
-                width: 1.5,
-              ),
-            ),
-            child: Text(
-              text,
-              style: theme.textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        _ => Text(
-            text,
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: scheme.onSurfaceVariant,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-      };
+      countWidget = Text(
+        text,
+        style: theme.textTheme.labelLarge?.copyWith(
+          color: scheme.onSurfaceVariant,
+          fontWeight: FontWeight.w700,
+        ),
+      );
     }
 
     return Padding(
@@ -3333,40 +3171,15 @@ class _HomeSectionHeader extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 2),
           child: Row(
             children: [
-              if (leading != null) ...[
-                leading,
-                const SizedBox(width: 10),
-              ],
+              leading,
+              const SizedBox(width: 10),
               Expanded(
-                child: switch (template) {
-                  UiTemplate.stickerJournal => Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: scheme.surface.withValues(
-                          alpha: isDark ? 0.28 : 0.45,
-                        ),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: scheme.secondary.withValues(
-                            alpha: isDark ? 0.25 : 0.4,
-                          ),
-                        ),
-                      ),
-                      child: Text(
-                        title,
-                        style: titleStyle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  _ => Text(
-                      title,
-                      style: titleStyle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                },
+                child: Text(
+                  title,
+                  style: titleStyle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
               const SizedBox(width: 6),
               countWidget,

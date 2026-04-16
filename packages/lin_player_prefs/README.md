@@ -1,15 +1,14 @@
-# lin_player_prefs
+﻿# lin_player_prefs
 
-`lin_player_prefs` 是 LinPlayer 的**偏好设置定义模块**：用于沉淀跨模块共享的设置项（枚举、序列化 id、默认值、少量轻量 value object）。
+`lin_player_prefs` 鏄?LinPlayer 鐨?*鍋忓ソ璁剧疆瀹氫箟妯″潡**锛氱敤浜庢矇娣€璺ㄦā鍧楀叡浜殑璁剧疆椤癸紙鏋氫妇銆佸簭鍒楀寲 id銆侀粯璁ゅ€笺€佸皯閲忚交閲?value object锛夈€?
 
-## 适用范围（放什么）
-- `UiTemplate` / `PlayerCore` / `PlaybackBufferPreset` 等“设置项枚举”与 `fromId()`。
-- 纯 Dart 的小型数据结构（例如缓冲拆分计算）。
-- 允许包含极少量与 UI 强绑定但“设置本身需要”的类型（例如 `Color` 作为主题 seed）。
+## 閫傜敤鑼冨洿锛堟斁浠€涔堬級
+- 绾?Dart 鐨勫皬鍨嬫暟鎹粨鏋勶紙渚嬪缂撳啿鎷嗗垎璁＄畻锛夈€?
+- 鍏佽鍖呭惈鏋佸皯閲忎笌 UI 寮虹粦瀹氫絾鈥滆缃湰韬渶瑕佲€濈殑绫诲瀷锛堜緥濡?`Color` 浣滀负涓婚 seed锛夈€?
 
-## 不放什么（边界）
-- 不放 Flutter Widget / `ThemeData`（UI 逻辑在 `lin_player_ui`）。
-- 不放网络请求、IO、持久化实现（这些在 state / api 层）。
+## 涓嶆斁浠€涔堬紙杈圭晫锛?
+- 涓嶆斁 Flutter Widget / `ThemeData`锛圲I 閫昏緫鍦?`lin_player_ui`锛夈€?
+- 涓嶆斁缃戠粶璇锋眰銆両O銆佹寔涔呭寲瀹炵幇锛堣繖浜涘湪 state / api 灞傦級銆?
 
-## 目的
-- 让 `state / player / ui` 都能依赖同一套“设置项定义”，避免重复与循环依赖。
+## 鐩殑
+- 璁?`state / player / ui` 閮借兘渚濊禆鍚屼竴濂椻€滆缃」瀹氫箟鈥濓紝閬垮厤閲嶅涓庡惊鐜緷璧栥€?

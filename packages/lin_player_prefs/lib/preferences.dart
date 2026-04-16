@@ -1,15 +1,4 @@
-import 'package:flutter/material.dart';
-
-enum UiTemplate {
-  candyGlass,
-  stickerJournal,
-  neonHud,
-  minimalCovers,
-  washiWatercolor,
-  pixelArcade,
-  mangaStoryboard,
-  proTool,
-}
+import 'package:flutter/foundation.dart' show immutable;
 
 enum TvBackgroundMode {
   none,
@@ -48,133 +37,13 @@ extension TvBackgroundModeX on TvBackgroundMode {
   String get label {
     switch (this) {
       case TvBackgroundMode.none:
-        return '无';
+        return '\u65e0';
       case TvBackgroundMode.solidColor:
-        return '纯色';
+        return '\u7eaf\u8272';
       case TvBackgroundMode.image:
-        return '图片';
+        return '\u56fe\u7247';
       case TvBackgroundMode.randomApi:
-        return '随机 API';
-    }
-  }
-}
-
-UiTemplate uiTemplateFromId(String? id) {
-  switch (id) {
-    // Legacy ids (<= early versions).
-    case 'default':
-      return UiTemplate.minimalCovers;
-    case 'warm':
-      return UiTemplate.washiWatercolor;
-    case 'cool':
-      return UiTemplate.neonHud;
-    case 'kawaii':
-      return UiTemplate.candyGlass;
-
-    // New ids.
-    case 'candy':
-      return UiTemplate.candyGlass;
-    case 'sticker':
-      return UiTemplate.stickerJournal;
-    case 'hud':
-      return UiTemplate.neonHud;
-    case 'minimal':
-      return UiTemplate.minimalCovers;
-    case 'washi':
-      return UiTemplate.washiWatercolor;
-    case 'pixel':
-      return UiTemplate.pixelArcade;
-    case 'manga':
-      return UiTemplate.mangaStoryboard;
-    case 'pro':
-      return UiTemplate.proTool;
-    default:
-      return UiTemplate.candyGlass;
-  }
-}
-
-extension UiTemplateX on UiTemplate {
-  String get id {
-    switch (this) {
-      case UiTemplate.candyGlass:
-        return 'candy';
-      case UiTemplate.stickerJournal:
-        return 'sticker';
-      case UiTemplate.neonHud:
-        return 'hud';
-      case UiTemplate.minimalCovers:
-        return 'minimal';
-      case UiTemplate.washiWatercolor:
-        return 'washi';
-      case UiTemplate.pixelArcade:
-        return 'pixel';
-      case UiTemplate.mangaStoryboard:
-        return 'manga';
-      case UiTemplate.proTool:
-        return 'pro';
-    }
-  }
-
-  String get label {
-    switch (this) {
-      case UiTemplate.candyGlass:
-        return '可爱二次元｜糖果玻璃';
-      case UiTemplate.stickerJournal:
-        return '可爱二次元｜贴纸手帐';
-      case UiTemplate.neonHud:
-        return '赛博霓虹｜HUD 控制台';
-      case UiTemplate.minimalCovers:
-        return '极简高级｜纯净封面墙';
-      case UiTemplate.washiWatercolor:
-        return '日系清淡｜和纸水彩';
-      case UiTemplate.pixelArcade:
-        return '复古像素｜街机风';
-      case UiTemplate.mangaStoryboard:
-        return '漫画分镜｜黑白网点';
-      case UiTemplate.proTool:
-        return '专业工具｜桌面优先';
-    }
-  }
-
-  Color get seed {
-    switch (this) {
-      case UiTemplate.candyGlass:
-        return const Color(0xFFFF6FB1);
-      case UiTemplate.stickerJournal:
-        return const Color(0xFFB69CFF);
-      case UiTemplate.neonHud:
-        return const Color(0xFF00E5FF);
-      case UiTemplate.minimalCovers:
-        return const Color(0xFF8CB4FF);
-      case UiTemplate.washiWatercolor:
-        return const Color(0xFF7CC8A7);
-      case UiTemplate.pixelArcade:
-        return const Color(0xFF4ADE80);
-      case UiTemplate.mangaStoryboard:
-        return const Color(0xFF111827);
-      case UiTemplate.proTool:
-        return const Color(0xFF64748B);
-    }
-  }
-
-  Color get secondarySeed {
-    switch (this) {
-      case UiTemplate.candyGlass:
-        return const Color(0xFF7DD9FF);
-      case UiTemplate.stickerJournal:
-        return const Color(0xFFFFC7A5);
-      case UiTemplate.neonHud:
-        return const Color(0xFFFF2DAA);
-      case UiTemplate.minimalCovers:
-        return const Color(0xFFFFC27A);
-      case UiTemplate.washiWatercolor:
-        return const Color(0xFFFFD6A5);
-      case UiTemplate.pixelArcade:
-        return const Color(0xFFFDE047);
-      case UiTemplate.mangaStoryboard:
-        return const Color(0xFFF9FAFB);
-      case UiTemplate.proTool:
-        return const Color(0xFF60A5FA);
+        return '\u968f\u673a API';
     }
   }
 }
@@ -275,13 +144,13 @@ extension PlaybackBufferPresetX on PlaybackBufferPreset {
   String get label {
     switch (this) {
       case PlaybackBufferPreset.seekFast:
-        return '拖动秒开';
+        return '\u62d6\u52a8\u79d2\u5f00';
       case PlaybackBufferPreset.balanced:
-        return '均衡';
+        return '\u5747\u8861';
       case PlaybackBufferPreset.stable:
-        return '稳定优先';
+        return '\u7a33\u5b9a\u4f18\u5148';
       case PlaybackBufferPreset.custom:
-        return '自定义';
+        return '\u81ea\u5b9a\u4e49';
     }
   }
 
@@ -312,9 +181,9 @@ extension PlaybackProxyModeX on PlaybackProxyMode {
   String get label {
     switch (this) {
       case PlaybackProxyMode.system:
-        return '系统代理';
+        return '\u7cfb\u7edf\u4ee3\u7406';
       case PlaybackProxyMode.custom:
-        return '自定义';
+        return '\u81ea\u5b9a\u4e49';
     }
   }
 }
@@ -418,15 +287,15 @@ extension VideoVersionPreferenceX on VideoVersionPreference {
   String get label {
     switch (this) {
       case VideoVersionPreference.defaultVersion:
-        return '默认';
+        return '\u9ed8\u8ba4';
       case VideoVersionPreference.highestResolution:
-        return '最高分辨率';
+        return '\u6700\u9ad8\u5206\u8fa8\u7387';
       case VideoVersionPreference.lowestBitrate:
-        return '最低码率';
+        return '\u6700\u4f4e\u7801\u7387';
       case VideoVersionPreference.preferHevc:
-        return '优先 HEVC';
+        return '\u4f18\u5148 HEVC';
       case VideoVersionPreference.preferAvc:
-        return '优先 AVC';
+        return '\u4f18\u5148 AVC';
     }
   }
 }

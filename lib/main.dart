@@ -199,7 +199,8 @@ Future<void> _bootstrapApp() async {
 
   EmbyApi.setClientFactory(EmbyHttpClientFactory.createClient);
   EmbyApi.setRouteLabelBuilder(EmbyHttpClientFactory.describeRoute);
-  CoverCacheManager.configureHttpClientFactory(EmbyHttpClientFactory.createClient);
+  CoverCacheManager.configureHttpClientFactory(
+      EmbyHttpClientFactory.createClient);
   HttpStreamProxyServer.instance.configureHttpClientFactory(
     EmbyHttpClientFactory.createClient,
   );
@@ -330,12 +331,10 @@ class _LinPlayerAppState extends State<LinPlayerApp>
               themeMode: appState.themeMode,
               theme: AppTheme.light(
                 dynamicScheme: useDynamic ? lightDynamic : null,
-                template: appState.uiTemplate,
                 compact: appState.compactMode,
               ),
               darkTheme: AppTheme.dark(
                 dynamicScheme: useDynamic ? darkDynamic : null,
-                template: appState.uiTemplate,
                 compact: appState.compactMode,
               ),
               builder: (context, child) {
