@@ -685,11 +685,16 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         mediaSource: selectedMediaSource,
       );
       final preloadStart = start ?? Duration.zero;
-      final preloadWarmup = _startCurrentItemPreloadWarmup(
+      final startupWarmupPlan =
+          PlaybackPreloadCoordinator.buildStartupWarmupPlan(
+        preloadEnabled: widget.appState.preloadEnabled,
         startPosition: preloadStart,
-        triggerSource:
-            preloadStart > Duration.zero ? 'playback_resume' : 'playback_start',
+        preparedPreload: initialPrepared,
       );
+      final preloadWarmup =
+          startupWarmupPlan.timing == StartupPlaybackWarmupTiming.immediate
+              ? _startStartupPreloadWarmupNow(plan: startupWarmupPlan)
+              : null;
       final playbackSourceStopwatch = Stopwatch()..start();
       final playbackSource =
           preparedPlaybackSource ?? await _buildPlaybackSource(resolvedSource);
@@ -700,10 +705,22 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         usesLoopbackProxy: usesLoopbackProxy,
         hadPreparedHandoff: initialPrepared != null,
         startPosition: preloadStart,
+        phase: startupWarmupPlan.timing == StartupPlaybackWarmupTiming.immediate
+            ? 'pre-init'
+            : startupWarmupPlan.timing ==
+                    StartupPlaybackWarmupTiming.afterPlayerInitialize
+                ? 'deferred'
+                : 'not-requested',
+        reason: startupWarmupPlan.reason,
       );
       _updatePlaybackCacheFingerprint(
         resolvedSource: resolvedSource,
         playbackSource: playbackSource,
+      );
+      final startupPlaybackReuseStatus = _observeStartupPlaybackReuse(
+        usesLoopbackProxy: usesLoopbackProxy,
+        hadPreparedHandoff: initialPrepared != null,
+        startPosition: preloadStart,
       );
       final playbackUrl = playbackSource.url;
       final playbackHeaders = playbackSource.httpHeaders;
@@ -723,6 +740,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
           'usesLoopbackProxy': usesLoopbackProxy,
           'playbackSourceBuildMs': playbackSourceStopwatch.elapsedMilliseconds,
           'startupPreloadWarmup': startupPreloadWarmupStatus,
+          'startupWarmupPlan': startupWarmupPlan.timing.name,
+          'startupWarmupReason': startupWarmupPlan.reason,
+          'startupPlaybackReuse': startupPlaybackReuseStatus,
         },
       );
       final httpProxy = playbackUrl.isNotEmpty
@@ -768,6 +788,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
           'usesLoopbackProxy': usesLoopbackProxy,
           'fastStartLoopbackProfile': usesLoopbackProxy,
         },
+      );
+      _startDeferredStartupPreloadWarmup(
+        plan: startupWarmupPlan,
+        usesLoopbackProxy: usesLoopbackProxy,
+        hadPreparedHandoff: initialPrepared != null,
       );
       if (_playerService.isExternalPlayback) {
         _playError = _playerService.externalPlaybackMessage ?? '已使用外部播放器播放';
@@ -1109,14 +1134,32 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     return result;
   }
 
-  Future<StreamPreloadResult?>? _startCurrentItemPreloadWarmup({
-    required Duration startPosition,
-    required String triggerSource,
+  Future<StreamPreloadResult?>? _startStartupPreloadWarmupNow({
+    required StartupPlaybackWarmupPlan plan,
   }) {
-    if (!widget.appState.preloadEnabled) return null;
+    if (!plan.shouldRequest) return null;
     return _preloadCurrentItemBestEffort(
-      startPosition: startPosition,
-      triggerSource: triggerSource,
+      startPosition: plan.startPosition,
+      triggerSource: plan.triggerSource,
+    );
+  }
+
+  void _startDeferredStartupPreloadWarmup({
+    required StartupPlaybackWarmupPlan plan,
+    required bool usesLoopbackProxy,
+    required bool hadPreparedHandoff,
+  }) {
+    if (plan.timing != StartupPlaybackWarmupTiming.afterPlayerInitialize) {
+      return;
+    }
+    final future = _startStartupPreloadWarmupNow(plan: plan);
+    _observeStartupPreloadWarmup(
+      preloadWarmup: future,
+      usesLoopbackProxy: usesLoopbackProxy,
+      hadPreparedHandoff: hadPreparedHandoff,
+      startPosition: plan.startPosition,
+      phase: 'post-init',
+      reason: plan.reason,
     );
   }
 
@@ -1125,8 +1168,15 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     required bool usesLoopbackProxy,
     required bool hadPreparedHandoff,
     required Duration startPosition,
+    required String phase,
+    required String reason,
   }) {
-    if (preloadWarmup == null) return 'not-requested';
+    final normalizedPhase = phase.trim().isEmpty ? 'unknown' : phase.trim();
+    final normalizedReason =
+        reason.trim().isEmpty ? 'unspecified' : reason.trim();
+    if (preloadWarmup == null) {
+      return '$normalizedPhase:$normalizedReason';
+    }
     final shouldTrackStartup = usesLoopbackProxy &&
         (hadPreparedHandoff || startPosition > Duration.zero);
     final immediateStatus = shouldTrackStartup
@@ -1149,6 +1199,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
             'startMs': startPosition.inMilliseconds,
             'hadPreparedHandoff': hadPreparedHandoff,
             'usesLoopbackProxy': usesLoopbackProxy,
+            'phase': normalizedPhase,
+            'reason': normalizedReason,
           },
         );
       } catch (error, stackTrace) {
@@ -1165,12 +1217,65 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
             'usesLoopbackProxy': usesLoopbackProxy,
             'error': AppDiagnosticsLogger.summarizeError(error),
             'stack': AppDiagnosticsLogger.summarizeStackTrace(stackTrace),
+            'phase': normalizedPhase,
+            'reason': normalizedReason,
           },
         );
       }
     }());
 
-    return immediateStatus;
+    return '$normalizedPhase:$immediateStatus:$normalizedReason';
+  }
+
+  String _observeStartupPlaybackReuse({
+    required bool usesLoopbackProxy,
+    required bool hadPreparedHandoff,
+    required Duration startPosition,
+  }) {
+    final fingerprint = (_playbackCacheFingerprint ?? '').trim();
+    if (!usesLoopbackProxy || fingerprint.isEmpty) return 'not-loopback';
+    final shouldTrackStartup =
+        hadPreparedHandoff || startPosition > Duration.zero;
+    unawaited(() async {
+      final observation =
+          await LocalHttpStreamProxy.waitForFirstPlaybackObservation(
+        cacheFingerprint: fingerprint,
+      );
+      if (!shouldTrackStartup) return;
+      if (observation == null) {
+        AppDiagnosticsLogger.instance.warn(
+          'player_network_mpv',
+          'Startup playback reuse observation timed out',
+          data: <String, Object?>{
+            'itemId': widget.itemId,
+            'cacheFingerprint': fingerprint,
+            'startMs': startPosition.inMilliseconds,
+            'hadPreparedHandoff': hadPreparedHandoff,
+          },
+        );
+        return;
+      }
+      AppDiagnosticsLogger.instance.info(
+        'player_network_mpv',
+        'Startup playback reuse observed',
+        data: <String, Object?>{
+          'itemId': widget.itemId,
+          'cacheFingerprint': fingerprint,
+          'cacheStatus': observation.cacheStatus,
+          'reuseOutcome': observation.reuseOutcome,
+          'missReason': observation.missReason,
+          'reason': observation.reason,
+          'waitedWarmup': observation.waitedWarmup,
+          'waitedCacheFill': observation.waitedCacheFill,
+          'cachedBytes': observation.cachedBytes,
+          'remoteBytes': observation.remoteBytes,
+          'range': observation.rangeHeader,
+          'statusCode': observation.statusCode,
+          'requestHeaders': observation.requestHeadersSummary,
+        },
+      );
+    }());
+    return shouldTrackStartup ? 'awaiting-first-request' : 'passive';
   }
 
   void _maybePreloadNextEpisode(Duration pos) {
@@ -2827,13 +2932,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     }
 
     if (!_resumeCloseEnough(initialWarmupStart, remoteStart)) {
-      final lateWarmup = _startCurrentItemPreloadWarmup(
+      final lateWarmup = _preloadCurrentItemBestEffort(
         startPosition: remoteStart,
         triggerSource: 'playback_server_resume',
       );
-      if (lateWarmup != null) {
-        unawaited(lateWarmup);
-      }
+      unawaited(lateWarmup);
     }
 
     final total = _playerService.duration;

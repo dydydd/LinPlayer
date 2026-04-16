@@ -48,6 +48,18 @@ class LocalHttpStreamProxy {
     );
   }
 
+  static Future<HttpStreamPlaybackObservation?>
+      waitForFirstPlaybackObservation({
+    required String cacheFingerprint,
+    Duration timeout = const Duration(seconds: 4),
+  }) {
+    if (kIsWeb) return Future<HttpStreamPlaybackObservation?>.value(null);
+    return HttpStreamProxyServer.instance.waitForFirstPlaybackObservation(
+      cacheFingerprint: cacheFingerprint,
+      timeout: timeout,
+    );
+  }
+
   static Future<PlayableSource?> _wrapHlsSource(
     PlayableSource candidate, {
     HttpStreamCacheKey? cacheKey,

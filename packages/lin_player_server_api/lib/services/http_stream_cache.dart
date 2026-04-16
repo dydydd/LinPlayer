@@ -175,7 +175,8 @@ class HttpStreamCacheKey {
           ..write(remoteUri.port);
       }
     }
-    final path = remoteUri.path.isEmpty ? (hasAuthority ? '/' : '') : remoteUri.path;
+    final path =
+        remoteUri.path.isEmpty ? (hasAuthority ? '/' : '') : remoteUri.path;
     buffer.write(path);
 
     final queryParts = <String>[];
@@ -288,4 +289,47 @@ class HttpStreamCacheDownloadProgressSnapshot {
     if (fraction > 1) return 1;
     return fraction;
   }
+}
+
+class HttpStreamPlaybackObservation {
+  const HttpStreamPlaybackObservation({
+    required this.timestamp,
+    required this.cacheFingerprint,
+    required this.method,
+    required this.rangeHeader,
+    required this.remoteUrl,
+    required this.requestUrl,
+    required this.requestHeadersSummary,
+    required this.firstPlaybackRequest,
+    required this.waitedWarmup,
+    required this.waitedCacheFill,
+    required this.cacheStatus,
+    required this.reuseOutcome,
+    required this.reason,
+    required this.missReason,
+    required this.cachedBytes,
+    required this.remoteBytes,
+    required this.statusCode,
+  });
+
+  final DateTime timestamp;
+  final String cacheFingerprint;
+  final String method;
+  final String rangeHeader;
+  final String remoteUrl;
+  final String requestUrl;
+  final String requestHeadersSummary;
+  final bool firstPlaybackRequest;
+  final bool waitedWarmup;
+  final bool waitedCacheFill;
+  final String cacheStatus;
+  final String reuseOutcome;
+  final String reason;
+  final String missReason;
+  final int cachedBytes;
+  final int remoteBytes;
+  final int statusCode;
+
+  bool get reusedCachePrefix =>
+      cacheStatus == 'hit' || cacheStatus == 'partial';
 }

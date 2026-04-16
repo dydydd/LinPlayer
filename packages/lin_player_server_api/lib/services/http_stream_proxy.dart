@@ -46,6 +46,11 @@ class HttpStreamProxyServer {
       StreamController<List<HttpStreamCacheDownloadProgressSnapshot>>.broadcast(
     sync: true,
   );
+  final StreamController<HttpStreamPlaybackObservation>
+      _playbackObservationController =
+      StreamController<HttpStreamPlaybackObservation>.broadcast(
+    sync: true,
+  );
   final Map<String, _HttpStreamProxyDownloadProgress> _activeDownloads =
       <String, _HttpStreamProxyDownloadProgress>{};
   final Map<String, _HttpStreamProxyDownloadCancellation>
@@ -55,6 +60,9 @@ class HttpStreamProxyServer {
 
   Stream<List<HttpStreamCacheDownloadProgressSnapshot>>
       get downloadProgressStream => _downloadProgressController.stream;
+
+  Stream<HttpStreamPlaybackObservation> get playbackObservationStream =>
+      _playbackObservationController.stream;
 
   void configureHttpClientFactory(http.Client Function()? factory) {
     _httpClientFactory = factory;
@@ -417,6 +425,42 @@ class HttpStreamProxyServer {
       );
     }
     return buffer.toString().trim();
+  }
+
+  HttpStreamPlaybackObservation? latestFirstPlaybackObservation({
+    required String cacheFingerprint,
+  }) {
+    final normalizedFingerprint = cacheFingerprint.trim();
+    if (normalizedFingerprint.isEmpty) return null;
+    for (final entry in _recentDiagnostics.reversed) {
+      if (!entry.firstPlaybackRequest) continue;
+      if (entry.cacheFingerprint != normalizedFingerprint) continue;
+      return entry.toPlaybackObservation();
+    }
+    return null;
+  }
+
+  Future<HttpStreamPlaybackObservation?> waitForFirstPlaybackObservation({
+    required String cacheFingerprint,
+    Duration timeout = const Duration(seconds: 4),
+  }) async {
+    final normalizedFingerprint = cacheFingerprint.trim();
+    if (normalizedFingerprint.isEmpty) return null;
+    final existing = latestFirstPlaybackObservation(
+      cacheFingerprint: normalizedFingerprint,
+    );
+    if (existing != null) return existing;
+    try {
+      return await playbackObservationStream
+          .firstWhere(
+            (entry) =>
+                entry.firstPlaybackRequest &&
+                entry.cacheFingerprint == normalizedFingerprint,
+          )
+          .timeout(timeout);
+    } on TimeoutException {
+      return null;
+    }
   }
 
   Future<void> debugResetForTest() async {
@@ -975,6 +1019,11 @@ class HttpStreamProxyServer {
         _recentDiagnostics.length - _maxRecentDiagnostics,
       );
     }
+    if (_isPlaybackMethod(entry.method)) {
+      try {
+        _playbackObservationController.add(entry.toPlaybackObservation());
+      } catch (_) {}
+    }
   }
 
   Future<bool> _awaitWarmupProgress(_HttpStreamProxyEntry entry) async {
@@ -1035,6 +1084,7 @@ class HttpStreamProxyServer {
       }
       activeEntry = entry;
       entry.touch();
+      diag.cacheFingerprint = entry.fingerprint;
       diag.remoteUrl = entry.remoteUri.toString();
       diag.requestUrl =
           (_baseUri?.resolveUri(request.uri) ?? request.uri).toString();
@@ -3246,6 +3296,7 @@ class _ProxyRequestTrace {
 
   final String method;
   final String rangeHeader;
+  String cacheFingerprint = '';
   String remoteUrl = '';
   String requestUrl = '';
   String requestHeadersSummary = '-';
@@ -3263,6 +3314,7 @@ class _ProxyRequestTrace {
   _HttpStreamProxyDiagnosticEntry build() {
     return _HttpStreamProxyDiagnosticEntry(
       timestamp: DateTime.now(),
+      cacheFingerprint: cacheFingerprint.trim(),
       method: method,
       rangeHeader: rangeHeader,
       remoteUrl: remoteUrl,
@@ -3286,6 +3338,7 @@ class _ProxyRequestTrace {
 class _HttpStreamProxyDiagnosticEntry {
   const _HttpStreamProxyDiagnosticEntry({
     required this.timestamp,
+    required this.cacheFingerprint,
     required this.method,
     required this.rangeHeader,
     required this.remoteUrl,
@@ -3304,6 +3357,7 @@ class _HttpStreamProxyDiagnosticEntry {
   });
 
   final DateTime timestamp;
+  final String cacheFingerprint;
   final String method;
   final String rangeHeader;
   final String remoteUrl;
@@ -3319,4 +3373,26 @@ class _HttpStreamProxyDiagnosticEntry {
   final int cachedBytes;
   final int remoteBytes;
   final int statusCode;
+
+  HttpStreamPlaybackObservation toPlaybackObservation() {
+    return HttpStreamPlaybackObservation(
+      timestamp: timestamp,
+      cacheFingerprint: cacheFingerprint,
+      method: method,
+      rangeHeader: rangeHeader,
+      remoteUrl: remoteUrl,
+      requestUrl: requestUrl,
+      requestHeadersSummary: requestHeadersSummary,
+      firstPlaybackRequest: firstPlaybackRequest,
+      waitedWarmup: waitedWarmup,
+      waitedCacheFill: waitedCacheFill,
+      cacheStatus: cacheStatus,
+      reuseOutcome: reuseOutcome,
+      reason: reason,
+      missReason: missReason,
+      cachedBytes: cachedBytes,
+      remoteBytes: remoteBytes,
+      statusCode: statusCode,
+    );
+  }
 }

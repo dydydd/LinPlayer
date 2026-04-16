@@ -70,6 +70,80 @@ void main() {
     expect(request.scopeKey, scopeKey);
   });
 
+  test('PlaybackPreloadCoordinator defers startup warmup for aligned handoff',
+      () {
+    final prepared = PlaybackPreloadCoordinator.prepareResolved(
+      appState: AppState(),
+      targetKind: PlaybackPreloadTargetKind.currentItem,
+      triggerSource: 'detail_current',
+      resolvedSource: const ResolvedPlaybackSource(
+        itemId: 'item-startup-plan',
+        playSessionId: 'ps-startup-plan',
+        mediaSourceId: 'ms-startup-plan',
+        url: 'https://media.example.com/videos/item-startup-plan/stream.mp4',
+        httpHeaders: <String, String>{},
+        isExternal: false,
+        mediaTypeHint: ResolvedPlaybackMediaType.file,
+        fromStrm: false,
+        redirectChain: <String>[
+          'https://media.example.com/videos/item-startup-plan/stream.mp4',
+        ],
+      ),
+      startPosition: const Duration(seconds: 10),
+    );
+
+    final plan = PlaybackPreloadCoordinator.buildStartupWarmupPlan(
+      preloadEnabled: true,
+      startPosition: const Duration(seconds: 11),
+      preparedPreload: prepared,
+    );
+
+    expect(plan.timing, StartupPlaybackWarmupTiming.afterPlayerInitialize);
+    expect(plan.reason, 'resume-already-prepared');
+    expect(plan.triggerSource, 'playback_resume');
+  });
+
+  test(
+      'PlaybackPreloadCoordinator starts startup warmup immediately when resume window shifts away from handoff',
+      () {
+    final prepared = PlaybackPreloadCoordinator.prepareResolved(
+      appState: AppState(),
+      targetKind: PlaybackPreloadTargetKind.currentItem,
+      triggerSource: 'detail_current',
+      resolvedSource: const ResolvedPlaybackSource(
+        itemId: 'item-startup-shifted',
+        playSessionId: 'ps-startup-shifted',
+        mediaSourceId: 'ms-startup-shifted',
+        url: 'https://media.example.com/videos/item-startup-shifted/stream.mp4',
+        httpHeaders: <String, String>{},
+        isExternal: false,
+        mediaTypeHint: ResolvedPlaybackMediaType.file,
+        fromStrm: false,
+        redirectChain: <String>[
+          'https://media.example.com/videos/item-startup-shifted/stream.mp4',
+        ],
+      ),
+      startPosition: const Duration(seconds: 2),
+    );
+
+    final shiftedPlan = PlaybackPreloadCoordinator.buildStartupWarmupPlan(
+      preloadEnabled: true,
+      startPosition: const Duration(seconds: 8),
+      preparedPreload: prepared,
+    );
+    final coldStartPlan = PlaybackPreloadCoordinator.buildStartupWarmupPlan(
+      preloadEnabled: true,
+      startPosition: Duration.zero,
+      preparedPreload: null,
+    );
+
+    expect(shiftedPlan.timing, StartupPlaybackWarmupTiming.immediate);
+    expect(shiftedPlan.reason, 'resume-window-shifted');
+    expect(coldStartPlan.timing,
+        StartupPlaybackWarmupTiming.afterPlayerInitialize);
+    expect(coldStartPlan.reason, 'avoid-startup-contention');
+  });
+
   test('PlaybackPreloadCoordinator.prepareItem keeps playback handoff metadata',
       () async {
     final adapter = _FakeAdapter(

@@ -16,6 +16,12 @@ enum PlaybackPreloadTargetKind {
   nextItem,
 }
 
+enum StartupPlaybackWarmupTiming {
+  notRequested,
+  immediate,
+  afterPlayerInitialize,
+}
+
 @immutable
 class PlaybackPreloadBuildRequest {
   const PlaybackPreloadBuildRequest({
@@ -182,8 +188,28 @@ class PreparedPlaybackPreload {
   }
 }
 
+@immutable
+class StartupPlaybackWarmupPlan {
+  const StartupPlaybackWarmupPlan({
+    required this.timing,
+    required this.startPosition,
+    required this.triggerSource,
+    required this.reason,
+  });
+
+  final StartupPlaybackWarmupTiming timing;
+  final Duration startPosition;
+  final String triggerSource;
+  final String reason;
+
+  bool get shouldRequest => timing != StartupPlaybackWarmupTiming.notRequested;
+}
+
 class PlaybackPreloadCoordinator {
   const PlaybackPreloadCoordinator._();
+
+  static const Duration _startupWarmupPreparedAlignmentTolerance =
+      Duration(seconds: 2);
 
   static int _nextOwnerTokenId = 0;
 
@@ -338,6 +364,63 @@ class PlaybackPreloadCoordinator {
     return proxied ?? candidate;
   }
 
+  static StartupPlaybackWarmupPlan buildStartupWarmupPlan({
+    required bool preloadEnabled,
+    required Duration startPosition,
+    PreparedPlaybackPreload? preparedPreload,
+  }) {
+    final normalizedStart =
+        startPosition < Duration.zero ? Duration.zero : startPosition;
+    final triggerSource =
+        normalizedStart > Duration.zero ? 'playback_resume' : 'playback_start';
+    if (!preloadEnabled) {
+      return StartupPlaybackWarmupPlan(
+        timing: StartupPlaybackWarmupTiming.notRequested,
+        startPosition: normalizedStart,
+        triggerSource: triggerSource,
+        reason: 'disabled',
+      );
+    }
+
+    final prepared = preparedPreload;
+    if (prepared == null) {
+      return StartupPlaybackWarmupPlan(
+        timing: normalizedStart > Duration.zero
+            ? StartupPlaybackWarmupTiming.immediate
+            : StartupPlaybackWarmupTiming.afterPlayerInitialize,
+        startPosition: normalizedStart,
+        triggerSource: triggerSource,
+        reason: normalizedStart > Duration.zero
+            ? 'resume-without-handoff'
+            : 'avoid-startup-contention',
+      );
+    }
+
+    final preparedStart = prepared.startPosition < Duration.zero
+        ? Duration.zero
+        : prepared.startPosition;
+    if (_startupWarmupPreparedAligned(
+      preparedStart: preparedStart,
+      playbackStart: normalizedStart,
+    )) {
+      return StartupPlaybackWarmupPlan(
+        timing: StartupPlaybackWarmupTiming.afterPlayerInitialize,
+        startPosition: normalizedStart,
+        triggerSource: triggerSource,
+        reason: normalizedStart > Duration.zero
+            ? 'resume-already-prepared'
+            : 'prepared-handoff',
+      );
+    }
+
+    return StartupPlaybackWarmupPlan(
+      timing: StartupPlaybackWarmupTiming.immediate,
+      startPosition: normalizedStart,
+      triggerSource: triggerSource,
+      reason: 'resume-window-shifted',
+    );
+  }
+
   static String createOwnerToken(String namespace) {
     final normalized = _normalizeScopeToken(namespace) ?? 'preload';
     _nextOwnerTokenId += 1;
@@ -380,5 +463,13 @@ class PlaybackPreloadCoordinator {
   static String? _normalizeProxyUrl(String? raw) {
     final value = (raw ?? '').trim();
     return value.isEmpty ? null : value;
+  }
+
+  static bool _startupWarmupPreparedAligned({
+    required Duration preparedStart,
+    required Duration playbackStart,
+  }) {
+    final delta = preparedStart - playbackStart;
+    return delta.abs() <= _startupWarmupPreparedAlignmentTolerance;
   }
 }

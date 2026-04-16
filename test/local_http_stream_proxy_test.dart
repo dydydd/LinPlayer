@@ -598,6 +598,63 @@ void main() {
     expect(summary, contains('range=bytes=0-3'));
   });
 
+  test('LocalHttpStreamProxy exposes first playback observation by fingerprint',
+      () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() async {
+      await server.close(force: true);
+    });
+
+    server.listen((HttpRequest req) async {
+      req.response.statusCode = 206;
+      req.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+      req.response.headers.set(
+        HttpHeaders.contentRangeHeader,
+        'bytes 0-3/8',
+      );
+      req.response.headers.contentType = ContentType('video', 'mp4');
+      req.response.contentLength = 4;
+      req.response.add(const <int>[0, 1, 2, 3]);
+      await req.response.close();
+    });
+
+    final remoteUri = Uri.parse('http://127.0.0.1:${server.port}/media');
+    const headers = <String, String>{'User-Agent': 'BrowserUA'};
+    final cacheKey = HttpStreamCacheKey.fromNetworkSource(
+      remoteUri: remoteUri,
+      httpHeaders: headers,
+    );
+    final proxyUri = await HttpStreamProxyServer.instance.registerStream(
+      remoteUri: remoteUri,
+      httpHeaders: headers,
+      fileName: 'video.mp4',
+      cacheKey: cacheKey,
+    );
+
+    final observationFuture =
+        LocalHttpStreamProxy.waitForFirstPlaybackObservation(
+      cacheFingerprint: cacheKey.fingerprint,
+    );
+
+    final client = HttpClient();
+    addTearDown(() {
+      client.close(force: true);
+    });
+
+    final request = await client.getUrl(proxyUri);
+    request.headers.set(HttpHeaders.rangeHeader, 'bytes=0-3');
+    final response = await request.close();
+    await response.drain<void>();
+
+    final observation = await observationFuture;
+    expect(observation, isNotNull);
+    expect(observation!.firstPlaybackRequest, isTrue);
+    expect(observation.cacheFingerprint, cacheKey.fingerprint);
+    expect(observation.cacheStatus, 'miss');
+    expect(observation.reuseOutcome, 'direct-upstream');
+    expect(observation.rangeHeader, 'bytes=0-3');
+  });
+
   test(
       'HttpStreamProxyServer serves seeded cache before fetching upstream tail',
       () async {
