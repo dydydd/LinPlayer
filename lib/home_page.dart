@@ -14,6 +14,7 @@ import 'aggregate_service_page.dart';
 import 'continue_watching_page.dart';
 import 'library_page.dart';
 import 'library_items_page.dart';
+import 'mobile_ui/settings/mobile_settings_page.dart';
 import 'player_screen.dart';
 import 'player_screen_exo.dart';
 import 'search_page.dart';
@@ -533,6 +534,7 @@ class _HomePageState extends State<HomePage> {
         final useExoCore = !kIsWeb &&
             defaultTargetPlatform == TargetPlatform.android &&
             widget.appState.playerCore == PlayerCore.exo;
+        final useMobileSettingsPage = !kIsWeb && !isDesktop;
         final template = widget.appState.uiTemplate;
         final usesGlassSurfaces = template == UiTemplate.candyGlass ||
             template == UiTemplate.stickerJournal ||
@@ -556,7 +558,9 @@ class _HomePageState extends State<HomePage> {
           useExoCore
               ? ExoPlayerScreen(appState: widget.appState)
               : PlayerScreen(appState: widget.appState),
-          SettingsPage(appState: widget.appState),
+          useMobileSettingsPage
+              ? MobileSettingsPage(appState: widget.appState)
+              : SettingsPage(appState: widget.appState),
         ];
 
         if (isTv) {
@@ -1335,8 +1339,8 @@ class _ServerGlassButtonState extends State<_ServerGlassButton> {
     final borderColor = highlighted
         ? scheme.primary.withValues(alpha: _focused ? 0.9 : 0.55)
         : (widget.infoStyle
-              ? Colors.white.withValues(alpha: isDark ? 0.10 : 0.16)
-              : Colors.transparent);
+            ? Colors.white.withValues(alpha: isDark ? 0.10 : 0.16)
+            : Colors.transparent);
 
     Widget child = FocusableActionDetector(
       enabled: enabled,

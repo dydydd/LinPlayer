@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lin_player_prefs/lin_player_prefs.dart';
@@ -197,11 +198,12 @@ class _InteractionSettingsPageState extends State<InteractionSettingsPage> {
                         padding: const EdgeInsets.only(bottom: 10),
                         child: Text(
                           '提示：仅桌面端播放页有效。点击条目后按下新的按键组合。按 Backspace / Delete 清除，按 Esc 取消。',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurfaceVariant,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
                         ),
                       ),
                       for (final action in DesktopShortcutAction.values) ...[
@@ -395,7 +397,7 @@ class _InteractionSettingsPageState extends State<InteractionSettingsPage> {
                         await appState.setSeekForwardSeconds(seconds);
                       },
                     ),
-                    if (!_isTv) ...[
+                    if (_isDesktopPlatform) ...[
                       const Divider(height: 1),
                       SwitchListTile(
                         value: appState.forceRemoteControlKeys,
@@ -485,8 +487,7 @@ class _InteractionSettingsPageState extends State<InteractionSettingsPage> {
       DesktopShortcutAction.togglePanelRoute => Icons.alt_route_rounded,
       DesktopShortcutAction.togglePanelVersion => Icons.layers_outlined,
       DesktopShortcutAction.togglePanelAudio => Icons.audiotrack_rounded,
-      DesktopShortcutAction.togglePanelSubtitle =>
-        Icons.subtitles_outlined,
+      DesktopShortcutAction.togglePanelSubtitle => Icons.subtitles_outlined,
       DesktopShortcutAction.togglePanelDanmaku => Icons.comment_outlined,
       DesktopShortcutAction.togglePanelEpisode => Icons.list_alt_rounded,
       DesktopShortcutAction.togglePanelAnime4k => Icons.auto_awesome_outlined,

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 
+import 'mobile_ui/settings/mobile_settings_page.dart';
 import 'player_screen.dart';
 import 'player_screen_exo.dart';
 import 'settings_page.dart';
@@ -28,6 +29,9 @@ class _WebDavHomePageState extends State<WebDavHomePage> {
     final useExoCore = !kIsWeb &&
         defaultTargetPlatform == TargetPlatform.android &&
         appState.playerCore == PlayerCore.exo;
+    final useMobileSettingsPage = !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS);
 
     final pages = [
       if (server == null)
@@ -37,7 +41,9 @@ class _WebDavHomePageState extends State<WebDavHomePage> {
       useExoCore
           ? ExoPlayerScreen(appState: appState)
           : PlayerScreen(appState: appState),
-      SettingsPage(appState: appState),
+      useMobileSettingsPage
+          ? MobileSettingsPage(appState: appState)
+          : SettingsPage(appState: appState),
     ];
 
     return Scaffold(

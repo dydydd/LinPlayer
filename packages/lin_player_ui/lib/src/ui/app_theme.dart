@@ -88,26 +88,11 @@ class AppTheme {
       onSecondaryContainer: secondaryScheme.onPrimaryContainer,
     );
 
-    if (dynamicScheme == null) return seeded;
+    // When Material You / Monet is available, use the full dynamic scheme so
+    // the visible accent colors actually follow the system palette.
+    if (dynamicScheme != null) return dynamicScheme;
 
-    // Keep dynamic neutrals/surfaces, but use template accents for visible
-    // differentiation between UI templates.
-    return dynamicScheme.copyWith(
-      primary: seeded.primary,
-      onPrimary: seeded.onPrimary,
-      primaryContainer: seeded.primaryContainer,
-      onPrimaryContainer: seeded.onPrimaryContainer,
-      secondary: seeded.secondary,
-      onSecondary: seeded.onSecondary,
-      secondaryContainer: seeded.secondaryContainer,
-      onSecondaryContainer: seeded.onSecondaryContainer,
-      tertiary: seeded.tertiary,
-      onTertiary: seeded.onTertiary,
-      tertiaryContainer: seeded.tertiaryContainer,
-      onTertiaryContainer: seeded.onTertiaryContainer,
-      surfaceTint: seeded.surfaceTint,
-      inversePrimary: seeded.inversePrimary,
-    );
+    return seeded;
   }
 
   static ThemeData light({
