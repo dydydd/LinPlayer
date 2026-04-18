@@ -547,6 +547,212 @@ class MobilePlayerBottomStatusBar extends StatelessWidget {
   }
 }
 
+class MobilePlayerPillButton extends StatelessWidget {
+  const MobilePlayerPillButton({
+    super.key,
+    required this.label,
+    this.icon,
+    this.onTap,
+    this.onLongPress,
+    this.compact = true,
+  });
+
+  final String label;
+  final IconData? icon;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        borderRadius: BorderRadius.circular(999),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            color: Colors.black.withValues(alpha: enabled ? 0.22 : 0.12),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: enabled ? 0.16 : 0.08),
+            ),
+          ),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 8 : 10,
+              vertical: compact ? 5 : 6,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (icon != null) ...[
+                  Icon(
+                    icon,
+                    size: compact ? 14 : 16,
+                    color: enabled ? Colors.white : Colors.white38,
+                  ),
+                  const SizedBox(width: 4),
+                ],
+                Text(
+                  label,
+                  style: _overlayLabelStyle(
+                    fontSize: compact ? 10.5 : 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: enabled ? Colors.white : Colors.white38,
+                    tabular: true,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class MobilePlayerEdgeSpeedBar extends StatelessWidget {
+  const MobilePlayerEdgeSpeedBar({
+    super.key,
+    required this.visible,
+    required this.currentRate,
+    required this.enabled,
+    required this.onIncrease,
+    required this.onDecrease,
+    required this.onIncreaseHoldStart,
+    required this.onIncreaseHoldEnd,
+    required this.onDecreaseHoldStart,
+    required this.onDecreaseHoldEnd,
+  });
+
+  final bool visible;
+  final double currentRate;
+  final bool enabled;
+  final VoidCallback onIncrease;
+  final VoidCallback onDecrease;
+  final VoidCallback onIncreaseHoldStart;
+  final VoidCallback onIncreaseHoldEnd;
+  final VoidCallback onDecreaseHoldStart;
+  final VoidCallback onDecreaseHoldEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final segmentWidth = math.min(76.0, size.width * 0.18).toDouble();
+    final bodyHeight = math.min(
+      math.max(112.0, size.height * 0.18),
+      150.0,
+    ).toDouble();
+
+    return Align(
+      alignment: Alignment.centerRight,
+      child: IgnorePointer(
+        ignoring: !visible,
+        child: SafeArea(
+          left: false,
+          minimum: const EdgeInsets.fromLTRB(0, 72, 8, 96),
+          child: AnimatedSlide(
+            offset: visible ? Offset.zero : const Offset(1.1, 0),
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            child: AnimatedOpacity(
+              opacity: visible ? 1 : 0,
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _MobileSpeedSegmentButton(
+                    width: segmentWidth,
+                    icon: Icons.add_rounded,
+                    label: '+0.1',
+                    enabled: enabled,
+                    onTap: onIncrease,
+                    onHoldStart: onIncreaseHoldStart,
+                    onHoldEnd: onIncreaseHoldEnd,
+                  ),
+                  const SizedBox(height: 8),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(20),
+                      color: Colors.black.withValues(alpha: 0.22),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.16),
+                      ),
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.white.withValues(alpha: 0.09),
+                          Colors.white.withValues(alpha: 0.03),
+                        ],
+                      ),
+                    ),
+                    child: SizedBox(
+                      width: segmentWidth,
+                      height: bodyHeight,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 14,
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              _formatRate(currentRate),
+                              textAlign: TextAlign.center,
+                              style: _overlayLabelStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                                tabular: true,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              '倍速',
+                              textAlign: TextAlign.center,
+                              style: _overlayLabelStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white70,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  _MobileSpeedSegmentButton(
+                    width: segmentWidth,
+                    icon: Icons.remove_rounded,
+                    label: '-0.1',
+                    enabled: enabled,
+                    onTap: onDecrease,
+                    onHoldStart: onDecreaseHoldStart,
+                    onHoldEnd: onDecreaseHoldEnd,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  static String _formatRate(double rate) {
+    final value = rate.clamp(0.1, 10.0).toDouble();
+    final digits = value == value.roundToDouble() ? 0 : 1;
+    return '${value.toStringAsFixed(digits)}x';
+  }
+}
+
 class MobilePlayerSpeedOverlay extends StatelessWidget {
   const MobilePlayerSpeedOverlay({
     super.key,

@@ -23,6 +23,7 @@ import 'services/app_diagnostics_log.dart';
 import 'services/app_route_observer.dart';
 import 'services/playback/playback_thresholds.dart';
 import 'services/playback/video_display_hint.dart';
+import 'services/series_skip_preferences.dart';
 import 'services/preload/playback_preload_coordinator.dart';
 import 'services/stream_proxy/local_http_stream_proxy.dart';
 import 'services/stream_resolver/stream_models.dart';
@@ -30,6 +31,7 @@ import 'services/subtitle_support.dart';
 import 'tv/tv_focusable.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
 import 'widgets/mobile_player_status_bars.dart';
+import 'widgets/series_skip_config_dialog.dart';
 
 class ExoPlayNetworkPage extends StatefulWidget {
   const ExoPlayNetworkPage({
@@ -236,6 +238,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
   MediaItem? _episodePickerItem;
   bool _episodePickerItemLoading = false;
+  SeriesSkipProfile _seriesSkipProfile = const SeriesSkipProfile();
+  String _seriesSkipStorageKey = '';
   bool _episodePickerVisible = false;
   _MobilePlayerPanel? _mobilePanel;
   bool _episodePickerLoading = false;
@@ -370,6 +374,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _init();
     // ignore: unawaited_futures
     _loadEpisodePickerItem();
+    // ignore: unawaited_futures
+    _loadSeriesSkipProfile();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -592,6 +598,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           .fetchItemDetail(access.auth, itemId: widget.itemId);
       if (!mounted) return;
       setState(() => _episodePickerItem = detail);
+      unawaited(_loadSeriesSkipProfile(force: true));
     } catch (_) {
       // Optional: if this fails, we simply hide the entry point.
     } finally {
@@ -703,6 +710,217 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   void _stopMobilePlaybackRateAdjust() {
     _mobileSpeedAdjustTimer?.cancel();
     _mobileSpeedAdjustTimer = null;
+  }
+
+  String? get _seriesSkipServerId {
+    final value = (widget.server?.id ?? widget.appState.activeServerId ?? '')
+        .trim();
+    return value.isEmpty ? null : value;
+  }
+
+  String? get _seriesSkipSeriesId {
+    final widgetSeriesId = (widget.seriesId ?? '').trim();
+    if (widgetSeriesId.isNotEmpty) return widgetSeriesId;
+    final detailSeriesId = (_episodePickerItem?.seriesId ?? '').trim();
+    return detailSeriesId.isNotEmpty ? detailSeriesId : null;
+  }
+
+  String? get _seriesSkipSeriesName {
+    final value = _episodePickerItem?.seriesName.trim() ?? '';
+    return value.isEmpty ? null : value;
+  }
+
+  String get _seriesSkipDisplayTitle {
+    final seriesName = _seriesSkipSeriesName;
+    if (seriesName != null && seriesName.isNotEmpty) return seriesName;
+    final fallback = widget.title.trim();
+    return fallback.isNotEmpty ? fallback : '当前剧集';
+  }
+
+  bool get _canShowSeriesSkipButtons =>
+      _seriesSkipSeriesId != null || _seriesSkipSeriesName != null;
+
+  Future<void> _loadSeriesSkipProfile({bool force = false}) async {
+    final serverId = _seriesSkipServerId;
+    if (serverId == null) return;
+
+    final seriesId = _seriesSkipSeriesId;
+    final seriesName = _seriesSkipSeriesName;
+    final storageKey = SeriesSkipPreferences.buildSeriesKey(
+      serverId: serverId,
+      seriesId: seriesId,
+      seriesName: seriesName,
+    );
+    if (storageKey == null) {
+      if (!mounted) return;
+      if (_seriesSkipStorageKey.isNotEmpty || !_seriesSkipProfile.isEmpty) {
+        setState(() {
+          _seriesSkipStorageKey = '';
+          _seriesSkipProfile = const SeriesSkipProfile();
+        });
+      }
+      return;
+    }
+
+    if (!force && _seriesSkipStorageKey == storageKey) return;
+    final profile = await SeriesSkipPreferences.load(
+      serverId: serverId,
+      seriesId: seriesId,
+      seriesName: seriesName,
+    );
+    if (!mounted) return;
+    if (_seriesSkipStorageKey == storageKey && _seriesSkipProfile == profile) {
+      return;
+    }
+    setState(() {
+      _seriesSkipStorageKey = storageKey;
+      _seriesSkipProfile = profile;
+    });
+  }
+
+  String _seriesSkipButtonLabel(String prefix, int? seconds) {
+    final formatted = formatSeriesSkipDuration(seconds);
+    return formatted.isEmpty ? prefix : '$prefix $formatted';
+  }
+
+  Future<SeriesSkipProfile?> _showSeriesSkipConfigEditor() async {
+    await _loadEpisodePickerItem();
+
+    final serverId = _seriesSkipServerId;
+    final seriesId = _seriesSkipSeriesId;
+    final seriesName = _seriesSkipSeriesName;
+    final storageKey = serverId == null
+        ? null
+        : SeriesSkipPreferences.buildSeriesKey(
+            serverId: serverId,
+            seriesId: seriesId,
+            seriesName: seriesName,
+          );
+    if (serverId == null || storageKey == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('当前内容不是剧集，无法设置 OP / ED')),
+        );
+      }
+      return null;
+    }
+
+    final initialProfile = _seriesSkipStorageKey == storageKey
+        ? _seriesSkipProfile
+        : await SeriesSkipPreferences.load(
+            serverId: serverId,
+            seriesId: seriesId,
+            seriesName: seriesName,
+          );
+    if (!mounted) return null;
+
+    final nextProfile = await showSeriesSkipConfigDialog(
+      context,
+      seriesTitle: _seriesSkipDisplayTitle,
+      initialProfile: initialProfile,
+    );
+    if (nextProfile == null) return null;
+
+    await SeriesSkipPreferences.save(
+      serverId: serverId,
+      seriesId: seriesId,
+      seriesName: seriesName,
+      profile: nextProfile,
+    );
+    if (!mounted) return null;
+
+    setState(() {
+      _seriesSkipStorageKey = storageKey;
+      _seriesSkipProfile = nextProfile;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          nextProfile.isEmpty ? '已清空当前剧的 OP / ED 设置' : '已保存当前剧的 OP / ED 时长',
+        ),
+      ),
+    );
+    return nextProfile;
+  }
+
+  Future<void> _handleSeriesSkipAction({required bool opening}) async {
+    _showControls();
+    var profile = _seriesSkipProfile;
+    var seconds = opening ? profile.openingSeconds : profile.endingSeconds;
+    if (seconds == null || seconds <= 0) {
+      final updated = await _showSeriesSkipConfigEditor();
+      if (updated == null) return;
+      profile = updated;
+      seconds = opening ? profile.openingSeconds : profile.endingSeconds;
+      if (seconds == null || seconds <= 0) return;
+    }
+
+    await _seekRelative(Duration(seconds: seconds), showOverlay: false);
+    _setGestureOverlay(
+      icon: Icons.skip_next_rounded,
+      text: '${opening ? 'OP' : 'ED'} +${formatSeriesSkipDuration(seconds)}',
+    );
+  }
+
+  Widget _buildMobileBottomLeftContent({required bool controlsEnabled}) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_canShowSeriesSkipButtons) ...[
+            MobilePlayerPillButton(
+              icon: _seriesSkipProfile.hasOpening
+                  ? Icons.skip_next_rounded
+                  : Icons.edit_outlined,
+              label: _seriesSkipButtonLabel(
+                'OP',
+                _seriesSkipProfile.openingSeconds,
+              ),
+              onTap: controlsEnabled
+                  ? () => unawaited(_handleSeriesSkipAction(opening: true))
+                  : null,
+              onLongPress: controlsEnabled
+                  ? () {
+                      _showControls(scheduleHide: false);
+                      unawaited(_showSeriesSkipConfigEditor());
+                    }
+                  : null,
+            ),
+            const SizedBox(width: 6),
+            MobilePlayerPillButton(
+              icon: _seriesSkipProfile.hasEnding
+                  ? Icons.skip_next_rounded
+                  : Icons.edit_outlined,
+              label: _seriesSkipButtonLabel(
+                'ED',
+                _seriesSkipProfile.endingSeconds,
+              ),
+              onTap: controlsEnabled
+                  ? () => unawaited(_handleSeriesSkipAction(opening: false))
+                  : null,
+              onLongPress: controlsEnabled
+                  ? () {
+                      _showControls(scheduleHide: false);
+                      unawaited(_showSeriesSkipConfigEditor());
+                    }
+                  : null,
+            ),
+            const SizedBox(width: 8),
+          ],
+          Text(
+            '网速 ${_mobileNetSpeedLabel()}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              color: Colors.white70,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _ensureEpisodePickerLoaded() async {
@@ -2849,16 +3067,15 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     required bool controlsEnabled,
     required VideoPlayerController controller,
   }) {
+    final isPlaying = controller.value.isPlaying;
     return MobilePlayerBottomStatusBar(
       position: _position,
       buffered: _lastBufferedEnd,
       duration: _duration,
       positionLabel: _fmtClock(_position),
       durationLabel: _fmtClock(_duration),
-      leftContent: Text(
-        '网速 ${_mobileNetSpeedLabel()}',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+      leftContent: _buildMobileBottomLeftContent(
+        controlsEnabled: controlsEnabled,
       ),
       centerContent: Row(
         mainAxisSize: MainAxisSize.min,
@@ -2879,13 +3096,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           ),
           const SizedBox(width: 4),
           MobilePlayerTransportButton(
-            icon: _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            icon: isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
             emphasized: true,
             onTap: controlsEnabled
-                ? () {
-                    _showControls();
-                    unawaited(_togglePlayPause(showOverlay: false));
-                  }
+                ? () => unawaited(_togglePlayPause(showOverlay: false))
                 : null,
           ),
           const SizedBox(width: 4),
@@ -2911,30 +3125,18 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           mainAxisSize: MainAxisSize.min,
           children: [
             MobilePlayerActionButton(
-              icon: Icons.speed_rounded,
-              label: '倍速',
-              compact: true,
-              onTap: controlsEnabled
-                  ? () => _openMobilePanel(_MobilePlayerPanel.speed)
-                  : null,
-            ),
-            MobilePlayerActionButton(
               icon: (_danmakuEnabled || _danmakuHeatmap.isNotEmpty)
                   ? Icons.comment
                   : Icons.comment_outlined,
               label: '弹幕',
               compact: true,
-              onTap: controlsEnabled
-                  ? () => _openMobilePanel(_MobilePlayerPanel.danmaku)
-                  : null,
+              onTap: () => _openMobilePanel(_MobilePlayerPanel.danmaku),
             ),
             MobilePlayerActionButton(
               icon: Icons.subtitles_outlined,
               label: '字幕',
               compact: true,
-              onTap: controlsEnabled
-                  ? () => _openMobilePanel(_MobilePlayerPanel.subtitle)
-                  : null,
+              onTap: () => _openMobilePanel(_MobilePlayerPanel.subtitle),
             ),
             MobilePlayerActionButton(
               icon: Icons.format_list_numbered,
@@ -2957,7 +3159,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       onSeekCommit: controlsEnabled
           ? (target) async {
               await controller.seekTo(target);
-              _maybeReportPlaybackProgress(target, force: true);
+              _position = target;
               _syncDanmakuCursor(target);
               _onScrubEnd();
               if (mounted) setState(() {});
@@ -2965,7 +3167,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           : null,
     );
   }
-
   String _mobilePanelTitle(_MobilePlayerPanel panel) {
     return switch (panel) {
       _MobilePlayerPanel.route => '线路',
@@ -3032,21 +3233,30 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   Widget _buildMobileSpeedOverlay({required bool controlsEnabled}) {
     final currentRate =
         (_controller?.value.playbackSpeed ?? 1.0).clamp(0.1, 10.0).toDouble();
-    final visible = _mobilePanel == _MobilePlayerPanel.speed;
-    return MobilePlayerSpeedOverlay(
-      visible: visible,
+    return MobilePlayerEdgeSpeedBar(
+      visible: _controlsVisible && !_mobileSidePanelVisible,
       currentRate: currentRate,
       enabled: controlsEnabled,
-      onDismiss: _closeMobilePanels,
-      onIncrease: () => _stepMobilePlaybackRate(0.1),
-      onDecrease: () => _stepMobilePlaybackRate(-0.1),
-      onIncreaseHoldStart: () => _startMobilePlaybackRateAdjust(0.1),
+      onIncrease: () {
+        _showControls();
+        _stepMobilePlaybackRate(0.1);
+      },
+      onDecrease: () {
+        _showControls();
+        _stepMobilePlaybackRate(-0.1);
+      },
+      onIncreaseHoldStart: () {
+        _showControls(scheduleHide: false);
+        _startMobilePlaybackRateAdjust(0.1);
+      },
       onIncreaseHoldEnd: _stopMobilePlaybackRateAdjust,
-      onDecreaseHoldStart: () => _startMobilePlaybackRateAdjust(-0.1),
+      onDecreaseHoldStart: () {
+        _showControls(scheduleHide: false);
+        _startMobilePlaybackRateAdjust(-0.1);
+      },
       onDecreaseHoldEnd: _stopMobilePlaybackRateAdjust,
     );
   }
-
   Widget _buildMobileCorePanel({required bool controlsEnabled}) {
     final current = widget.appState.playerCore;
 
@@ -3510,17 +3720,12 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       }
     }
 
-    return Stack(
-      children: [
-        _buildMobileSpeedOverlay(controlsEnabled: controlsEnabled),
-        MobilePlayerSidePanel(
-          title: _mobilePanelTitle(effectivePanel),
-          visible: visibleSidePanel,
-          onDismiss: _closeMobilePanels,
-          headerTrailing: headerTrailing,
-          child: child,
-        ),
-      ],
+    return MobilePlayerSidePanel(
+      title: _mobilePanelTitle(effectivePanel),
+      visible: visibleSidePanel,
+      onDismiss: _closeMobilePanels,
+      headerTrailing: headerTrailing,
+      child: child,
     );
   }
 
@@ -6598,6 +6803,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                     ),
                                   ),
                                 ),
+                              ),
+                            if (!widget.isTv)
+                              _buildMobileSpeedOverlay(
+                                controlsEnabled: controlsEnabled,
                               ),
                             if (_skipIntroPromptVisible)
                               Align(
