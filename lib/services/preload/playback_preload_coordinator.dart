@@ -61,6 +61,8 @@ class PlaybackPreloadBuildRequest {
 
 @immutable
 class PreparedPlaybackPreload {
+  static const Duration _mpvDirectFilePreloadDuration = Duration(seconds: 8);
+
   PreparedPlaybackPreload({
     required this.targetKind,
     required this.triggerSource,
@@ -166,11 +168,27 @@ class PreparedPlaybackPreload {
       resolvedSource: resolvedSource,
       triggerSource: triggerSource,
       startPosition: startPosition,
+      preloadDuration: _preloadDurationForPreparedSource(),
       dedupeFingerprint: _dedupeFingerprintForTargetKind(targetKind),
       httpProxyUrl: httpProxyUrl,
       ownerKey: ownerKey,
       scopeKey: scopeKey,
     );
+  }
+
+  Duration _preloadDurationForPreparedSource() {
+    if (playerCore != PlaybackSourcePlayerCoreKind.mpv) {
+      return PreloadRequest.defaultPreloadDuration;
+    }
+    return switch (resolvedSource.mediaTypeHint) {
+      // MPV still tends to ask for a larger contiguous prefix before the first
+      // frame, so widen prepared direct-file warmups instead of only relying
+      // on the default 3s preload window.
+      ResolvedPlaybackMediaType.file ||
+      ResolvedPlaybackMediaType.unknown => _mpvDirectFilePreloadDuration,
+      ResolvedPlaybackMediaType.hls ||
+      ResolvedPlaybackMediaType.dash => PreloadRequest.defaultPreloadDuration,
+    };
   }
 
   static String _dedupeFingerprintForTargetKind(

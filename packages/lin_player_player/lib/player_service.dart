@@ -11,7 +11,7 @@ import 'src/external_player/external_mpv_launcher.dart';
 import 'package:lin_player_prefs/preferences.dart';
 
 class PlayerService {
-  static const int _loopbackFastStartCacheMb = 128;
+  static const int _loopbackFastStartCacheMb = 64;
 
   Player? _player;
   VideoController? _controller;
@@ -80,7 +80,8 @@ class PlayerService {
         preferFastStartForLoopbackProxy &&
         cacheMb > _loopbackFastStartCacheMb) {
       // The loopback proxy already provides a shared cache layer, so keeping
-      // MPV's network cache smaller reduces "pre-playback" over-buffering.
+      // MPV's network cache much smaller reduces "pre-playback"
+      // over-buffering before the first frame.
       cacheMb = _loopbackFastStartCacheMb;
     }
     final split = PlaybackBufferSplit.from(

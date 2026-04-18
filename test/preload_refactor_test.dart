@@ -66,8 +66,38 @@ void main() {
     expect(request.httpProxyUrl, proxyUrl);
     expect(request.resolvedSource.proxyUrl, proxyUrl);
     expect(request.dedupeFingerprint, 'target:current');
+    expect(request.preloadDuration, const Duration(seconds: 8));
     expect(request.ownerKey, ownerKey);
     expect(request.scopeKey, scopeKey);
+  });
+
+  test(
+      'PlaybackPreloadCoordinator keeps EXO prepared preload duration on the default window',
+      () {
+    final prepared = PlaybackPreloadCoordinator.prepareResolved(
+      appState: AppState(),
+      targetKind: PlaybackPreloadTargetKind.currentItem,
+      triggerSource: 'detail_current',
+      playerCore: PlaybackSourcePlayerCoreKind.exo,
+      resolvedSource: const ResolvedPlaybackSource(
+        itemId: 'item-exo-duration',
+        playSessionId: 'ps-exo-duration',
+        mediaSourceId: 'ms-exo-duration',
+        url: 'https://media.example.com/videos/item-exo-duration/stream.mp4',
+        httpHeaders: <String, String>{},
+        isExternal: false,
+        mediaTypeHint: ResolvedPlaybackMediaType.file,
+        fromStrm: false,
+        redirectChain: <String>[
+          'https://media.example.com/videos/item-exo-duration/stream.mp4',
+        ],
+      ),
+    );
+
+    expect(
+      prepared.toPreloadRequest().preloadDuration,
+      PreloadRequest.defaultPreloadDuration,
+    );
   });
 
   test('PlaybackPreloadCoordinator defers startup warmup for aligned handoff',
