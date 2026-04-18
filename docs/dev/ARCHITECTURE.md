@@ -168,7 +168,7 @@ Legacy TV Activity(XML/View)
 - 集详情页（`EpisodeDetailPage`）加载完成后，使用 UA `preload-linplayer` 预取：
   - 当前集前 3 秒
   - 下一集前 3 秒
-- 播放过程中，当剩余时长 ≤ 5 秒时，预取下一集前 3 秒（兜底：非从详情页进入的场景）。
+- 播放过程中，当观看进度达到用户设置的观看阈值时，预取下一集前 3 秒（兜底：非从详情页进入的场景）。
 
 失败策略：
 - 单次预取最多尝试 3 次；若同一 source / proxy scope 在短时间内连续失败，会进入带 TTL 的短时熔断，并在恢复窗口后重新允许尝试。
@@ -289,7 +289,7 @@ UI 组织：
 
 1. 通过 `resolveServerAccess(...)` 获取 `adapter + auth`。
 2. `fetchPlaybackInfo(...)` 获取 `PlaySessionId/MediaSources`。
-3. （可选）若开启「预加载」，会在集详情页/播放结束前触发 `StreamPreloadService`，用 UA `preload-linplayer` 预取当前集与下一集的前 3 秒数据。
+3. （可选）若开启「预加载」，会在集详情页/播放达到观看阈值后触发 `StreamPreloadService`，用 UA `preload-linplayer` 预取当前集与下一集的前 3 秒数据。
 4. 组装流 URL 与 header，交给 MPV 或 Exo 播放。
 5. 播放期间上报：
   - `reportPlaybackStart`

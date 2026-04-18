@@ -888,7 +888,7 @@ class _MobileSettingsPageState extends State<MobileSettingsPage> {
           secondary: const Icon(Icons.download_outlined),
           title: const Text('\u9884\u52a0\u8f7d'),
           subtitle: const Text(
-            '\u8be6\u60c5\u9875\u9884\u52a0\u8f7d\u5373\u5c06\u64ad\u653e\u7684\u8d44\u6e90\uff0c\u7f13\u89e3\u7b49\u5f85\u65f6\u95f4',
+            '\u8be6\u60c5\u9875\u9884\u52a0\u8f7d\u524d 3 \u79d2\uff0c\u7eed\u770b\u65f6\u4ece\u8fdb\u5ea6\u5904\u9884\u52a0\u8f7d\uff0c\u5e76\u5728\u8fbe\u5230\u89c2\u770b\u9608\u503c\u540e\u9884\u52a0\u8f7d\u4e0b\u4e00\u96c6\u524d 3 \u79d2\u3002',
           ),
         ),
         const Divider(height: 1),

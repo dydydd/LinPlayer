@@ -23,6 +23,7 @@ import 'services/app_diagnostics_log.dart';
 import 'services/app_route_observer.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/desktop_window.dart';
+import 'services/playback/playback_thresholds.dart';
 import 'services/playback/video_display_hint.dart';
 import 'services/preload/playback_preload_coordinator.dart';
 import 'services/playback_proxy/playback_proxy.dart';
@@ -1283,9 +1284,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     if (!widget.appState.preloadEnabled) return;
 
     final total = _playerService.duration;
-    if (total <= Duration.zero) return;
-    final remaining = total - pos;
-    if (remaining > const Duration(seconds: 5)) return;
+    if (!_isPlayedByThreshold(pos, total)) return;
 
     _nextEpisodePreloadTriggered = true;
     final access = _serverAccess;
@@ -3795,12 +3794,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   }
 
   bool _isPlayedByThreshold(Duration position, Duration duration) {
-    if (duration <= Duration.zero) return false;
-    final durUs = duration.inMicroseconds;
-    if (durUs <= 0) return false;
-    final threshold = widget.appState.markPlayedThresholdPercent.clamp(75, 100);
-    final posUs = position.inMicroseconds;
-    return posUs * 100 >= durUs * threshold;
+    return isPlaybackThresholdReached(
+      position: position,
+      duration: duration,
+      thresholdPercent: widget.appState.markPlayedThresholdPercent,
+    );
   }
 
   void _maybeAutoMarkPlayed(Duration position) {
