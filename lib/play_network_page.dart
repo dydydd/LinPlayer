@@ -1938,6 +1938,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       icon: Icons.skip_next_rounded,
       text: '${opening ? 'OP' : 'ED'} +${formatSeriesSkipDuration(seconds)}',
     );
+    _hideGestureOverlay(const Duration(milliseconds: 1500));
   }
 
   Widget _buildMobileBottomLeftContent({required bool controlsEnabled}) {

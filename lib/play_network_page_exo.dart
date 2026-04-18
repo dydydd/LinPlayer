@@ -860,6 +860,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       icon: Icons.skip_next_rounded,
       text: '${opening ? 'OP' : 'ED'} +${formatSeriesSkipDuration(seconds)}',
     );
+    _hideGestureOverlay(const Duration(milliseconds: 1500));
   }
 
   Widget _buildMobileBottomLeftContent({required bool controlsEnabled}) {
