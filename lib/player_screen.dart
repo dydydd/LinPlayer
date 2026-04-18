@@ -22,6 +22,7 @@ import 'services/app_diagnostics_log.dart';
 import 'services/app_route_observer.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/desktop_window.dart';
+import 'services/playback/video_display_mode.dart';
 import 'services/playback_proxy/playback_proxy.dart';
 import 'services/subtitle_support.dart';
 import 'services/stream_proxy/local_http_stream_proxy.dart';
@@ -143,6 +144,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _controlsVisible = true;
   bool _isScrubbing = false;
   _MobilePlayerPanel? _mobilePanel;
+  VideoDisplayMode _mobileVideoDisplayMode = VideoDisplayMode.fill;
   Timer? _mobileSpeedAdjustTimer;
   _DesktopSidePanel _desktopSidePanel = _DesktopSidePanel.none;
   bool _desktopTopBarHovered = false;
@@ -244,6 +246,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         );
       }
     }
+    unawaited(_restoreMobileVideoDisplayMode());
   }
 
   @override
@@ -2921,6 +2924,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                                     Video(
                                       key: ValueKey(_playerService.controller),
                                       controller: _playerService.controller,
+                                      fit: _mobileVideoDisplayMode.boxFit,
                                       controls: NoVideoControls,
                                       subtitleViewConfiguration:
                                           _subtitleViewConfiguration,
@@ -3223,6 +3227,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                                         key:
                                             ValueKey(_playerService.controller),
                                         controller: _playerService.controller,
+                                        fit: _mobileVideoDisplayMode.boxFit,
                                         controls: NoVideoControls,
                                         subtitleViewConfiguration:
                                             _subtitleViewConfiguration,
@@ -4801,6 +4806,18 @@ class _PlayerScreenState extends State<PlayerScreen>
                 ),
               ),
             ),
+            MobilePlayerActionButton(
+              icon: Icons.fit_screen_outlined,
+              label: '画面',
+              compact: true,
+              onTap: _playerService.isInitialized
+                  ? () => unawaited(
+                        _showMobileVideoDisplaySheet(
+                          controlsEnabled: _playerService.isInitialized,
+                        ),
+                      )
+                  : null,
+            ),
           ],
         ),
       ),
@@ -6254,6 +6271,98 @@ class _PlayerScreenState extends State<PlayerScreen>
     _showControls(scheduleHide: scheduleHide);
   }
 
+  Future<void> _restoreMobileVideoDisplayMode() async {
+    final mode = await VideoDisplayModePreferences.load();
+    if (!mounted || mode == _mobileVideoDisplayMode) return;
+    setState(() => _mobileVideoDisplayMode = mode);
+  }
+
+  void _setMobileVideoDisplayMode(VideoDisplayMode mode) {
+    if (_mobileVideoDisplayMode == mode) return;
+    setState(() => _mobileVideoDisplayMode = mode);
+    unawaited(VideoDisplayModePreferences.save(mode));
+  }
+
+  Future<void> _showMobileVideoDisplaySheet({
+    required bool controlsEnabled,
+  }) async {
+    _showControls(scheduleHide: false);
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54,
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(24),
+                color: Colors.black.withValues(alpha: 0.88),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.14),
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            '画面模式',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: '关闭',
+                          onPressed: () => Navigator.of(sheetContext).pop(),
+                          icon: const Icon(Icons.close_rounded),
+                          color: Colors.white,
+                          splashRadius: 20,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    for (final mode in VideoDisplayMode.values) ...[
+                      MobilePlayerOptionTile(
+                        title: mode.label,
+                        subtitle: mode.description,
+                        selected: mode == _mobileVideoDisplayMode,
+                        trailing: mode == _mobileVideoDisplayMode
+                            ? const Icon(
+                                Icons.check_circle_rounded,
+                                color: Colors.white,
+                              )
+                            : null,
+                        onTap: !controlsEnabled ||
+                                mode == _mobileVideoDisplayMode
+                            ? null
+                            : () {
+                                _setMobileVideoDisplayMode(mode);
+                                Navigator.of(sheetContext).pop();
+                              },
+                      ),
+                      if (mode != VideoDisplayMode.values.last)
+                        const SizedBox(height: 8),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _setMobilePlaybackRate(double rate) async {
     final normalized =
         ((rate.clamp(0.1, 10.0).toDouble() * 10).round() / 10).toDouble();
@@ -6417,6 +6526,18 @@ class _PlayerScreenState extends State<PlayerScreen>
               label: '列表',
               compact: true,
               onTap: () => _openMobilePanel(_MobilePlayerPanel.playlist),
+            ),
+            MobilePlayerActionButton(
+              icon: Icons.fit_screen_outlined,
+              label: '画面',
+              compact: true,
+              onTap: controlsEnabled
+                  ? () => unawaited(
+                        _showMobileVideoDisplaySheet(
+                          controlsEnabled: controlsEnabled,
+                        ),
+                      )
+                  : null,
             ),
           ],
         ),

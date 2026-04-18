@@ -2443,7 +2443,7 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<void> addWebDavServer({
+  Future<String?> addWebDavServer({
     required String baseUrl,
     required String username,
     required String password,
@@ -2460,6 +2460,7 @@ class AppState extends ChangeNotifier {
     final fixedRemark = (remark ?? '').trim();
     final fixedIconUrl = iconUrl?.trim();
     final fixedName = (displayName ?? '').trim();
+    String? serverId;
 
     Uri baseUri;
     try {
@@ -2468,7 +2469,7 @@ class AppState extends ChangeNotifier {
       _error = e.toString();
       _loading = false;
       notifyListeners();
-      return;
+      return null;
     }
     final fixedBaseUrl = baseUri.toString();
 
@@ -2507,6 +2508,7 @@ class AppState extends ChangeNotifier {
       customDomains:
           existingIndex >= 0 ? _servers[existingIndex].customDomains : null,
     );
+    serverId = server.id;
 
     var shouldActivate = activate;
 
@@ -2535,7 +2537,7 @@ class AppState extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await _persistServers(prefs);
 
-      if (!shouldActivate) return;
+      if (!shouldActivate) return serverId;
 
       _activeServerId = server.id;
       _domains = [];
@@ -2553,6 +2555,8 @@ class AppState extends ChangeNotifier {
       _loading = false;
       notifyListeners();
     }
+
+    return serverId;
   }
 
   Future<bool> enterServer(String serverId) async {

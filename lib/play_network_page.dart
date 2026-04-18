@@ -23,6 +23,7 @@ import 'services/app_diagnostics_log.dart';
 import 'services/app_route_observer.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/desktop_window.dart';
+import 'services/playback/video_display_mode.dart';
 import 'services/playback/playback_thresholds.dart';
 import 'services/playback/video_display_hint.dart';
 import 'services/series_skip_preferences.dart';
@@ -341,6 +342,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
   bool _episodePickerVisible = false;
   _MobilePlayerPanel? _mobilePanel;
+  VideoDisplayMode _mobileVideoDisplayMode = VideoDisplayMode.fill;
   bool _episodePickerLoading = false;
   String? _episodePickerError;
   List<MediaItem> _episodeSeasons = const [];
@@ -402,6 +404,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _loadEpisodePickerItem();
     // ignore: unawaited_futures
     _loadSeriesSkipProfile();
+    // ignore: unawaited_futures
+    _restoreMobileVideoDisplayMode();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -1763,6 +1767,98 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _showControls(scheduleHide: scheduleHide);
   }
 
+  Future<void> _restoreMobileVideoDisplayMode() async {
+    final mode = await VideoDisplayModePreferences.load();
+    if (!mounted || mode == _mobileVideoDisplayMode) return;
+    setState(() => _mobileVideoDisplayMode = mode);
+  }
+
+  void _setMobileVideoDisplayMode(VideoDisplayMode mode) {
+    if (_mobileVideoDisplayMode == mode) return;
+    setState(() => _mobileVideoDisplayMode = mode);
+    unawaited(VideoDisplayModePreferences.save(mode));
+  }
+
+  Future<void> _showMobileVideoDisplaySheet({
+    required bool controlsEnabled,
+  }) async {
+    _showControls(scheduleHide: false);
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54,
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(24),
+                color: Colors.black.withValues(alpha: 0.88),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.14),
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            '画面模式',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: '关闭',
+                          onPressed: () => Navigator.of(sheetContext).pop(),
+                          icon: const Icon(Icons.close_rounded),
+                          color: Colors.white,
+                          splashRadius: 20,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    for (final mode in VideoDisplayMode.values) ...[
+                      MobilePlayerOptionTile(
+                        title: mode.label,
+                        subtitle: mode.description,
+                        selected: mode == _mobileVideoDisplayMode,
+                        trailing: mode == _mobileVideoDisplayMode
+                            ? const Icon(
+                                Icons.check_circle_rounded,
+                                color: Colors.white,
+                              )
+                            : null,
+                        onTap: !controlsEnabled ||
+                                mode == _mobileVideoDisplayMode
+                            ? null
+                            : () {
+                                _setMobileVideoDisplayMode(mode);
+                                Navigator.of(sheetContext).pop();
+                              },
+                      ),
+                      if (mode != VideoDisplayMode.values.last)
+                        const SizedBox(height: 8),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _setMobilePlaybackRate(double rate) async {
     final normalized =
         ((rate.clamp(0.1, 10.0).toDouble() * 10).round() / 10).toDouble();
@@ -1861,7 +1957,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     return formatted.isEmpty ? prefix : '$prefix $formatted';
   }
 
-  Future<SeriesSkipProfile?> _showSeriesSkipConfigEditor() async {
+  Future<SeriesSkipProfile?> _showSeriesSkipConfigEditor({
+    required bool opening,
+  }) async {
     await _loadEpisodePickerItem();
 
     final serverId = _seriesSkipServerId;
@@ -1892,12 +1990,20 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
           );
     if (!mounted) return null;
 
-    final nextProfile = await showSeriesSkipConfigDialog(
+    final result = await showSeriesSkipConfigDialog(
       context,
       seriesTitle: _seriesSkipDisplayTitle,
-      initialProfile: initialProfile,
+      segment:
+          opening ? SeriesSkipSegment.opening : SeriesSkipSegment.ending,
+      initialSeconds:
+          opening ? initialProfile.openingSeconds : initialProfile.endingSeconds,
     );
-    if (nextProfile == null) return null;
+    if (result == null) return null;
+
+    final nextProfile = SeriesSkipProfile(
+      openingSeconds: opening ? result.seconds : initialProfile.openingSeconds,
+      endingSeconds: opening ? initialProfile.endingSeconds : result.seconds,
+    );
 
     await SeriesSkipPreferences.save(
       serverId: serverId,
@@ -1926,7 +2032,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     var profile = _seriesSkipProfile;
     var seconds = opening ? profile.openingSeconds : profile.endingSeconds;
     if (seconds == null || seconds <= 0) {
-      final updated = await _showSeriesSkipConfigEditor();
+      final updated = await _showSeriesSkipConfigEditor(opening: opening);
       if (updated == null) return;
       profile = updated;
       seconds = opening ? profile.openingSeconds : profile.endingSeconds;
@@ -1962,7 +2068,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
               onLongPress: controlsEnabled
                   ? () {
                       _showControls(scheduleHide: false);
-                      unawaited(_showSeriesSkipConfigEditor());
+                      unawaited(
+                        _showSeriesSkipConfigEditor(opening: true),
+                      );
                     }
                   : null,
             ),
@@ -1981,7 +2089,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
               onLongPress: controlsEnabled
                   ? () {
                       _showControls(scheduleHide: false);
-                      unawaited(_showSeriesSkipConfigEditor());
+                      unawaited(
+                        _showSeriesSkipConfigEditor(opening: false),
+                      );
                     }
                   : null,
             ),
@@ -6251,6 +6361,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                   Video(
                                     key: ValueKey(_playerService.controller),
                                     controller: _playerService.controller,
+                                    fit: _mobileVideoDisplayMode.boxFit,
                                     controls: NoVideoControls,
                                     subtitleViewConfiguration:
                                         _subtitleViewConfiguration,
@@ -7663,6 +7774,18 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                       _showControls(scheduleHide: false);
                       unawaited(_toggleEpisodePicker());
                     }
+                  : null,
+            ),
+            MobilePlayerActionButton(
+              icon: Icons.fit_screen_outlined,
+              label: '画面',
+              compact: true,
+              onTap: controlsEnabled
+                  ? () => unawaited(
+                        _showMobileVideoDisplaySheet(
+                          controlsEnabled: controlsEnabled,
+                        ),
+                      )
                   : null,
             ),
           ],

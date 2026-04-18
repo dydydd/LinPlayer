@@ -263,13 +263,7 @@ class _ServerTextImportSheetState extends State<ServerTextImportSheet> {
     );
 
     if (success > 0 && mounted) {
-      final appState = widget.appState;
-      final shouldEnter = firstAddedServerId != null;
-      if (shouldEnter) {
-        await appState.enterServer(firstAddedServerId!);
-      }
-      if (!mounted) return;
-      Navigator.of(context).pop(shouldEnter);
+      Navigator.of(context).pop(firstAddedServerId);
     }
   }
 

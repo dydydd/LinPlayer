@@ -62,12 +62,31 @@ class _MobileServerPageState extends State<MobileServerPage> {
   }
 
   Future<void> _openAddServerPage() async {
-    final entered = await Navigator.of(context).push<bool>(
+    final addedServerId = await Navigator.of(context).push<String?>(
       MaterialPageRoute(
         builder: (_) => MobileAddServerPage(appState: widget.appState),
       ),
     );
-    if (!mounted || entered != true) return;
+    if (!mounted || addedServerId == null) return;
+    final ok = await widget.appState.enterServer(addedServerId);
+    if (!mounted) return;
+    if (!ok) {
+      String message = (widget.appState.error ?? '').trim();
+      if (message.isEmpty) {
+        for (final server in widget.appState.servers) {
+          if (server.id == addedServerId) {
+            message = (server.lastErrorMessage ?? '').trim();
+            break;
+          }
+        }
+      }
+      if (message.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message)),
+        );
+      }
+      return;
+    }
     await _openActiveWorkspace();
   }
 
@@ -1106,7 +1125,7 @@ class _MobileAddServerSheetState extends State<_MobileAddServerSheet> {
     } else if (_serverType == MediaServerType.webdav) {
       final uri = _buildAutoMetaUri();
       if (uri == null) return;
-      await widget.appState.addWebDavServer(
+      addedId = await widget.appState.addWebDavServer(
         baseUrl: uri.toString(),
         username: _userCtrl.text.trim(),
         password: _pwdCtrl.text,
@@ -1115,8 +1134,8 @@ class _MobileAddServerSheetState extends State<_MobileAddServerSheet> {
         remark:
             _remarkCtrl.text.trim().isEmpty ? null : _remarkCtrl.text.trim(),
         iconUrl: _iconUrl,
+        activate: false,
       );
-      addedId = widget.appState.activeServerId;
     } else {
       addedId = await widget.appState.addServer(
         hostOrUrl: _hostCtrl.text.trim(),
@@ -1130,6 +1149,7 @@ class _MobileAddServerSheetState extends State<_MobileAddServerSheet> {
         remark:
             _remarkCtrl.text.trim().isEmpty ? null : _remarkCtrl.text.trim(),
         iconUrl: _iconUrl,
+        activate: false,
       );
     }
 
@@ -1141,9 +1161,7 @@ class _MobileAddServerSheetState extends State<_MobileAddServerSheet> {
       return;
     }
 
-    final entered = _serverType != MediaServerType.plex &&
-        (addedId ?? widget.appState.activeServerId) != null;
-    Navigator.of(context).pop(entered);
+    Navigator.of(context).pop(addedId);
   }
 
   @override

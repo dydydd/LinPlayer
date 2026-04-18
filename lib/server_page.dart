@@ -72,7 +72,7 @@ class _ServerPageState extends State<ServerPage> {
   }
 
   Future<void> _showAddServerSheet() async {
-    await showModalBottomSheet<void>(
+    final addedServerId = await showModalBottomSheet<String?>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
@@ -82,14 +82,50 @@ class _ServerPageState extends State<ServerPage> {
           Navigator.of(sheetContext).pop();
           await Future<void>.delayed(const Duration(milliseconds: 120));
           if (!mounted) return;
-          await _showBulkImportSheet();
+          final importedServerId = await _showBulkImportSheet();
+          if (!mounted || importedServerId == null) return;
+          final ok = await widget.appState.enterServer(importedServerId);
+          if (!mounted || ok) return;
+
+          String message = (widget.appState.error ?? '').trim();
+          if (message.isEmpty) {
+            for (final server in widget.appState.servers) {
+              if (server.id == importedServerId) {
+                message = (server.lastErrorMessage ?? '').trim();
+                break;
+              }
+            }
+          }
+          if (message.isNotEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(message)),
+            );
+          }
         },
       ),
     );
+    if (!mounted || addedServerId == null) return;
+    final ok = await widget.appState.enterServer(addedServerId);
+    if (!mounted || ok) return;
+
+    String message = (widget.appState.error ?? '').trim();
+    if (message.isEmpty) {
+      for (final server in widget.appState.servers) {
+        if (server.id == addedServerId) {
+          message = (server.lastErrorMessage ?? '').trim();
+          break;
+        }
+      }
+    }
+    if (message.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    }
   }
 
-  Future<bool?> _showBulkImportSheet() async {
-    return showModalBottomSheet<bool>(
+  Future<String?> _showBulkImportSheet() async {
+    return showModalBottomSheet<String?>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
@@ -1840,6 +1876,7 @@ class _AddServerSheetState extends State<_AddServerSheet> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     FocusScope.of(context).unfocus();
+    String? addedId;
 
     if (_serverType == MediaServerType.plex) {
       if (_plexMode == _PlexAddMode.account) {
@@ -1880,7 +1917,7 @@ class _AddServerSheetState extends State<_AddServerSheet> {
     } else if (_serverType == MediaServerType.webdav) {
       final uri = _buildAutoMetaUri();
       if (uri == null) return;
-      await widget.appState.addWebDavServer(
+      addedId = await widget.appState.addWebDavServer(
         baseUrl: uri.toString(),
         username: _userCtrl.text.trim(),
         password: _pwdCtrl.text,
@@ -1889,11 +1926,12 @@ class _AddServerSheetState extends State<_AddServerSheet> {
         remark:
             _remarkCtrl.text.trim().isEmpty ? null : _remarkCtrl.text.trim(),
         iconUrl: _iconUrl,
+        activate: false,
       );
     } else {
       // Emby/Jellyfin
       final hostInput = _hostCtrl.text.trim();
-      await widget.appState.addServer(
+      addedId = await widget.appState.addServer(
         hostOrUrl: hostInput,
         scheme: _scheme,
         port: _portCtrl.text.trim().isEmpty ? null : _portCtrl.text.trim(),
@@ -1905,6 +1943,7 @@ class _AddServerSheetState extends State<_AddServerSheet> {
         remark:
             _remarkCtrl.text.trim().isEmpty ? null : _remarkCtrl.text.trim(),
         iconUrl: _iconUrl,
+        activate: false,
       );
     }
     if (!mounted) return;
@@ -1914,7 +1953,7 @@ class _AddServerSheetState extends State<_AddServerSheet> {
       );
       return;
     }
-    Navigator.of(context).pop();
+    Navigator.of(context).pop(addedId);
   }
 
   @override

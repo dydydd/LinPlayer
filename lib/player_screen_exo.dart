@@ -18,6 +18,7 @@ import 'package:video_player_platform_interface/video_player_platform_interface.
 
 import 'services/app_diagnostics_log.dart';
 import 'services/app_route_observer.dart';
+import 'services/playback/video_display_mode.dart';
 import 'services/subtitle_support.dart';
 import 'services/stream_proxy/local_http_stream_proxy.dart';
 import 'services/stream_resolver/stream_resolver.dart';
@@ -119,6 +120,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   bool _controlsVisible = true;
   bool _isScrubbing = false;
   _MobilePlayerPanel? _mobilePanel;
+  VideoDisplayMode _mobileVideoDisplayMode = VideoDisplayMode.fill;
   Timer? _mobileSpeedAdjustTimer;
 
   static const Duration _gestureOverlayAutoHideDelay =
@@ -195,6 +197,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
         );
       }
     }
+    unawaited(_restoreMobileVideoDisplayMode());
   }
 
   @override
@@ -1912,6 +1915,127 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     _showControls(scheduleHide: scheduleHide);
   }
 
+  Future<void> _restoreMobileVideoDisplayMode() async {
+    final mode = await VideoDisplayModePreferences.load();
+    if (!mounted || mode == _mobileVideoDisplayMode) return;
+    setState(() => _mobileVideoDisplayMode = mode);
+  }
+
+  void _setMobileVideoDisplayMode(VideoDisplayMode mode) {
+    if (_mobileVideoDisplayMode == mode) return;
+    setState(() => _mobileVideoDisplayMode = mode);
+    unawaited(VideoDisplayModePreferences.save(mode));
+  }
+
+  Future<void> _showMobileVideoDisplaySheet({
+    required bool controlsEnabled,
+  }) async {
+    _showControls(scheduleHide: false);
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54,
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(24),
+                color: Colors.black.withValues(alpha: 0.88),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.14),
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            '画面模式',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: '关闭',
+                          onPressed: () => Navigator.of(sheetContext).pop(),
+                          icon: const Icon(Icons.close_rounded),
+                          color: Colors.white,
+                          splashRadius: 20,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    for (final mode in VideoDisplayMode.values) ...[
+                      MobilePlayerOptionTile(
+                        title: mode.label,
+                        subtitle: mode.description,
+                        selected: mode == _mobileVideoDisplayMode,
+                        trailing: mode == _mobileVideoDisplayMode
+                            ? const Icon(
+                                Icons.check_circle_rounded,
+                                color: Colors.white,
+                              )
+                            : null,
+                        onTap: !controlsEnabled ||
+                                mode == _mobileVideoDisplayMode
+                            ? null
+                            : () {
+                                _setMobileVideoDisplayMode(mode);
+                                Navigator.of(sheetContext).pop();
+                              },
+                      ),
+                      if (mode != VideoDisplayMode.values.last)
+                        const SizedBox(height: 8),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Size _mobileVideoSurfaceSize(VideoPlayerController controller) {
+    final size = controller.value.size;
+    if (size.width > 0 && size.height > 0) {
+      return size;
+    }
+    final aspect = controller.value.aspectRatio;
+    if (aspect.isFinite && aspect > 0) {
+      return Size(aspect * 1000, 1000);
+    }
+    return const Size(16, 9);
+  }
+
+  Widget _buildMobileVideoSurface(VideoPlayerController controller) {
+    final size = _mobileVideoSurfaceSize(controller);
+    return ClipRect(
+      child: SizedBox.expand(
+        child: FittedBox(
+          fit: _mobileVideoDisplayMode.boxFit,
+          alignment: Alignment.center,
+          child: SizedBox(
+            width: size.width,
+            height: size.height,
+            child: VideoPlayer(controller),
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _setMobilePlaybackRate(double rate) async {
     final controller = _controller;
     if (controller == null) return;
@@ -2075,6 +2199,18 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
               label: '列表',
               compact: true,
               onTap: () => _openMobilePanel(_MobilePlayerPanel.playlist),
+            ),
+            MobilePlayerActionButton(
+              icon: Icons.fit_screen_outlined,
+              label: '画面',
+              compact: true,
+              onTap: controlsEnabled
+                  ? () => unawaited(
+                        _showMobileVideoDisplaySheet(
+                          controlsEnabled: controlsEnabled,
+                        ),
+                      )
+                  : null,
             ),
           ],
         ),
@@ -3354,15 +3490,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                           ? Stack(
                               fit: StackFit.expand,
                               children: [
-                                Center(
-                                  child: AspectRatio(
-                                    aspectRatio:
-                                        controller.value.aspectRatio == 0
-                                            ? 16 / 9
-                                            : controller.value.aspectRatio,
-                                    child: VideoPlayer(controller),
-                                  ),
-                                ),
+                                _buildMobileVideoSurface(controller),
                                 Positioned.fill(
                                   child: DanmakuStage(
                                     key: _danmakuKey,
@@ -3694,15 +3822,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                             ? Stack(
                                 fit: StackFit.expand,
                                 children: [
-                                  Center(
-                                    child: AspectRatio(
-                                      aspectRatio:
-                                          controller.value.aspectRatio == 0
-                                              ? 16 / 9
-                                              : controller.value.aspectRatio,
-                                      child: VideoPlayer(controller),
-                                    ),
-                                  ),
+                                  _buildMobileVideoSurface(controller),
                                   Positioned.fill(
                                     child: DanmakuStage(
                                       key: _danmakuKey,

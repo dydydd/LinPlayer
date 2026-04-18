@@ -139,14 +139,14 @@ class _MobileAddServerPageState extends State<MobileAddServerPage> {
   }
 
   Future<void> _openBulkImport() async {
-    final imported = await showModalBottomSheet<bool>(
+    final importedServerId = await showModalBottomSheet<String?>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
       builder: (ctx) => ServerTextImportSheet(appState: widget.appState),
     );
-    if (!mounted || imported != true) return;
-    Navigator.of(context).pop(true);
+    if (!mounted || importedServerId == null) return;
+    Navigator.of(context).pop(importedServerId);
   }
 
   _ParsedServerAddress? _parseAddress() {
@@ -349,7 +349,7 @@ class _MobileAddServerPageState extends State<MobileAddServerPage> {
     try {
       final displayName = _displayNameOrNull();
       final remark = _remarkOrNull();
-      var shouldOpenWorkspace = false;
+      String? addedId;
 
       if (_serverType == MediaServerType.plex) {
         if (_plexMode == _PlexAddMode.account) {
@@ -391,19 +391,19 @@ class _MobileAddServerPageState extends State<MobileAddServerPage> {
       } else if (_serverType == MediaServerType.webdav) {
         final parsed = _parseAddress();
         if (parsed == null) return;
-        await widget.appState.addWebDavServer(
+        addedId = await widget.appState.addWebDavServer(
           baseUrl: parsed.normalizedBaseUrl,
           username: _userCtrl.text.trim(),
           password: _pwdCtrl.text,
           displayName: displayName,
           remark: remark,
           iconUrl: _iconUrl,
+          activate: false,
         );
-        shouldOpenWorkspace = widget.appState.activeServerId != null;
       } else {
         final parsed = _parseAddress();
         if (parsed == null) return;
-        final addedId = await widget.appState.addServer(
+        addedId = await widget.appState.addServer(
           hostOrUrl: parsed.normalizedBaseUrl,
           scheme: parsed.scheme,
           port: null,
@@ -413,10 +413,8 @@ class _MobileAddServerPageState extends State<MobileAddServerPage> {
           displayName: displayName,
           remark: remark,
           iconUrl: _iconUrl,
+          activate: false,
         );
-        shouldOpenWorkspace =
-            (addedId ?? widget.appState.activeServerId)?.trim().isNotEmpty ==
-                true;
       }
 
       if (!mounted) return;
@@ -428,9 +426,7 @@ class _MobileAddServerPageState extends State<MobileAddServerPage> {
         return;
       }
 
-      Navigator.of(context).pop(
-        _serverType != MediaServerType.plex && shouldOpenWorkspace,
-      );
+      Navigator.of(context).pop(addedId);
     } finally {
       if (mounted) {
         setState(() => _submitting = false);

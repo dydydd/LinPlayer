@@ -1,133 +1,231 @@
 import 'package:flutter/material.dart';
 
-import '../services/series_skip_preferences.dart';
+enum SeriesSkipSegment { opening, ending }
 
-Future<SeriesSkipProfile?> showSeriesSkipConfigDialog(
+@immutable
+class SeriesSkipConfigResult {
+  final int? seconds;
+
+  const SeriesSkipConfigResult({required this.seconds});
+}
+
+Future<SeriesSkipConfigResult?> showSeriesSkipConfigDialog(
   BuildContext context, {
   required String seriesTitle,
-  required SeriesSkipProfile initialProfile,
+  required SeriesSkipSegment segment,
+  int? initialSeconds,
 }) async {
-  final openingController = TextEditingController(
-    text: formatSeriesSkipDuration(initialProfile.openingSeconds),
+  final controller = TextEditingController(
+    text: formatSeriesSkipDuration(initialSeconds),
   );
-  final endingController = TextEditingController(
-    text: formatSeriesSkipDuration(initialProfile.endingSeconds),
-  );
+  final segmentLabel = segment == SeriesSkipSegment.opening ? 'OP' : 'ED';
+  final theme = Theme.of(context);
+  final scheme = theme.colorScheme;
 
   try {
-    return await showDialog<SeriesSkipProfile>(
+    return await showGeneralDialog<SeriesSkipConfigResult>(
       context: context,
-      builder: (dialogContext) {
-        String? openingError;
-        String? endingError;
-
-        SeriesSkipProfile? validate() {
-          final openingSeconds = parseSeriesSkipDurationInput(
-            openingController.text,
-          );
-          final endingSeconds = parseSeriesSkipDurationInput(
-            endingController.text,
-          );
-          openingError = null;
-          endingError = null;
-
-          if (openingController.text.trim().isNotEmpty && openingSeconds == null) {
-            openingError = '支持 90 或 1:30';
-          }
-          if (endingController.text.trim().isNotEmpty && endingSeconds == null) {
-            endingError = '支持 90 或 1:30';
-          }
-          if (openingSeconds != null && openingSeconds > 7200) {
-            openingError = '请控制在 2 小时内';
-          }
-          if (endingSeconds != null && endingSeconds > 7200) {
-            endingError = '请控制在 2 小时内';
-          }
-
-          if (openingError != null || endingError != null) {
-            return null;
-          }
-
-          return SeriesSkipProfile(
-            openingSeconds: openingSeconds,
-            endingSeconds: endingSeconds,
-          );
-        }
-
+      barrierDismissible: true,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      barrierColor: Colors.black.withValues(alpha: 0.26),
+      transitionDuration: const Duration(milliseconds: 180),
+      pageBuilder: (dialogContext, _, __) {
         return StatefulBuilder(
           builder: (context, setState) {
+            String? errorText;
+
             void submit() {
-              final next = validate();
-              if (next == null) {
+              final seconds = parseSeriesSkipDurationInput(controller.text);
+              errorText = null;
+
+              if (controller.text.trim().isNotEmpty && seconds == null) {
+                errorText = '支持 90 或 1:30';
+              } else if (seconds != null && seconds > 7200) {
+                errorText = '请控制在 2 小时内';
+              }
+
+              if (errorText != null) {
                 setState(() {});
                 return;
               }
-              Navigator.of(dialogContext).pop(next);
+
+              Navigator.of(dialogContext).pop(
+                SeriesSkipConfigResult(seconds: seconds),
+              );
             }
 
-            return AlertDialog(
-              title: Text('设置 $seriesTitle 的 OP / ED'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TextField(
-                    controller: openingController,
-                    autofocus: true,
-                    keyboardType: TextInputType.text,
-                    textInputAction: TextInputAction.next,
-                    decoration: InputDecoration(
-                      labelText: 'OP 时长',
-                      hintText: '如 90 或 1:30',
-                      helperText: '留空表示不设置',
-                      errorText: openingError,
+            return SafeArea(
+              child: AnimatedPadding(
+                duration: const Duration(milliseconds: 120),
+                curve: Curves.easeOut,
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  20,
+                  20,
+                  MediaQuery.of(dialogContext).viewInsets.bottom + 92,
+                ),
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Material(
+                    color: scheme.surface,
+                    elevation: 18,
+                    shadowColor: Colors.black.withValues(alpha: 0.22),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(24),
+                      side: BorderSide(
+                        color: scheme.outlineVariant.withValues(alpha: 0.6),
+                      ),
                     ),
-                    onSubmitted: (_) => submit(),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: endingController,
-                    keyboardType: TextInputType.text,
-                    textInputAction: TextInputAction.done,
-                    decoration: InputDecoration(
-                      labelText: 'ED 时长',
-                      hintText: '如 90 或 1:30',
-                      helperText: '留空表示不设置',
-                      errorText: endingError,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 340),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: scheme.primary.withValues(
+                                      alpha: 0.12,
+                                    ),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    segmentLabel,
+                                    style:
+                                        theme.textTheme.labelLarge?.copyWith(
+                                      color: scheme.primary,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    '设置 $segmentLabel 跳过时长',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style:
+                                        theme.textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  onPressed: () =>
+                                      Navigator.of(dialogContext).pop(),
+                                  icon: const Icon(Icons.close_rounded),
+                                  splashRadius: 18,
+                                  tooltip: '关闭',
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              seriesTitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            TextField(
+                              controller: controller,
+                              autofocus: true,
+                              keyboardType: TextInputType.text,
+                              textInputAction: TextInputAction.done,
+                              onSubmitted: (_) => submit(),
+                              decoration: InputDecoration(
+                                isDense: true,
+                                filled: true,
+                                fillColor: scheme.surfaceContainerHighest
+                                    .withValues(alpha: 0.68),
+                                labelText: '$segmentLabel 时长',
+                                hintText: '90 或 1:30',
+                                errorText: errorText,
+                                prefixIcon: const Icon(
+                                  Icons.timer_outlined,
+                                  size: 18,
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(18),
+                                  borderSide: BorderSide.none,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              '留空表示不设置，支持 90、1:30、1:02:03',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            Row(
+                              children: [
+                                TextButton(
+                                  onPressed: () => Navigator.of(
+                                    dialogContext,
+                                  ).pop(
+                                    const SeriesSkipConfigResult(seconds: null),
+                                  ),
+                                  child: const Text('清空'),
+                                ),
+                                const Spacer(),
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.of(dialogContext).pop(),
+                                  child: const Text('取消'),
+                                ),
+                                const SizedBox(width: 8),
+                                FilledButton(
+                                  onPressed: submit,
+                                  style: FilledButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 18,
+                                      vertical: 10,
+                                    ),
+                                  ),
+                                  child: const Text('保存'),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                    onSubmitted: (_) => submit(),
                   ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    '点击 OP/ED 按钮会按当前时刻向前跳过对应时长，长按按钮可重新修改。',
-                    style: TextStyle(fontSize: 12, color: Colors.black54),
-                  ),
-                ],
+                ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('取消'),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(
-                    const SeriesSkipProfile(),
-                  ),
-                  child: const Text('清空'),
-                ),
-                FilledButton(
-                  onPressed: submit,
-                  child: const Text('保存'),
-                ),
-              ],
             );
           },
         );
       },
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return FadeTransition(
+          opacity: curved,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.96, end: 1).animate(curved),
+            child: child,
+          ),
+        );
+      },
     );
   } finally {
-    openingController.dispose();
-    endingController.dispose();
+    controller.dispose();
   }
 }
 

@@ -180,7 +180,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _openServerTextImport(BuildContext context) async {
-    await showModalBottomSheet<void>(
+    await showModalBottomSheet<String?>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
