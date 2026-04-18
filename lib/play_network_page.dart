@@ -132,6 +132,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   VideoParams? _lastVideoParams;
   final _OrientationMode _orientationMode = _OrientationMode.auto;
   String? _lastOrientationKey;
+  bool _preserveOrientationOnDispose = false;
   DateTime? _suppressLifecyclePauseUntil;
   bool _remoteEnabled = false;
   final FocusNode _tvSurfaceFocusNode =
@@ -2007,6 +2008,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     final start =
         ticks > 0 ? Duration(microseconds: (ticks / 10).round()) : null;
     final episodeSeriesId = (episode.seriesId ?? '').trim();
+    _preserveOrientationForReplacementRoute();
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => PlayNetworkPage(
@@ -3942,6 +3944,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     return aspect;
   }
 
+  void _preserveOrientationForReplacementRoute() {
+    _preserveOrientationOnDispose = true;
+  }
+
   Future<void> _applyOrientationForMode({
     VideoParams? videoParams,
     Map<String, dynamic>? mediaSource,
@@ -4086,7 +4092,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     // ignore: unawaited_futures
     _reportPlaybackStoppedBestEffort();
     // ignore: unawaited_futures
-    _exitImmersiveMode(resetOrientations: true);
+    _exitImmersiveMode(
+      resetOrientations: !_preserveOrientationOnDispose,
+    );
     _resumeHintTimer?.cancel();
     _resumeHintTimer = null;
     _startOverHintTimer?.cancel();
@@ -5651,6 +5659,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _maybeReportPlaybackProgress(pos, force: true);
     await widget.appState.setPlayerCore(PlayerCore.exo);
     if (!mounted) return;
+    _preserveOrientationForReplacementRoute();
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => ExoPlayNetworkPage(

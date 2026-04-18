@@ -95,6 +95,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   final _OrientationMode _orientationMode = _OrientationMode.auto;
   String? _lastOrientationKey;
   DateTime? _lastAutoOrientationApplyAt;
+  bool _preserveOrientationOnDispose = false;
   DateTime? _suppressLifecyclePauseUntil;
   Duration? _resumeHintPosition;
   bool _showResumeHint = false;
@@ -297,6 +298,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     return playbackSource;
   }
 
+  void _preserveOrientationForReplacementRoute() {
+    _preserveOrientationOnDispose = true;
+  }
+
   bool _usesLoopbackPlaybackSource(PlayableSource playbackSource) {
     final host = (Uri.tryParse(playbackSource.url)?.host ?? '').trim();
     return host == '127.0.0.1' || host == 'localhost' || host == '::1';
@@ -496,7 +501,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     // ignore: unawaited_futures
     _reportPlaybackStoppedBestEffort();
     // ignore: unawaited_futures
-    _exitImmersiveMode(resetOrientations: true);
+    _exitImmersiveMode(
+      resetOrientations: !_preserveOrientationOnDispose,
+    );
     // ignore: unawaited_futures
     _controller?.dispose();
     _controller = null;
@@ -843,6 +850,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     final start =
         ticks > 0 ? Duration(microseconds: (ticks / 10).round()) : null;
     final episodeSeriesId = (episode.seriesId ?? '').trim();
+    _preserveOrientationForReplacementRoute();
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => ExoPlayNetworkPage(
@@ -4620,6 +4628,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _maybeReportPlaybackProgress(pos, force: true);
     await widget.appState.setPlayerCore(PlayerCore.mpv);
     if (!mounted) return;
+    _preserveOrientationForReplacementRoute();
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => PlayNetworkPage(
