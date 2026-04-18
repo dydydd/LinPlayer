@@ -12,8 +12,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../home_page.dart';
 import '../../player_screen.dart';
 import '../../player_screen_exo.dart';
-import '../../server_text_import_sheet.dart';
 import '../../webdav_home_page.dart';
+import 'mobile_add_server_page.dart';
 
 class MobileServerPage extends StatefulWidget {
   const MobileServerPage({
@@ -61,31 +61,11 @@ class _MobileServerPageState extends State<MobileServerPage> {
     );
   }
 
-  Future<void> _showAddServerSheet() async {
-    final entered = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (ctx) => _MobileAddServerSheet(
-        appState: widget.appState,
-        onOpenBulkImport: (sheetContext) async {
-          Navigator.of(sheetContext).pop();
-          await Future<void>.delayed(const Duration(milliseconds: 120));
-          if (!mounted) return;
-          await _showBulkImportSheet();
-        },
+  Future<void> _openAddServerPage() async {
+    final entered = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => MobileAddServerPage(appState: widget.appState),
       ),
-    );
-    if (!mounted || entered != true) return;
-    await _openActiveWorkspace();
-  }
-
-  Future<void> _showBulkImportSheet() async {
-    final entered = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (ctx) => ServerTextImportSheet(appState: widget.appState),
     );
     if (!mounted || entered != true) return;
     await _openActiveWorkspace();
@@ -131,7 +111,8 @@ class _MobileServerPageState extends State<MobileServerPage> {
       return;
     }
 
-    final message = (server.lastErrorMessage ?? widget.appState.error ?? '').trim();
+    final message =
+        (server.lastErrorMessage ?? widget.appState.error ?? '').trim();
     if (message.isNotEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message)),
@@ -139,7 +120,7 @@ class _MobileServerPageState extends State<MobileServerPage> {
     }
   }
 
-  String _serverSubtitle(ServerProfile server) {
+  String? _serverSubtitle(ServerProfile server) {
     final serverRemark = (server.remark ?? '').trim();
     if (serverRemark.isNotEmpty) return serverRemark;
 
@@ -147,10 +128,7 @@ class _MobileServerPageState extends State<MobileServerPage> {
         (widget.appState.serverDomainRemark(server.id, server.baseUrl) ?? '')
             .trim();
     if (routeRemark.isNotEmpty) return routeRemark;
-
-    final uri = Uri.tryParse(server.baseUrl);
-    if (uri != null && uri.host.trim().isNotEmpty) return uri.host.trim();
-    return server.serverType.label;
+    return null;
   }
 
   @override
@@ -160,10 +138,11 @@ class _MobileServerPageState extends State<MobileServerPage> {
       builder: (context, _) {
         final servers = widget.appState.servers;
         final loading = widget.appState.isLoading;
-        final isList = widget.appState.serverListLayout == ServerListLayout.list;
+        final isList =
+            widget.appState.serverListLayout == ServerListLayout.list;
         final colorScheme = Theme.of(context).colorScheme;
         final size = MediaQuery.sizeOf(context);
-        final gridAspectRatio = size.width < 390 ? 1.18 : 1.36;
+        final gridAspectRatio = size.width < 390 ? 1.34 : 1.5;
 
         return Scaffold(
           body: DecoratedBox(
@@ -210,7 +189,8 @@ class _MobileServerPageState extends State<MobileServerPage> {
                                 onSelectionChanged: loading
                                     ? null
                                     : (selected) async {
-                                        await widget.appState.setServerListLayout(
+                                        await widget.appState
+                                            .setServerListLayout(
                                           selected.first,
                                         );
                                       },
@@ -219,7 +199,7 @@ class _MobileServerPageState extends State<MobileServerPage> {
                           ),
                           const SizedBox(width: 12),
                           FilledButton.tonalIcon(
-                            onPressed: loading ? null : _showAddServerSheet,
+                            onPressed: loading ? null : _openAddServerPage,
                             icon: const Icon(Icons.add),
                             label: const Text('添加'),
                           ),
@@ -274,8 +254,7 @@ class _MobileServerPageState extends State<MobileServerPage> {
                                     .textTheme
                                     .bodyMedium
                                     ?.copyWith(
-                                      color:
-                                          colorScheme.onSurfaceVariant,
+                                      color: colorScheme.onSurfaceVariant,
                                     ),
                               ),
                             ],
@@ -300,7 +279,8 @@ class _MobileServerPageState extends State<MobileServerPage> {
                               active:
                                   server.id == widget.appState.activeServerId,
                               layout: _MobileServerItemLayout.list,
-                              onTap: loading ? null : () => _enterServer(server),
+                              onTap:
+                                  loading ? null : () => _enterServer(server),
                               onLongPress: () => _showEditServerSheet(server),
                             ),
                           );
@@ -311,8 +291,7 @@ class _MobileServerPageState extends State<MobileServerPage> {
                     SliverPadding(
                       padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
                       sliver: SliverGrid(
-                        gridDelegate:
-                            SliverGridDelegateWithFixedCrossAxisCount(
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 2,
                           mainAxisSpacing: 12,
                           crossAxisSpacing: 12,
@@ -327,7 +306,8 @@ class _MobileServerPageState extends State<MobileServerPage> {
                               active:
                                   server.id == widget.appState.activeServerId,
                               layout: _MobileServerItemLayout.grid,
-                              onTap: loading ? null : () => _enterServer(server),
+                              onTap:
+                                  loading ? null : () => _enterServer(server),
                               onLongPress: () => _showEditServerSheet(server),
                             );
                           },
@@ -361,7 +341,7 @@ class _MobileServerItem extends StatelessWidget {
   });
 
   final ServerProfile server;
-  final String subtitle;
+  final String? subtitle;
   final bool active;
   final _MobileServerItemLayout layout;
   final VoidCallback? onTap;
@@ -372,6 +352,8 @@ class _MobileServerItem extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final isGrid = layout == _MobileServerItemLayout.grid;
     final hasError = server.lastErrorCode != null;
+    final subtitleText = subtitle?.trim() ?? '';
+    final hasSubtitle = subtitleText.isNotEmpty;
     final borderColor = active
         ? colorScheme.primary.withValues(alpha: 0.55)
         : hasError
@@ -408,7 +390,7 @@ class _MobileServerItem extends StatelessWidget {
             ],
           ),
           child: Padding(
-            padding: EdgeInsets.all(isGrid ? 14 : 16),
+            padding: EdgeInsets.all(isGrid ? 12 : 16),
             child: isGrid
                 ? Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -419,9 +401,9 @@ class _MobileServerItem extends StatelessWidget {
                           ServerIconAvatar(
                             iconUrl: server.iconUrl,
                             name: server.name,
-                            radius: 20,
+                            radius: 18,
                           ),
-                          const SizedBox(width: 12),
+                          const SizedBox(width: 10),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -437,26 +419,27 @@ class _MobileServerItem extends StatelessWidget {
                                         fontWeight: FontWeight.w800,
                                       ),
                                 ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  subtitle,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodySmall
-                                      ?.copyWith(
-                                        height: 1.25,
-                                        color:
-                                            colorScheme.onSurfaceVariant,
-                                      ),
-                                ),
+                                if (hasSubtitle) ...[
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    subtitleText,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                          height: 1.25,
+                                          color: colorScheme.onSurfaceVariant,
+                                        ),
+                                  ),
+                                ],
                               ],
                             ),
                           ),
                         ],
                       ),
-                      const Spacer(),
+                      const SizedBox(height: 10),
                       Row(
                         children: [
                           _ServerMetaChip(
@@ -494,19 +477,21 @@ class _MobileServerItem extends StatelessWidget {
                                   .titleMedium
                                   ?.copyWith(fontWeight: FontWeight.w800),
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              subtitle,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(
-                                    height: 1.25,
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
-                            ),
+                            if (hasSubtitle) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                subtitleText,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                      height: 1.25,
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -631,8 +616,8 @@ class _MobileLocalPlaybackCard extends StatelessWidget {
                   width: 52,
                   height: 52,
                   decoration: BoxDecoration(
-                    color: colorScheme.onPrimaryContainer
-                        .withValues(alpha: 0.08),
+                    color:
+                        colorScheme.onPrimaryContainer.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Icon(
@@ -647,13 +632,11 @@ class _MobileLocalPlaybackCard extends StatelessWidget {
                     children: [
                       Text(
                         '本地播放',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(
-                              fontWeight: FontWeight.w800,
-                              color: colorScheme.onPrimaryContainer,
-                            ),
+                        style:
+                            Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  color: colorScheme.onPrimaryContainer,
+                                ),
                       ),
                       const SizedBox(height: 4),
                       Text(
@@ -699,11 +682,11 @@ extension _PlexAddModeX on _PlexAddMode {
 class _MobileAddServerSheet extends StatefulWidget {
   const _MobileAddServerSheet({
     required this.appState,
-    this.onOpenBulkImport,
+    required this.onOpenBulkImport,
   });
 
   final AppState appState;
-  final Future<void> Function(BuildContext sheetContext)? onOpenBulkImport;
+  final Future<void> Function(BuildContext sheetContext) onOpenBulkImport;
 
   @override
   State<_MobileAddServerSheet> createState() => _MobileAddServerSheetState();
@@ -763,7 +746,8 @@ class _MobileAddServerSheetState extends State<_MobileAddServerSheet> {
     super.dispose();
   }
 
-  String _defaultPortForScheme(String scheme) => scheme == 'http' ? '80' : '443';
+  String _defaultPortForScheme(String scheme) =>
+      scheme == 'http' ? '80' : '443';
 
   void _maybeParseHostInput() {
     if (_handlingHostParse) return;
@@ -1145,8 +1129,8 @@ class _MobileAddServerSheetState extends State<_MobileAddServerSheet> {
       return;
     }
 
-    final entered =
-        _serverType != MediaServerType.plex && (addedId ?? widget.appState.activeServerId) != null;
+    final entered = _serverType != MediaServerType.plex &&
+        (addedId ?? widget.appState.activeServerId) != null;
     Navigator.of(context).pop(entered);
   }
 
@@ -1188,13 +1172,12 @@ class _MobileAddServerSheetState extends State<_MobileAddServerSheet> {
                             style: Theme.of(context).textTheme.titleLarge,
                           ),
                         ),
-                        if (widget.onOpenBulkImport != null &&
-                            _serverType.isEmbyLike)
+                        if (_serverType.isEmbyLike)
                           TextButton.icon(
                             onPressed: loading
                                 ? null
                                 : () => unawaited(
-                                      widget.onOpenBulkImport!(context),
+                                      widget.onOpenBulkImport(context),
                                     ),
                             icon: const Icon(Icons.playlist_add_outlined),
                             label: const Text('批量导入'),
@@ -1212,8 +1195,9 @@ class _MobileAddServerSheetState extends State<_MobileAddServerSheet> {
                           )
                           .toList(growable: false),
                       selected: <MediaServerType>{_serverType},
-                      onSelectionChanged:
-                          loading ? null : (selected) => _setServerType(selected.first),
+                      onSelectionChanged: loading
+                          ? null
+                          : (selected) => _setServerType(selected.first),
                     ),
                     if (_serverType == MediaServerType.plex) ...[
                       const SizedBox(height: 12),
@@ -1258,14 +1242,12 @@ class _MobileAddServerSheetState extends State<_MobileAddServerSheet> {
                           const SizedBox(height: 6),
                           Text(
                             '授权码：${_plexPin!.code}，在浏览器完成授权后返回。',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant,
-                                ),
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
+                                    ),
                           ),
                         ],
                         if ((_plexError ?? '').trim().isNotEmpty) ...[
@@ -1316,9 +1298,8 @@ class _MobileAddServerSheetState extends State<_MobileAddServerSheet> {
                             decoration: const InputDecoration(
                               labelText: '选择 Plex 服务器',
                             ),
-                            validator: (_) => _selectedPlexServer == null
-                                ? '请选择服务器'
-                                : null,
+                            validator: (_) =>
+                                _selectedPlexServer == null ? '请选择服务器' : null,
                           ),
                           const SizedBox(height: 4),
                           Builder(
@@ -1348,8 +1329,7 @@ class _MobileAddServerSheetState extends State<_MobileAddServerSheet> {
                     TextFormField(
                       controller: _nameCtrl,
                       onChanged: (_) => _nameTouched = true,
-                      decoration:
-                          const InputDecoration(labelText: '服务器名称（可选）'),
+                      decoration: const InputDecoration(labelText: '服务器名称（可选）'),
                     ),
                     const SizedBox(height: 10),
                     TextFormField(
@@ -1488,7 +1468,8 @@ class _MobileAddServerSheetState extends State<_MobileAddServerSheet> {
                             flex: 2,
                             child: DropdownButtonFormField<String>(
                               initialValue: _scheme,
-                              decoration: const InputDecoration(labelText: '协议'),
+                              decoration:
+                                  const InputDecoration(labelText: '协议'),
                               items: const [
                                 DropdownMenuItem(
                                   value: 'https',
@@ -1526,10 +1507,10 @@ class _MobileAddServerSheetState extends State<_MobileAddServerSheet> {
                                 hintText: '例如 emby.example.com 或 1.2.3.4',
                               ),
                               keyboardType: TextInputType.url,
-                              validator: (value) => (value == null ||
-                                      value.trim().isEmpty)
-                                  ? '请输入服务器地址'
-                                  : null,
+                              validator: (value) =>
+                                  (value == null || value.trim().isEmpty)
+                                      ? '请输入服务器地址'
+                                      : null,
                             ),
                           ),
                         ],
@@ -1548,7 +1529,9 @@ class _MobileAddServerSheetState extends State<_MobileAddServerSheet> {
                         ),
                         keyboardType: TextInputType.number,
                         validator: (value) {
-                          if (value == null || value.trim().isEmpty) return null;
+                          if (value == null || value.trim().isEmpty) {
+                            return null;
+                          }
                           final port = int.tryParse(value.trim());
                           if (port == null || port <= 0 || port > 65535) {
                             return '端口不合法';
@@ -1861,8 +1844,7 @@ class _MobileEditServerSheetState extends State<_MobileEditServerSheet> {
             child: const Text('取消'),
           ),
           FilledButton(
-            onPressed: () =>
-                Navigator.of(dialogContext).pop(ctrl.text.trim()),
+            onPressed: () => Navigator.of(dialogContext).pop(ctrl.text.trim()),
             child: const Text('保存'),
           ),
         ],
@@ -1899,7 +1881,8 @@ class _MobileEditServerSheetState extends State<_MobileEditServerSheet> {
       initialName: route.name,
       initialUrl: route.url,
       initialRemark:
-          (widget.appState.serverDomainRemark(server.id, route.url) ?? '').trim(),
+          (widget.appState.serverDomainRemark(server.id, route.url) ?? '')
+              .trim(),
     );
     if (draft == null || draft.url.trim().isEmpty) return;
 
@@ -2107,8 +2090,10 @@ class _MobileEditServerSheetState extends State<_MobileEditServerSheet> {
                       Card(
                         margin: EdgeInsets.zero,
                         child: ListTile(
-                          contentPadding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
-                          leading: const Icon(Icons.radio_button_checked_rounded),
+                          contentPadding:
+                              const EdgeInsets.fromLTRB(16, 10, 12, 10),
+                          leading:
+                              const Icon(Icons.radio_button_checked_rounded),
                           title: Text(
                             _routeName(server, currentUrl),
                             maxLines: 1,
@@ -2164,12 +2149,14 @@ class _MobileEditServerSheetState extends State<_MobileEditServerSheet> {
                           ),
                           child: Text(
                             '还没有自定义线路。可以新增备用线路，也可以点下面现有线路切换为当前。',
-                            style:
-                                Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurfaceVariant,
-                                    ),
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
                           ),
                         )
                       else
@@ -2185,7 +2172,8 @@ class _MobileEditServerSheetState extends State<_MobileEditServerSheet> {
                                   .trim();
                           return Padding(
                             padding: EdgeInsets.only(
-                              bottom: entry.key == customRoutes.length - 1 ? 0 : 10,
+                              bottom:
+                                  entry.key == customRoutes.length - 1 ? 0 : 10,
                             ),
                             child: Card(
                               margin: EdgeInsets.zero,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:lin_player/main.dart';
+import 'package:lin_player/mobile_ui/server/mobile_add_server_page.dart';
 import 'package:lin_player/mobile_ui/server/mobile_server_page.dart';
 import 'package:lin_player_core/app_config/app_config.dart';
 import 'package:lin_player_core/state/media_server_type.dart';
@@ -45,13 +46,14 @@ void main() {
     await tester.tap(addButton);
     await tester.pumpAndSettle();
 
-    final fields = find.byType(TextFormField);
-    expect(fields, findsNWidgets(6));
+    expect(find.byType(MobileAddServerPage), findsOneWidget);
 
-    // Order in the mobile add-server sheet: name, remark, host, port,
-    // username, password.
-    await tester.enterText(fields.at(2), 'emby.example.com');
-    await tester.enterText(fields.at(4), 'demo');
+    final fields = find.byType(TextFormField);
+    expect(fields, findsNWidgets(5));
+
+    // Order in the mobile add-server page: name, address, remark, username, password.
+    await tester.enterText(fields.at(1), 'emby.example.com');
+    await tester.enterText(fields.at(3), 'demo');
 
     await tester.ensureVisible(find.text(_connectAndEnterLabel));
     await tester.tap(find.text(_connectAndEnterLabel));

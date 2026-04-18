@@ -92,6 +92,7 @@ flutter:
     - assets/images/imdb.png
     - assets/images/TMDB.png
     - assets/images/trakt.png
+    - assets/images/server_types/
     - assets/shaders/anime4k/
     - assets/tv_remote/
     - assets/tv_remote/images/
