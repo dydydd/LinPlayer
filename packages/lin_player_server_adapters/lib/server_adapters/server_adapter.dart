@@ -156,6 +156,17 @@ abstract class MediaServerAdapter {
     required int positionTicks,
   });
 
+  Future<void> hideFromResume(
+    ServerAuthSession auth, {
+    required String itemId,
+  });
+
+  Future<void> setFavorite(
+    ServerAuthSession auth, {
+    required String itemId,
+    required bool favorite,
+  });
+
   Future<void> updatePlaybackPosition(
     ServerAuthSession auth, {
     required String itemId,

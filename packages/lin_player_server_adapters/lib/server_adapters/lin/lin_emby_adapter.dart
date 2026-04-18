@@ -368,6 +368,34 @@ class LinEmbyAdapter implements MediaServerAdapter {
   }
 
   @override
+  Future<void> hideFromResume(
+    ServerAuthSession auth, {
+    required String itemId,
+  }) {
+    return _apiFor(auth).hideFromResume(
+      token: auth.token,
+      baseUrl: auth.baseUrl,
+      userId: auth.userId,
+      itemId: itemId,
+    );
+  }
+
+  @override
+  Future<void> setFavorite(
+    ServerAuthSession auth, {
+    required String itemId,
+    required bool favorite,
+  }) {
+    return _apiFor(auth).setFavorite(
+      token: auth.token,
+      baseUrl: auth.baseUrl,
+      userId: auth.userId,
+      itemId: itemId,
+      favorite: favorite,
+    );
+  }
+
+  @override
   Future<void> updatePlaybackPosition(
     ServerAuthSession auth, {
     required String itemId,

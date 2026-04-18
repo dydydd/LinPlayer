@@ -3398,6 +3398,35 @@ class AppState extends ChangeNotifier {
     return ordered.take(20).toList(growable: false);
   }
 
+  List<MediaItem> _normalizeContinueWatchingItems(List<MediaItem> items) {
+    final usedIds = <String>{};
+    final out = <MediaItem>[];
+    for (final entry in items) {
+      final id = entry.id.trim();
+      if (id.isNotEmpty && !usedIds.add(id)) continue;
+
+      final existingIndex = out.indexWhere(
+        (existing) => _isSameContinueWatchingEntry(existing, entry),
+      );
+      if (existingIndex >= 0) {
+        out[existingIndex] = _pickPreferredContinueWatchingItem(
+          out[existingIndex],
+          entry,
+        );
+      } else {
+        out.add(entry);
+        if (out.length >= 20) break;
+      }
+    }
+    return out;
+  }
+
+  Future<void> _commitContinueWatchingItems(List<MediaItem> items) async {
+    _continueWatching = _normalizeContinueWatchingItems(items);
+    await _persistContinueWatchingCache();
+    notifyListeners();
+  }
+
   Future<List<MediaItem>> loadContinueWatching({
     bool forceRefresh = false,
     bool forceNewRequest = false,
@@ -3444,6 +3473,38 @@ class AppState extends ChangeNotifier {
     });
   }
 
+  Future<void> removeContinueWatchingEntry({
+    required MediaItem item,
+  }) async {
+    _continueWatchingRequestId += 1;
+    final snapshot =
+        (_continueWatching ?? const <MediaItem>[]).toList(growable: true);
+    snapshot.removeWhere((entry) => _isSameContinueWatchingEntry(entry, item));
+    await _commitContinueWatchingItems(snapshot);
+  }
+
+  Future<void> updateContinueWatchingItem({
+    required MediaItem item,
+  }) async {
+    _continueWatchingRequestId += 1;
+    final snapshot =
+        (_continueWatching ?? const <MediaItem>[]).toList(growable: true);
+    final targetId = item.id.trim();
+    final index = snapshot.indexWhere((entry) {
+      final entryId = entry.id.trim();
+      if (targetId.isNotEmpty && entryId.isNotEmpty && entryId == targetId) {
+        return true;
+      }
+      return _isSameContinueWatchingEntry(entry, item);
+    });
+    if (index >= 0) {
+      snapshot[index] = item;
+    } else {
+      snapshot.insert(0, item);
+    }
+    await _commitContinueWatchingItems(snapshot);
+  }
+
   Future<void> updateContinueWatchingAfterPlaybackMark({
     required MediaItem item,
     required bool played,
@@ -3457,42 +3518,13 @@ class AppState extends ChangeNotifier {
     final indexOfKey = snapshot
         .indexWhere((entry) => _isSameContinueWatchingEntry(entry, item));
 
-    List<MediaItem> normalize(List<MediaItem> items) {
-      final usedIds = <String>{};
-      final out = <MediaItem>[];
-      for (final entry in items) {
-        final id = entry.id.trim();
-        if (id.isNotEmpty && !usedIds.add(id)) continue;
-
-        final existingIndex = out.indexWhere(
-          (existing) => _isSameContinueWatchingEntry(existing, entry),
-        );
-        if (existingIndex >= 0) {
-          out[existingIndex] = _pickPreferredContinueWatchingItem(
-            out[existingIndex],
-            entry,
-          );
-        } else {
-          out.add(entry);
-          if (out.length >= 20) break;
-        }
-      }
-      return out;
-    }
-
-    Future<void> commit(List<MediaItem> items) async {
-      _continueWatching = normalize(items);
-      await _persistContinueWatchingCache();
-      notifyListeners();
-    }
-
     if (!played) {
       if (indexOfKey >= 0) {
         snapshot[indexOfKey] = item;
       } else {
         snapshot.insert(0, item);
       }
-      await commit(snapshot);
+      await _commitContinueWatchingItems(snapshot);
       return;
     }
 
@@ -3526,17 +3558,17 @@ class AppState extends ChangeNotifier {
         final insertAt =
             indexOfKey >= 0 ? indexOfKey.clamp(0, cleaned.length) : 0;
         cleaned.insert(insertAt, next);
-        await commit(cleaned);
+        await _commitContinueWatchingItems(cleaned);
         return;
       }
       snapshot
           .removeWhere((entry) => _isSameContinueWatchingEntry(entry, item));
-      await commit(snapshot);
+      await _commitContinueWatchingItems(snapshot);
       return;
     }
 
     snapshot.removeWhere((entry) => _isSameContinueWatchingEntry(entry, item));
-    await commit(snapshot);
+    await _commitContinueWatchingItems(snapshot);
   }
 
   Future<MediaItem?> _tryResolveNextUpAfterEpisode({

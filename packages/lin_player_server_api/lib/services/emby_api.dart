@@ -1811,6 +1811,51 @@ class EmbyApi {
     }
   }
 
+  Future<void> hideFromResume({
+    required String token,
+    required String baseUrl,
+    required String userId,
+    required String itemId,
+  }) async {
+    final resp = await _client.post(
+      _apiUri(
+        baseUrl,
+        'Users/$userId/Items/$itemId/HideFromResume',
+        token: token,
+      ),
+      headers: _jsonHeaders(token: token, userId: userId),
+    );
+    if (resp.statusCode != 200 && resp.statusCode != 204) {
+      throw Exception('HideFromResume failed (${resp.statusCode})');
+    }
+  }
+
+  Future<void> setFavorite({
+    required String token,
+    required String baseUrl,
+    required String userId,
+    required String itemId,
+    required bool favorite,
+  }) async {
+    final uri = _apiUri(
+      baseUrl,
+      'Users/$userId/FavoriteItems/$itemId',
+      token: token,
+    );
+    final resp = favorite
+        ? await _client.post(
+            uri,
+            headers: _jsonHeaders(token: token, userId: userId),
+          )
+        : await _client.delete(
+            uri,
+            headers: _jsonHeaders(token: token, userId: userId),
+          );
+    if (resp.statusCode != 200 && resp.statusCode != 204) {
+      throw Exception('Favorite update failed (${resp.statusCode})');
+    }
+  }
+
   Future<void> _postPlaybackEvent({
     required String token,
     required String baseUrl,

@@ -142,7 +142,7 @@ class _MobileServerPageState extends State<MobileServerPage> {
             widget.appState.serverListLayout == ServerListLayout.list;
         final colorScheme = Theme.of(context).colorScheme;
         final size = MediaQuery.sizeOf(context);
-        final gridAspectRatio = size.width < 390 ? 1.34 : 1.5;
+        final gridAspectRatio = size.width < 390 ? 1.95 : 2.2;
 
         return Scaffold(
           body: DecoratedBox(
@@ -354,11 +354,25 @@ class _MobileServerItem extends StatelessWidget {
     final hasError = server.lastErrorCode != null;
     final subtitleText = subtitle?.trim() ?? '';
     final hasSubtitle = subtitleText.isNotEmpty;
-    final borderColor = active
-        ? colorScheme.primary.withValues(alpha: 0.55)
-        : hasError
-            ? colorScheme.error.withValues(alpha: 0.28)
-            : colorScheme.outlineVariant;
+    final surfaceTopColor =
+        colorScheme.surfaceContainerHighest.withValues(alpha: 0.94);
+    final surfaceBottomColor =
+        colorScheme.surfaceContainerHigh.withValues(alpha: 0.82);
+    final backgroundTopColor = active
+        ? Color.alphaBlend(
+            colorScheme.primary.withValues(alpha: 0.14),
+            surfaceTopColor,
+          )
+        : surfaceTopColor;
+    final backgroundBottomColor = active
+        ? Color.alphaBlend(
+            colorScheme.primary.withValues(alpha: 0.08),
+            surfaceBottomColor,
+          )
+        : surfaceBottomColor;
+    final borderColor = hasError
+        ? colorScheme.error.withValues(alpha: 0.28)
+        : colorScheme.outlineVariant.withValues(alpha: active ? 0.72 : 1.0);
 
     return Material(
       color: Colors.transparent,
@@ -373,13 +387,13 @@ class _MobileServerItem extends StatelessWidget {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                colorScheme.surfaceContainerHighest.withValues(alpha: 0.94),
-                colorScheme.surfaceContainerHigh.withValues(alpha: 0.82),
+                backgroundTopColor,
+                backgroundBottomColor,
               ],
             ),
             border: Border.all(
               color: borderColor,
-              width: active ? 1.4 : 1.0,
+              width: 1.0,
             ),
             boxShadow: [
               BoxShadow(
@@ -390,10 +404,13 @@ class _MobileServerItem extends StatelessWidget {
             ],
           ),
           child: Padding(
-            padding: EdgeInsets.all(isGrid ? 12 : 16),
+            padding: isGrid
+                ? const EdgeInsets.fromLTRB(10, 10, 10, 6)
+                : const EdgeInsets.all(16),
             child: isGrid
                 ? Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -401,9 +418,9 @@ class _MobileServerItem extends StatelessWidget {
                           ServerIconAvatar(
                             iconUrl: server.iconUrl,
                             name: server.name,
-                            radius: 18,
+                            radius: 20,
                           ),
-                          const SizedBox(width: 10),
+                          const SizedBox(width: 12),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -414,7 +431,7 @@ class _MobileServerItem extends StatelessWidget {
                                   overflow: TextOverflow.ellipsis,
                                   style: Theme.of(context)
                                       .textTheme
-                                      .titleSmall
+                                      .titleMedium
                                       ?.copyWith(
                                         fontWeight: FontWeight.w800,
                                       ),
@@ -439,20 +456,15 @@ class _MobileServerItem extends StatelessWidget {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          _ServerMetaChip(
-                            label: active ? '当前服务器' : server.serverType.label,
-                            highlighted: active,
+                      if (hasError) ...[
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: _ServerErrorPill(
+                            code: server.lastErrorCode!,
                           ),
-                          const Spacer(),
-                          if (hasError)
-                            _ServerErrorPill(
-                              code: server.lastErrorCode!,
-                            ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ],
                   )
                 : Row(

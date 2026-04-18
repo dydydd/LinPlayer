@@ -2113,11 +2113,16 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection>
   PageRoute<dynamic>? _route;
   Future<List<MediaItem>>? _future;
   final ScrollController _controller = ScrollController();
+  bool _loading = true;
+  String? _error;
+  List<MediaItem> _items = const <MediaItem>[];
+  final Set<String> _busyItemIds = <String>{};
 
   @override
   void initState() {
     super.initState();
     _future = _fetch();
+    unawaited(_loadFromFuture(_future!));
   }
 
   @override
@@ -2151,8 +2156,32 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection>
     );
   }
 
+  Future<void> _loadFromFuture(Future<List<MediaItem>> future) async {
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+
+    try {
+      final items = await future;
+      if (!mounted) return;
+      setState(() => _items = items);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    }
+  }
+
   void _reload() {
-    setState(() => _future = _fetch(forceRefresh: true));
+    final future = _fetch(forceRefresh: true);
+    setState(() => _future = future);
+    unawaited(_loadFromFuture(future));
   }
 
   Duration _ticksToDuration(int ticks) =>
@@ -2199,16 +2228,61 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection>
     );
   }
 
+  Future<void> _handleLongPress({
+    required MediaItem item,
+    required Offset globalPosition,
+  }) async {
+    if (_busyItemIds.contains(item.id)) return;
+
+    final action = await ContinueWatchingActions.showMenu(
+      context,
+      globalPosition: globalPosition,
+      favorite: item.favorite,
+    );
+    if (action == null || !mounted) return;
+
+    setState(() => _busyItemIds.add(item.id));
+    try {
+      final result = await ContinueWatchingActions.perform(
+        appState: widget.appState,
+        item: item,
+        action: action,
+      );
+      if (!mounted) return;
+      setState(() {
+        _items = List<MediaItem>.of(widget.appState.continueWatching);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.message),
+          duration: const Duration(milliseconds: 1400),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('操作失败：$e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _busyItemIds.remove(item.id));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<MediaItem>>(
       future: _future,
       builder: (context, snap) {
-        final items = snap.data ?? const <MediaItem>[];
-        final loading = snap.connectionState == ConnectionState.waiting;
+        final items = _loading && _items.isEmpty
+            ? (snap.data ?? const <MediaItem>[])
+            : _items;
+        final loading = _loading || snap.connectionState == ConnectionState.waiting;
+        final hasError = (_error ?? '').trim().isNotEmpty || snap.hasError;
         final theme = Theme.of(context);
 
-        if (!loading && snap.hasError && items.isEmpty) {
+        if (!loading && hasError && items.isEmpty) {
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
@@ -2354,6 +2428,7 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection>
                             const SizedBox(width: spacing),
                         itemBuilder: (context, index) {
                           final item = items[index];
+                          final busy = _busyItemIds.contains(item.id);
                           final isEpisode =
                               item.type.toLowerCase() == 'episode';
                           final title =
@@ -2365,7 +2440,7 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection>
                           final tag = isEpisode ? _episodeTag(item) : '';
                           final subParts = <String>[
                             if (isEpisode && tag.isNotEmpty) tag,
-                            if (pos > Duration.zero) '观看到 ${_fmt(pos)}',
+                            if (pos > Duration.zero) '看到 ${_fmt(pos)}',
                           ];
                           final sub = subParts.join(' · ');
 
@@ -2401,72 +2476,104 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection>
                                   );
                                 }
 
-                                final content = Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                final content = Stack(
                                   children: [
-                                    AspectRatio(
-                                      aspectRatio: 16 / 9,
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(12),
-                                        child: img != null
-                                            ? CachedNetworkImage(
-                                                imageUrl: img,
-                                                cacheManager:
-                                                    CoverCacheManager.instance,
-                                                httpHeaders: {
-                                                  'User-Agent':
-                                                      LinHttpClientFactory
-                                                          .userAgent
-                                                },
-                                                fit: BoxFit.cover,
-                                                placeholder: (_, __) =>
-                                                    const ColoredBox(
-                                                  color: Colors.black12,
-                                                  child: Center(
-                                                    child: Icon(Icons.image),
-                                                  ),
-                                                ),
-                                                errorWidget: (_, __, ___) =>
-                                                    const ColoredBox(
-                                                  color: Colors.black12,
-                                                  child: Center(
-                                                    child: Icon(
-                                                      Icons.broken_image,
+                                    Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        AspectRatio(
+                                          aspectRatio: 16 / 9,
+                                          child: ClipRRect(
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                            child: img != null
+                                                ? CachedNetworkImage(
+                                                    imageUrl: img,
+                                                    cacheManager:
+                                                        CoverCacheManager
+                                                            .instance,
+                                                    httpHeaders: {
+                                                      'User-Agent':
+                                                          LinHttpClientFactory
+                                                              .userAgent
+                                                    },
+                                                    fit: BoxFit.cover,
+                                                    placeholder: (_, __) =>
+                                                        const ColoredBox(
+                                                      color: Colors.black12,
+                                                      child: Center(
+                                                        child: Icon(
+                                                          Icons.image,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    errorWidget: (_, __, ___) =>
+                                                        const ColoredBox(
+                                                      color: Colors.black12,
+                                                      child: Center(
+                                                        child: Icon(
+                                                          Icons.broken_image,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  )
+                                                : const ColoredBox(
+                                                    color: Colors.black12,
+                                                    child: Center(
+                                                      child: Icon(Icons.image),
                                                     ),
                                                   ),
-                                                ),
-                                              )
-                                            : const ColoredBox(
-                                                color: Colors.black12,
-                                                child: Center(
-                                                  child: Icon(Icons.image),
-                                                ),
-                                              ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      title,
-                                      maxLines: titleMaxLines,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: (widget.isTv
-                                              ? theme.textTheme.bodySmall
-                                              : theme.textTheme.bodyMedium)
-                                          ?.copyWith(
-                                              fontWeight: FontWeight.w700),
-                                    ),
-                                    if (sub.isNotEmpty)
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 2),
-                                        child: Text(
-                                          sub,
-                                          maxLines: 1,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          title,
+                                          maxLines: titleMaxLines,
                                           overflow: TextOverflow.ellipsis,
-                                          style: theme.textTheme.labelSmall
+                                          style: (widget.isTv
+                                                  ? theme.textTheme.bodySmall
+                                                  : theme.textTheme.bodyMedium)
                                               ?.copyWith(
-                                            color: theme
-                                                .colorScheme.onSurfaceVariant,
-                                            fontWeight: FontWeight.w600,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        if (sub.isNotEmpty)
+                                          Padding(
+                                            padding:
+                                                const EdgeInsets.only(top: 2),
+                                            child: Text(
+                                              sub,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: theme.textTheme.labelSmall
+                                                  ?.copyWith(
+                                                color: theme.colorScheme
+                                                    .onSurfaceVariant,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                    if (busy)
+                                      Positioned.fill(
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            color: Colors.black.withValues(
+                                              alpha: 0.18,
+                                            ),
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                          ),
+                                          child: const Center(
+                                            child: SizedBox(
+                                              width: 24,
+                                              height: 24,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2.4,
+                                              ),
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -2474,10 +2581,20 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection>
                                 );
 
                                 if (!widget.isTv) {
-                                  return InkWell(
-                                    borderRadius: BorderRadius.circular(12),
-                                    onTap: onTap,
-                                    child: content,
+                                  return GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onLongPressStart: busy
+                                        ? null
+                                        : (details) => _handleLongPress(
+                                              item: item,
+                                              globalPosition:
+                                                  details.globalPosition,
+                                            ),
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(12),
+                                      onTap: busy ? null : onTap,
+                                      child: content,
+                                    ),
                                   );
                                 }
 
