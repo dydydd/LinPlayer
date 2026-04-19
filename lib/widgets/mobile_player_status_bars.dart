@@ -173,6 +173,7 @@ class MobilePlayerSidePanel extends StatelessWidget {
     required this.onDismiss,
     required this.child,
     this.headerTrailing,
+    this.variant = MobilePlayerSidePanelVariant.standard,
   });
 
   final String title;
@@ -181,13 +182,29 @@ class MobilePlayerSidePanel extends StatelessWidget {
   final Widget child;
   final Widget? headerTrailing;
 
+  /// [moreOptions]：贴右侧较宽面板、弱遮罩、无描边（用于「更多选项」）。
+  final MobilePlayerSidePanelVariant variant;
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
-    final panelWidth = math.min(
-      336.0,
-      size.width * (size.width > size.height ? 0.38 : 0.50),
-    );
+    final panelWidth = switch (variant) {
+      MobilePlayerSidePanelVariant.standard => math.min(
+          336.0,
+          size.width * (size.width > size.height ? 0.38 : 0.50),
+        ),
+      MobilePlayerSidePanelVariant.moreOptions =>
+        size.width * (2 / 3),
+    };
+    final barrierOpacity = switch (variant) {
+      MobilePlayerSidePanelVariant.standard => 0.22,
+      MobilePlayerSidePanelVariant.moreOptions => 0.14,
+    };
+    final radius = switch (variant) {
+      MobilePlayerSidePanelVariant.standard => 24.0,
+      MobilePlayerSidePanelVariant.moreOptions => 18.0,
+    };
+    final showBorder = variant == MobilePlayerSidePanelVariant.standard;
 
     return Positioned.fill(
       child: Stack(
@@ -201,7 +218,7 @@ class MobilePlayerSidePanel extends StatelessWidget {
                 behavior: HitTestBehavior.opaque,
                 onTap: onDismiss,
                 child: ColoredBox(
-                  color: Colors.black.withValues(alpha: 0.22),
+                  color: Colors.black.withValues(alpha: barrierOpacity),
                   child: const SizedBox.expand(),
                 ),
               ),
@@ -223,11 +240,13 @@ class MobilePlayerSidePanel extends StatelessWidget {
                   padding: const EdgeInsets.only(left: 10),
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(24),
+                      borderRadius: BorderRadius.circular(radius),
                       color: Colors.black.withValues(alpha: 0.10),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.16),
-                      ),
+                      border: showBorder
+                          ? Border.all(
+                              color: Colors.white.withValues(alpha: 0.16),
+                            )
+                          : null,
                       gradient: LinearGradient(
                         begin: Alignment.topRight,
                         end: Alignment.bottomLeft,
@@ -238,7 +257,7 @@ class MobilePlayerSidePanel extends StatelessWidget {
                       ),
                     ),
                     child: ClipRRect(
-                      borderRadius: BorderRadius.circular(24),
+                      borderRadius: BorderRadius.circular(radius),
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
                         child: Column(
@@ -286,6 +305,11 @@ class MobilePlayerSidePanel extends StatelessWidget {
       ),
     );
   }
+}
+
+enum MobilePlayerSidePanelVariant {
+  standard,
+  moreOptions,
 }
 
 class MobilePlayerOptionTile extends StatelessWidget {

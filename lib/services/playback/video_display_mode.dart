@@ -1,30 +1,42 @@
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// 移动端画面比例 / 缩放模式（持久化，全局生效）。
 enum VideoDisplayMode {
-  fill(
-    storageKey: 'fill',
-    label: '填充',
-    description: '保持比例完整显示，可能会留黑边',
+  adapt(
+    storageKey: 'adapt',
+    label: '适应',
+    description: '完整显示画面，保持比例，可能有黑边',
     boxFit: BoxFit.contain,
-  ),
-  original(
-    storageKey: 'original',
-    label: '原始',
-    description: '按原始大小显示，超出时自动缩小',
-    boxFit: BoxFit.scaleDown,
+    fixedAspectRatio: null,
   ),
   stretch(
     storageKey: 'stretch',
     label: '拉伸',
-    description: '拉伸到整个画面区域，可能会变形',
+    description: '拉伸填满区域，可能变形',
     boxFit: BoxFit.fill,
+    fixedAspectRatio: null,
   ),
   cover(
     storageKey: 'cover',
-    label: '铺满',
-    description: '保持比例铺满画面，可能会裁切边缘',
+    label: '填充',
+    description: '保持比例铺满，可能裁切边缘',
     boxFit: BoxFit.cover,
+    fixedAspectRatio: null,
+  ),
+  ratio16_9(
+    storageKey: 'ar16_9',
+    label: '16:9',
+    description: '在 16:9 区域内适应显示',
+    boxFit: BoxFit.contain,
+    fixedAspectRatio: 16 / 9,
+  ),
+  ratio4_3(
+    storageKey: 'ar4_3',
+    label: '4:3',
+    description: '在 4:3 区域内适应显示',
+    boxFit: BoxFit.contain,
+    fixedAspectRatio: 4 / 3,
   );
 
   const VideoDisplayMode({
@@ -32,6 +44,7 @@ enum VideoDisplayMode {
     required this.label,
     required this.description,
     required this.boxFit,
+    required this.fixedAspectRatio,
   });
 
   final String storageKey;
@@ -39,25 +52,54 @@ enum VideoDisplayMode {
   final String description;
   final BoxFit boxFit;
 
+  /// 当非空时，在固定比例容器内使用 [boxFit] 显示视频。
+  final double? fixedAspectRatio;
+
+  bool get usesFixedAspectRatio => fixedAspectRatio != null;
+
+  /// 将视频组件置于合适容器中（含固定比例时的 [AspectRatio] 包裹）。
+  Widget wrapVideo(Widget video) {
+    if (!usesFixedAspectRatio) return video;
+    final ar = fixedAspectRatio!;
+    return Center(
+      child: AspectRatio(
+        aspectRatio: ar,
+        child: video,
+      ),
+    );
+  }
+
   static VideoDisplayMode fromStorageKey(String? value) {
     final key = (value ?? '').trim().toLowerCase();
     for (final mode in values) {
       if (mode.storageKey == key) return mode;
     }
-    return VideoDisplayMode.fill;
+    return _migrateLegacyStorageKey(key);
+  }
+
+  static VideoDisplayMode _migrateLegacyStorageKey(String key) {
+    return switch (key) {
+      'fill' => VideoDisplayMode.adapt,
+      'original' => VideoDisplayMode.adapt,
+      'pad' => VideoDisplayMode.cover,
+      _ => VideoDisplayMode.adapt,
+    };
   }
 }
 
 class VideoDisplayModePreferences {
-  static const String _prefsKey = 'mobileVideoDisplayMode_v1';
+  static const String _prefsKey = 'mobileVideoDisplayMode_v2';
 
   static Future<VideoDisplayMode> load() async {
     final prefs = await SharedPreferences.getInstance();
-    return VideoDisplayMode.fromStorageKey(prefs.getString(_prefsKey));
+    final raw = prefs.getString(_prefsKey) ?? prefs.getString(_legacyPrefsKey);
+    return VideoDisplayMode.fromStorageKey(raw);
   }
 
   static Future<void> save(VideoDisplayMode mode) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefsKey, mode.storageKey);
   }
+
+  static const String _legacyPrefsKey = 'mobileVideoDisplayMode_v1';
 }

@@ -23,6 +23,7 @@ import 'services/app_diagnostics_log.dart';
 import 'services/app_route_observer.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/desktop_window.dart';
+import 'services/playback/mobile_playback_preferences.dart';
 import 'services/playback/video_display_mode.dart';
 import 'services/playback/playback_thresholds.dart';
 import 'services/playback/video_display_hint.dart';
@@ -342,7 +343,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
   bool _episodePickerVisible = false;
   _MobilePlayerPanel? _mobilePanel;
-  VideoDisplayMode _mobileVideoDisplayMode = VideoDisplayMode.fill;
+  VideoDisplayMode _mobileVideoDisplayMode = VideoDisplayMode.adapt;
+  bool _mobileListenVideoOnly = false;
+  bool _mobileAutoPlayNextEpisode = false;
+  MobilePlaybackLoopMode _mobileLoopMode = MobilePlaybackLoopMode.none;
   bool _episodePickerLoading = false;
   String? _episodePickerError;
   List<MediaItem> _episodeSeasons = const [];
@@ -406,6 +410,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _loadSeriesSkipProfile();
     // ignore: unawaited_futures
     _restoreMobileVideoDisplayMode();
+    // ignore: unawaited_futures
+    _restoreMobilePlaybackPreferences();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -919,6 +925,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       _completedSub = _playerService.player.stream.completed.listen((value) {
         if (!value) return;
         // ignore: unawaited_futures
+        _onMobilePlaybackCompleted();
+        // ignore: unawaited_futures
         _reportPlaybackStoppedBestEffort(completed: true);
       });
       _videoParamsSub = _playerService.player.stream.videoParams.listen((p) {
@@ -949,6 +957,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         setState(() => _playError = message);
       });
       await _ensurePlaybackAutoStarts();
+      await _applyMobileLoopModeToPlayer();
       unawaited(
         _maybeApplyLateServerResume(
           initSession: initSession,
@@ -1784,89 +1793,74 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     setState(() => _mobileVideoDisplayMode = mode);
   }
 
+  Future<void> _restoreMobilePlaybackPreferences() async {
+    final listen = await MobilePlaybackPreferences.loadListenVideoOnly();
+    final next = await MobilePlaybackPreferences.loadAutoPlayNextEpisode();
+    final loop = await MobilePlaybackPreferences.loadLoopMode();
+    if (!mounted) return;
+    setState(() {
+      _mobileListenVideoOnly = listen;
+      _mobileAutoPlayNextEpisode = next;
+      _mobileLoopMode = loop;
+    });
+  }
+
   void _setMobileVideoDisplayMode(VideoDisplayMode mode) {
     if (_mobileVideoDisplayMode == mode) return;
     setState(() => _mobileVideoDisplayMode = mode);
     unawaited(VideoDisplayModePreferences.save(mode));
   }
 
-  Future<void> _showMobileVideoDisplaySheet({
-    required bool controlsEnabled,
-  }) async {
-    await _showPinnedControlsModal(() => showModalBottomSheet<void>(
-          context: context,
-          backgroundColor: Colors.transparent,
-          barrierColor: Colors.black54,
-          builder: (sheetContext) {
-            return SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(24),
-                    color: Colors.black.withValues(alpha: 0.88),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.14),
-                    ),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(
-                          children: [
-                            const Expanded(
-                              child: Text(
-                                '画面模式',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                            IconButton(
-                              tooltip: '关闭',
-                              onPressed: () => Navigator.of(sheetContext).pop(),
-                              icon: const Icon(Icons.close_rounded),
-                              color: Colors.white,
-                              splashRadius: 20,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        for (final mode in VideoDisplayMode.values) ...[
-                          MobilePlayerOptionTile(
-                            title: mode.label,
-                            subtitle: mode.description,
-                            selected: mode == _mobileVideoDisplayMode,
-                            trailing: mode == _mobileVideoDisplayMode
-                                ? const Icon(
-                                    Icons.check_circle_rounded,
-                                    color: Colors.white,
-                                  )
-                                : null,
-                            onTap: !controlsEnabled ||
-                                    mode == _mobileVideoDisplayMode
-                                ? null
-                                : () {
-                                    _setMobileVideoDisplayMode(mode);
-                                    Navigator.of(sheetContext).pop();
-                                  },
-                          ),
-                          if (mode != VideoDisplayMode.values.last)
-                            const SizedBox(height: 8),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        ));
+  Future<void> _setMobileListenVideoOnly(bool value) async {
+    if (_mobileListenVideoOnly == value) return;
+    setState(() => _mobileListenVideoOnly = value);
+    await MobilePlaybackPreferences.saveListenVideoOnly(value);
+  }
+
+  Future<void> _setMobileAutoPlayNextEpisode(bool value) async {
+    if (_mobileAutoPlayNextEpisode == value) return;
+    setState(() => _mobileAutoPlayNextEpisode = value);
+    await MobilePlaybackPreferences.saveAutoPlayNextEpisode(value);
+  }
+
+  Future<void> _setMobileLoopMode(MobilePlaybackLoopMode mode) async {
+    if (_mobileLoopMode == mode) return;
+    setState(() => _mobileLoopMode = mode);
+    await MobilePlaybackPreferences.saveLoopMode(mode);
+    await _applyMobileLoopModeToPlayer();
+  }
+
+  Future<void> _applyMobileLoopModeToPlayer() async {
+    if (!_playerService.isInitialized || _playerService.isExternalPlayback) {
+      return;
+    }
+    try {
+      await _playerService.player
+          .setPlaylistMode(_mobileLoopMode.playlistMode);
+    } catch (_) {}
+  }
+
+  Future<void> _tryAutoPlayNextEpisode() async {
+    if (!_mobileAutoPlayNextEpisode) return;
+    if (_mobileLoopMode != MobilePlaybackLoopMode.none) return;
+    final access = _serverAccess;
+    if (access == null) return;
+    final nextId = await _resolveNextEpisodeIdBestEffort(access);
+    if (nextId == null || nextId.trim().isEmpty) return;
+    if (nextId.trim() == widget.itemId) return;
+    late final MediaItem item;
+    try {
+      item = await access.adapter
+          .fetchItemDetail(access.auth, itemId: nextId.trim());
+    } catch (_) {
+      return;
+    }
+    if (!mounted) return;
+    _playEpisodeFromPicker(item);
+  }
+
+  Future<void> _onMobilePlaybackCompleted() async {
+    await _tryAutoPlayNextEpisode();
   }
 
   Future<void> _setMobilePlaybackRate(double rate) async {
@@ -4490,6 +4484,13 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         state != AppLifecycleState.paused) {
       return;
     }
+    if (_mobileListenVideoOnly &&
+        !widget.isTv &&
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS)) {
+      return;
+    }
     if (widget.appState.returnHomeBehavior != ReturnHomeBehavior.pause) return;
     if (_shouldIgnoreLifecyclePause) return;
 
@@ -6372,14 +6373,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                             ? Stack(
                                 fit: StackFit.expand,
                                 children: [
-                                  Video(
-                                    key: ValueKey(_playerService.controller),
-                                    controller: _playerService.controller,
-                                    fit: _mobileVideoDisplayMode.boxFit,
-                                    controls: NoVideoControls,
-                                    subtitleViewConfiguration:
-                                        _subtitleViewConfiguration,
-                                  ),
+                                  _buildMobileNetworkVideoLayer(),
                                   Positioned.fill(
                                     child: DanmakuStage(
                                       key: _danmakuKey,
@@ -7671,13 +7665,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
             : null,
       ),
       MobilePlayerActionButton(
-        icon: _anime4kPreset.isOff
-            ? Icons.auto_fix_high_outlined
-            : Icons.auto_fix_high,
-        label: _anime4kPreset.isOff ? '超分 关' : '超分 开',
+        icon: Icons.more_horiz,
+        label: '更多',
         compact: true,
         onTap: controlsEnabled
-            ? () => _openMobilePanel(_MobilePlayerPanel.superResolution)
+            ? () => _openMobilePanel(_MobilePlayerPanel.moreOptions)
             : null,
       ),
     ];
@@ -7790,18 +7782,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                     }
                   : null,
             ),
-            MobilePlayerActionButton(
-              icon: Icons.fit_screen_outlined,
-              label: '画面',
-              compact: true,
-              onTap: controlsEnabled
-                  ? () => unawaited(
-                        _showMobileVideoDisplaySheet(
-                          controlsEnabled: controlsEnabled,
-                        ),
-                      )
-                  : null,
-            ),
           ],
         ),
       ),
@@ -7831,7 +7811,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       _MobilePlayerPanel.version => '版本',
       _MobilePlayerPanel.audio => '音频',
       _MobilePlayerPanel.core => '内核',
-      _MobilePlayerPanel.superResolution => '超分',
+      _MobilePlayerPanel.moreOptions => '更多选项',
       _MobilePlayerPanel.danmaku => '弹幕',
       _MobilePlayerPanel.subtitle => '字幕',
       _MobilePlayerPanel.speed => '倍速',
@@ -8289,10 +8269,201 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     );
   }
 
-  Widget _buildMobileSuperResolutionPanel({required bool controlsEnabled}) {
+  Widget _buildMobileNetworkVideoLayer() {
+    final mode = _mobileVideoDisplayMode;
+    Widget core = Video(
+      key: ValueKey(_playerService.controller),
+      controller: _playerService.controller,
+      fit: mode.boxFit,
+      controls: NoVideoControls,
+      subtitleViewConfiguration: _subtitleViewConfiguration,
+    );
+    core = mode.wrapVideo(core);
+    if (_mobileListenVideoOnly) {
+      core = IgnorePointer(
+        child: Opacity(
+          opacity: 0,
+          child: core,
+        ),
+      );
+    }
+    return core;
+  }
+
+  Widget _buildMobileMoreOptionsPanel({required bool controlsEnabled}) {
+    TextStyle sectionStyle() => const TextStyle(
+          color: Colors.white70,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+        );
+
+    Widget toggleRow(String label, bool value, ValueChanged<bool> onChanged) {
+      final enabled = controlsEnabled;
+      return Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: enabled ? () => onChanged(!value) : null,
+          borderRadius: BorderRadius.circular(16),
+          child: Ink(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              color: Colors.black.withValues(alpha: value ? 0.22 : 0.08),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: value ? 0.28 : 0.10),
+              ),
+            ),
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+            child: Center(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: enabled ? Colors.white : Colors.white38,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return ListView(
-      padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+      padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
       children: [
+        Text('播放', style: sectionStyle()),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: toggleRow(
+                '听视频',
+                _mobileListenVideoOnly,
+                (v) => unawaited(_setMobileListenVideoOnly(v)),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: toggleRow(
+                '自动连播',
+                _mobileAutoPlayNextEpisode,
+                (v) => unawaited(_setMobileAutoPlayNextEpisode(v)),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Text('循环播放', style: sectionStyle()),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            for (final entry in <(MobilePlaybackLoopMode, String)>[
+              (MobilePlaybackLoopMode.none, '不循环'),
+              (MobilePlaybackLoopMode.single, '单集循环'),
+              (MobilePlaybackLoopMode.list, '列表循环'),
+            ]) ...[
+              Expanded(
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: controlsEnabled &&
+                            _mobileLoopMode != entry.$1
+                        ? () => unawaited(_setMobileLoopMode(entry.$1))
+                        : null,
+                    borderRadius: BorderRadius.circular(16),
+                    child: Ink(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        color: Colors.black.withValues(
+                          alpha: _mobileLoopMode == entry.$1 ? 0.22 : 0.08,
+                        ),
+                        border: Border.all(
+                          color: Colors.white.withValues(
+                            alpha:
+                                _mobileLoopMode == entry.$1 ? 0.28 : 0.10,
+                          ),
+                        ),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 10,
+                        horizontal: 4,
+                      ),
+                      child: Center(
+                        child: Text(
+                          entry.$2,
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: controlsEnabled
+                                ? Colors.white
+                                : Colors.white38,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              if (entry.$1 != MobilePlaybackLoopMode.list)
+                const SizedBox(width: 6),
+            ],
+          ],
+        ),
+        const SizedBox(height: 14),
+        Text('画面比例', style: sectionStyle()),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final mode in VideoDisplayMode.values)
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: controlsEnabled && _mobileVideoDisplayMode != mode
+                      ? () => _setMobileVideoDisplayMode(mode)
+                      : null,
+                  borderRadius: BorderRadius.circular(999),
+                  child: Ink(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      color: Colors.black.withValues(
+                        alpha: _mobileVideoDisplayMode == mode ? 0.22 : 0.08,
+                      ),
+                      border: Border.all(
+                        color: Colors.white.withValues(
+                          alpha: _mobileVideoDisplayMode == mode
+                              ? 0.28
+                              : 0.10,
+                        ),
+                      ),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    child: Text(
+                      mode.label,
+                      style: TextStyle(
+                        color:
+                            controlsEnabled ? Colors.white : Colors.white38,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Text('Anime4K 超分', style: sectionStyle()),
+        const SizedBox(height: 8),
         for (final preset in Anime4kPreset.values) ...[
           Builder(
             builder: (context) {
@@ -8355,7 +8526,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
           const SizedBox(height: 8),
         ],
         MobilePlayerOptionTile(
-          title: '更多超分选项',
+          title: '更多超分设置',
           leading: const Icon(Icons.tune, color: Colors.white),
           onTap: controlsEnabled
               ? () {
@@ -8408,8 +8579,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         case _MobilePlayerPanel.core:
           child = _buildMobileCorePanel(controlsEnabled: controlsEnabled);
           break;
-        case _MobilePlayerPanel.superResolution:
-          child = _buildMobileSuperResolutionPanel(
+        case _MobilePlayerPanel.moreOptions:
+          child = _buildMobileMoreOptionsPanel(
             controlsEnabled: controlsEnabled,
           );
           break;
@@ -8429,6 +8600,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       visible: visibleSidePanel,
       onDismiss: _closeMobilePanels,
       headerTrailing: headerTrailing,
+      variant: effectivePanel == _MobilePlayerPanel.moreOptions
+          ? MobilePlayerSidePanelVariant.moreOptions
+          : MobilePlayerSidePanelVariant.standard,
       child: child,
     );
   }
@@ -11387,7 +11561,7 @@ enum _MobilePlayerPanel {
   version,
   audio,
   core,
-  superResolution,
+  moreOptions,
   danmaku,
   subtitle,
   speed,
