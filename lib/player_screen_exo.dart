@@ -688,206 +688,206 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   }
 
   Future<void> _showDanmakuSheet() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) {
-        var onlineLoading = false;
-        var manualLoading = false;
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            final hasSources = _danmakuSources.isNotEmpty;
-            final selectedName = (_danmakuSourceIndex >= 0 &&
-                    _danmakuSourceIndex < _danmakuSources.length)
-                ? _danmakuSources[_danmakuSourceIndex].name
-                : '未选择';
+    await _showPinnedControlsModal(() => showModalBottomSheet<void>(
+          context: context,
+          showDragHandle: true,
+          builder: (ctx) {
+            var onlineLoading = false;
+            var manualLoading = false;
+            return StatefulBuilder(
+              builder: (context, setSheetState) {
+                final hasSources = _danmakuSources.isNotEmpty;
+                final selectedName = (_danmakuSourceIndex >= 0 &&
+                        _danmakuSourceIndex < _danmakuSources.length)
+                    ? _danmakuSources[_danmakuSourceIndex].name
+                    : '未选择';
 
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Expanded(
-                        child: Text(
-                          '弹幕',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
-                      ),
-                      TextButton.icon(
-                        onPressed: () async {
-                          await _pickDanmakuFile();
-                          setSheetState(() {});
-                        },
-                        icon: const Icon(Icons.upload_file),
-                        label: const Text('本地'),
-                      ),
-                      const SizedBox(width: 8),
-                      TextButton.icon(
-                        onPressed: onlineLoading ||
-                                _currentIndex < 0 ||
-                                _currentIndex >= _playlist.length
-                            ? null
-                            : () async {
-                                onlineLoading = true;
-                                setSheetState(() {});
-                                try {
-                                  await _loadOnlineDanmakuForFile(
-                                    _playlist[_currentIndex],
-                                    showToast: true,
-                                  );
-                                } finally {
-                                  onlineLoading = false;
-                                  setSheetState(() {});
-                                }
-                              },
-                        icon: onlineLoading
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.cloud_download_outlined),
-                        label: const Text('在线'),
-                      ),
-                      const SizedBox(width: 8),
-                      TextButton.icon(
-                        onPressed: manualLoading ||
-                                onlineLoading ||
-                                _currentIndex < 0 ||
-                                _currentIndex >= _playlist.length
-                            ? null
-                            : () async {
-                                manualLoading = true;
-                                setSheetState(() {});
-                                try {
-                                  await _manualMatchOnlineDanmakuForCurrent(
-                                    showToast: true,
-                                  );
-                                } finally {
-                                  manualLoading = false;
-                                  setSheetState(() {});
-                                }
-                              },
-                        icon: manualLoading
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.search),
-                        label: const Text('手动'),
-                      ),
-                    ],
-                  ),
-                  SwitchListTile(
-                    value: _danmakuEnabled,
-                    onChanged: (v) async {
-                      setState(() => _danmakuEnabled = v);
-                      if (!v) {
-                        _danmakuKey.currentState?.clear();
-                      } else if (hasSources) {
-                        await _ensureDanmakuVisible();
-                      }
-                      setSheetState(() {});
-                    },
-                    title: const Text('启用弹幕'),
-                    subtitle:
-                        Text(hasSources ? '当前：$selectedName' : '尚未加载弹幕文件'),
-                    contentPadding: EdgeInsets.zero,
-                  ),
-                  const Divider(height: 1),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.layers_outlined),
-                    title: const Text('弹幕源'),
-                    subtitle: Text(
-                      selectedName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: OutlinedButton(
-                      onPressed: !hasSources
-                          ? null
-                          : () async {
-                              final names = _danmakuSources
-                                  .map((e) => e.name)
-                                  .toList(growable: false);
-                              final picked = await showListPickerDialog(
-                                context: context,
-                                title: '选择弹幕源',
-                                items: names,
-                                initialIndex: _danmakuSourceIndex >= 0
-                                    ? _danmakuSourceIndex
-                                    : null,
-                                height: 320,
-                              );
-                              if (!mounted || picked == null) return;
-                              setState(() {
-                                _danmakuSourceIndex = picked;
-                                _danmakuEnabled = true;
-                                _rebuildDanmakuHeatmap();
-                                _syncDanmakuCursor(_position);
-                              });
-                              if (widget
-                                      .appState.danmakuRememberSelectedSource &&
-                                  picked >= 0 &&
-                                  picked < _danmakuSources.length) {
-                                // ignore: unawaited_futures
-                                widget.appState
-                                    .setDanmakuLastSelectedSourceName(
-                                  _danmakuSources[picked].name,
-                                );
-                              }
-                              await _ensureDanmakuVisible();
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '弹幕',
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
+                          ),
+                          TextButton.icon(
+                            onPressed: () async {
+                              await _pickDanmakuFile();
                               setSheetState(() {});
                             },
-                      child: const Text('选择'),
-                    ),
-                  ),
-                  const Divider(height: 1),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.opacity_outlined),
-                    title: const Text('不透明度'),
-                    subtitle: AppSlider(
-                      value: _danmakuOpacity,
-                      min: 0.2,
-                      max: 1.0,
-                      onChanged: (v) {
-                        setState(() => _danmakuOpacity = v);
-                        setSheetState(() {});
-                      },
-                    ),
-                  ),
-                  if (hasSources)
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () {
-                          setState(() {
-                            _danmakuSources.clear();
-                            _danmakuSourceIndex = -1;
-                            _danmakuEnabled = false;
-                            _danmakuHeatmap = const [];
+                            icon: const Icon(Icons.upload_file),
+                            label: const Text('本地'),
+                          ),
+                          const SizedBox(width: 8),
+                          TextButton.icon(
+                            onPressed: onlineLoading ||
+                                    _currentIndex < 0 ||
+                                    _currentIndex >= _playlist.length
+                                ? null
+                                : () async {
+                                    onlineLoading = true;
+                                    setSheetState(() {});
+                                    try {
+                                      await _loadOnlineDanmakuForFile(
+                                        _playlist[_currentIndex],
+                                        showToast: true,
+                                      );
+                                    } finally {
+                                      onlineLoading = false;
+                                      setSheetState(() {});
+                                    }
+                                  },
+                            icon: onlineLoading
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
+                                  )
+                                : const Icon(Icons.cloud_download_outlined),
+                            label: const Text('在线'),
+                          ),
+                          const SizedBox(width: 8),
+                          TextButton.icon(
+                            onPressed: manualLoading ||
+                                    onlineLoading ||
+                                    _currentIndex < 0 ||
+                                    _currentIndex >= _playlist.length
+                                ? null
+                                : () async {
+                                    manualLoading = true;
+                                    setSheetState(() {});
+                                    try {
+                                      await _manualMatchOnlineDanmakuForCurrent(
+                                        showToast: true,
+                                      );
+                                    } finally {
+                                      manualLoading = false;
+                                      setSheetState(() {});
+                                    }
+                                  },
+                            icon: manualLoading
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
+                                  )
+                                : const Icon(Icons.search),
+                            label: const Text('手动'),
+                          ),
+                        ],
+                      ),
+                      SwitchListTile(
+                        value: _danmakuEnabled,
+                        onChanged: (v) async {
+                          setState(() => _danmakuEnabled = v);
+                          if (!v) {
                             _danmakuKey.currentState?.clear();
-                          });
+                          } else if (hasSources) {
+                            await _ensureDanmakuVisible();
+                          }
                           setSheetState(() {});
                         },
-                        icon: const Icon(Icons.delete_outline),
-                        label: const Text('清空弹幕'),
+                        title: const Text('启用弹幕'),
+                        subtitle:
+                            Text(hasSources ? '当前：$selectedName' : '尚未加载弹幕文件'),
+                        contentPadding: EdgeInsets.zero,
                       ),
-                    ),
-                ],
-              ),
+                      const Divider(height: 1),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.layers_outlined),
+                        title: const Text('弹幕源'),
+                        subtitle: Text(
+                          selectedName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: OutlinedButton(
+                          onPressed: !hasSources
+                              ? null
+                              : () async {
+                                  final names = _danmakuSources
+                                      .map((e) => e.name)
+                                      .toList(growable: false);
+                                  final picked = await showListPickerDialog(
+                                    context: context,
+                                    title: '选择弹幕源',
+                                    items: names,
+                                    initialIndex: _danmakuSourceIndex >= 0
+                                        ? _danmakuSourceIndex
+                                        : null,
+                                    height: 320,
+                                  );
+                                  if (!mounted || picked == null) return;
+                                  setState(() {
+                                    _danmakuSourceIndex = picked;
+                                    _danmakuEnabled = true;
+                                    _rebuildDanmakuHeatmap();
+                                    _syncDanmakuCursor(_position);
+                                  });
+                                  if (widget.appState
+                                          .danmakuRememberSelectedSource &&
+                                      picked >= 0 &&
+                                      picked < _danmakuSources.length) {
+                                    // ignore: unawaited_futures
+                                    widget.appState
+                                        .setDanmakuLastSelectedSourceName(
+                                      _danmakuSources[picked].name,
+                                    );
+                                  }
+                                  await _ensureDanmakuVisible();
+                                  setSheetState(() {});
+                                },
+                          child: const Text('选择'),
+                        ),
+                      ),
+                      const Divider(height: 1),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.opacity_outlined),
+                        title: const Text('不透明度'),
+                        subtitle: AppSlider(
+                          value: _danmakuOpacity,
+                          min: 0.2,
+                          max: 1.0,
+                          onChanged: (v) {
+                            setState(() => _danmakuOpacity = v);
+                            setSheetState(() {});
+                          },
+                        ),
+                      ),
+                      if (hasSources)
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                _danmakuSources.clear();
+                                _danmakuSourceIndex = -1;
+                                _danmakuEnabled = false;
+                                _danmakuHeatmap = const [];
+                                _danmakuKey.currentState?.clear();
+                              });
+                              setSheetState(() {});
+                            },
+                            icon: const Icon(Icons.delete_outline),
+                            label: const Text('清空弹幕'),
+                          ),
+                        ),
+                    ],
+                  ),
+                );
+              },
             );
           },
-        );
-      },
-    );
+        ));
   }
 
   void _showControls({bool scheduleHide = true}) {
@@ -1361,39 +1361,39 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     }
 
     if (!context.mounted) return;
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) {
-        if (tracks.isEmpty) {
-          return const Padding(
-            padding: EdgeInsets.all(16),
-            child: Text('暂无音轨'),
-          );
-        }
-        return ListView(
-          children: tracks
-              .map(
-                (t) => ListTile(
-                  title: Text(_audioTrackTitle(t)),
-                  subtitle: Text(_audioTrackSubtitle(t)),
-                  trailing: t.isSelected ? const Icon(Icons.check) : null,
-                  onTap: () async {
-                    Navigator.of(ctx).pop();
-                    try {
-                      await platform.selectAudioTrack(playerId, t.id);
-                    } catch (e) {
-                      if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('切换音轨失败：$e')),
-                      );
-                    }
-                  },
-                ),
-              )
-              .toList(),
-        );
-      },
-    );
+    await _showPinnedControlsModal(() => showModalBottomSheet<void>(
+          context: context,
+          builder: (ctx) {
+            if (tracks.isEmpty) {
+              return const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('暂无音轨'),
+              );
+            }
+            return ListView(
+              children: tracks
+                  .map(
+                    (t) => ListTile(
+                      title: Text(_audioTrackTitle(t)),
+                      subtitle: Text(_audioTrackSubtitle(t)),
+                      trailing: t.isSelected ? const Icon(Icons.check) : null,
+                      onTap: () async {
+                        Navigator.of(ctx).pop();
+                        try {
+                          await platform.selectAudioTrack(playerId, t.id);
+                        } catch (e) {
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('切换音轨失败：$e')),
+                          );
+                        }
+                      },
+                    ),
+                  )
+                  .toList(),
+            );
+          },
+        ));
   }
 
   String _subtitleTrackTitle(vp_android.ExoPlayerSubtitleTrackData t) {
@@ -1564,327 +1564,331 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     }
 
     if (!context.mounted) return;
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (ctx) {
-        var tracksExpanded = true;
-        final messenger = ScaffoldMessenger.of(context);
+    await _showPinnedControlsModal(() => showModalBottomSheet<void>(
+          context: context,
+          showDragHandle: true,
+          isScrollControlled: true,
+          builder: (ctx) {
+            var tracksExpanded = true;
+            final messenger = ScaffoldMessenger.of(context);
 
-        IconButton miniIconButton({
-          required VoidCallback? onPressed,
-          required IconData icon,
-          String? tooltip,
-        }) {
-          return IconButton(
-            onPressed: onPressed,
-            tooltip: tooltip,
-            icon: Icon(icon),
-            padding: EdgeInsets.zero,
-            visualDensity: VisualDensity.compact,
-            constraints: const BoxConstraints.tightFor(width: 34, height: 34),
-          );
-        }
-
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            String selectedKey = 'off';
-            for (final t in tracks) {
-              if (t.isSelected) {
-                selectedKey = '${t.groupIndex}_${t.trackIndex}';
-                break;
-              }
+            IconButton miniIconButton({
+              required VoidCallback? onPressed,
+              required IconData icon,
+              String? tooltip,
+            }) {
+              return IconButton(
+                onPressed: onPressed,
+                tooltip: tooltip,
+                icon: Icon(icon),
+                padding: EdgeInsets.zero,
+                visualDensity: VisualDensity.compact,
+                constraints:
+                    const BoxConstraints.tightFor(width: 34, height: 34),
+              );
             }
 
-            Future<void> refreshTracks() async {
-              try {
-                tracks = await fetchTracks();
-                setSheetState(() {});
-              } catch (e) {
-                messenger.showSnackBar(
-                  SnackBar(content: Text('获取字幕失败：$e')),
-                );
-              }
-            }
-
-            Future<void> selectTrackKey(String key) async {
-              try {
-                if (key == 'off') {
-                  await api.deselectSubtitleTrack();
-                } else {
-                  final parts = key.split('_');
-                  final g = int.parse(parts[0]);
-                  final t = int.parse(parts[1]);
-                  await api.selectSubtitleTrack(g, t);
+            return StatefulBuilder(
+              builder: (context, setSheetState) {
+                String selectedKey = 'off';
+                for (final t in tracks) {
+                  if (t.isSelected) {
+                    selectedKey = '${t.groupIndex}_${t.trackIndex}';
+                    break;
+                  }
                 }
-                await refreshTracks();
-              } catch (e) {
-                messenger.showSnackBar(
-                  SnackBar(content: Text('切换字幕失败：$e')),
-                );
-              }
-            }
 
-            Future<void> pickAndAddSubtitle() async {
-              final result = await FilePicker.platform.pickFiles(
-                type: FileType.custom,
-                allowedExtensions: kSupportedExternalSubtitleExtensions,
-              );
-              if (result == null || result.files.isEmpty) return;
-              final f = result.files.first;
-              final path = (f.path ?? '').trim();
-              if (path.isEmpty) {
-                messenger.showSnackBar(
-                  const SnackBar(content: Text('无法读取字幕文件路径')),
-                );
-                return;
-              }
-              try {
-                await api.addSubtitleSource(
-                  path,
-                  externalSubtitleMimeTypeForPath(path),
-                  null,
-                  f.name,
-                );
-                await refreshTracks();
-              } catch (e) {
-                messenger.showSnackBar(
-                  SnackBar(content: Text('添加字幕失败：$e')),
-                );
-              }
-            }
+                Future<void> refreshTracks() async {
+                  try {
+                    tracks = await fetchTracks();
+                    setSheetState(() {});
+                  } catch (e) {
+                    messenger.showSnackBar(
+                      SnackBar(content: Text('获取字幕失败：$e')),
+                    );
+                  }
+                }
 
-            Future<void> editSubtitleDelay() async {
-              final controller = TextEditingController(
-                text: _subtitleDelaySeconds.toStringAsFixed(1),
-              );
-              final value = await showDialog<double>(
-                context: ctx,
-                builder: (dctx) => AlertDialog(
-                  title: const Text('字幕同步'),
-                  content: TextField(
-                    controller: controller,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                      signed: false,
-                    ),
-                    decoration: const InputDecoration(
-                      hintText: '单位：秒，例如 0.5',
-                    ),
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.of(dctx).pop(),
-                      child: const Text('取消'),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        final v = double.tryParse(controller.text.trim());
-                        Navigator.of(dctx).pop(v);
-                      },
-                      child: const Text('确定'),
-                    ),
-                  ],
-                ),
-              );
-              if (value == null) return;
-              setState(() => _subtitleDelaySeconds = value.clamp(0.0, 60.0));
-              await _applyExoSubtitleOptions();
-              setSheetState(() {});
-            }
+                Future<void> selectTrackKey(String key) async {
+                  try {
+                    if (key == 'off') {
+                      await api.deselectSubtitleTrack();
+                    } else {
+                      final parts = key.split('_');
+                      final g = int.parse(parts[0]);
+                      final t = int.parse(parts[1]);
+                      await api.selectSubtitleTrack(g, t);
+                    }
+                    await refreshTracks();
+                  } catch (e) {
+                    messenger.showSnackBar(
+                      SnackBar(content: Text('切换字幕失败：$e')),
+                    );
+                  }
+                }
 
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                child: ListView(
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '字幕',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
+                Future<void> pickAndAddSubtitle() async {
+                  final result = await FilePicker.platform.pickFiles(
+                    type: FileType.custom,
+                    allowedExtensions: kSupportedExternalSubtitleExtensions,
+                  );
+                  if (result == null || result.files.isEmpty) return;
+                  final f = result.files.first;
+                  final path = (f.path ?? '').trim();
+                  if (path.isEmpty) {
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('无法读取字幕文件路径')),
+                    );
+                    return;
+                  }
+                  try {
+                    await api.addSubtitleSource(
+                      path,
+                      externalSubtitleMimeTypeForPath(path),
+                      null,
+                      f.name,
+                    );
+                    await refreshTracks();
+                  } catch (e) {
+                    messenger.showSnackBar(
+                      SnackBar(content: Text('添加字幕失败：$e')),
+                    );
+                  }
+                }
+
+                Future<void> editSubtitleDelay() async {
+                  final controller = TextEditingController(
+                    text: _subtitleDelaySeconds.toStringAsFixed(1),
+                  );
+                  final value = await showDialog<double>(
+                    context: ctx,
+                    builder: (dctx) => AlertDialog(
+                      title: const Text('字幕同步'),
+                      content: TextField(
+                        controller: controller,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                          signed: false,
                         ),
-                        IconButton(
-                          tooltip: '关闭',
-                          icon: const Icon(Icons.close),
-                          onPressed: () => Navigator.of(ctx).pop(),
+                        decoration: const InputDecoration(
+                          hintText: '单位：秒，例如 0.5',
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(dctx).pop(),
+                          child: const Text('取消'),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            final v = double.tryParse(controller.text.trim());
+                            Navigator.of(dctx).pop(v);
+                          },
+                          child: const Text('确定'),
                         ),
                       ],
                     ),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.closed_caption_outlined),
-                      title: const Text('轨道'),
-                      trailing: IconButton(
-                        icon: Icon(
-                          tracksExpanded
-                              ? Icons.expand_less
-                              : Icons.expand_more,
-                        ),
-                        onPressed: () {
-                          tracksExpanded = !tracksExpanded;
-                          setSheetState(() {});
-                        },
-                      ),
-                    ),
-                    if (tracksExpanded) ...[
-                      RadioGroup<String>(
-                        groupValue: selectedKey,
-                        onChanged: (value) {
-                          if (value == null) return;
-                          // ignore: unawaited_futures
-                          selectTrackKey(value);
-                        },
-                        child: Column(
+                  );
+                  if (value == null) return;
+                  setState(
+                      () => _subtitleDelaySeconds = value.clamp(0.0, 60.0));
+                  await _applyExoSubtitleOptions();
+                  setSheetState(() {});
+                }
+
+                return SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    child: ListView(
+                      children: [
+                        Row(
                           children: [
-                            const RadioListTile<String>(
-                              value: 'off',
-                              title: Text('关闭'),
-                              contentPadding: EdgeInsets.zero,
-                              dense: true,
+                            Expanded(
+                              child: Text(
+                                '字幕',
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
                             ),
-                            if (tracks.isEmpty)
-                              const Padding(
-                                padding: EdgeInsets.fromLTRB(40, 0, 0, 8),
-                                child: Text('暂无字幕'),
-                              ),
-                            for (final t in tracks)
-                              RadioListTile<String>(
-                                value: '${t.groupIndex}_${t.trackIndex}',
-                                title: Text(_subtitleTrackTitle(t)),
-                                subtitle: Text(_subtitleTrackSubtitle(t)),
-                                contentPadding: EdgeInsets.zero,
-                                dense: true,
-                              ),
+                            IconButton(
+                              tooltip: '关闭',
+                              icon: const Icon(Icons.close),
+                              onPressed: () => Navigator.of(ctx).pop(),
+                            ),
                           ],
                         ),
-                      ),
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.add),
-                        title: const Text('添加字幕'),
-                        onTap: pickAndAddSubtitle,
-                      ),
-                    ],
-                    const Divider(height: 1),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('字幕同步'),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          miniIconButton(
-                            onPressed: () async {
-                              setState(() {
-                                _subtitleDelaySeconds =
-                                    (_subtitleDelaySeconds - 0.1)
-                                        .clamp(0.0, 60.0)
-                                        .toDouble();
-                              });
-                              await _applyExoSubtitleOptions();
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.closed_caption_outlined),
+                          title: const Text('轨道'),
+                          trailing: IconButton(
+                            icon: Icon(
+                              tracksExpanded
+                                  ? Icons.expand_less
+                                  : Icons.expand_more,
+                            ),
+                            onPressed: () {
+                              tracksExpanded = !tracksExpanded;
                               setSheetState(() {});
                             },
-                            icon: Icons.remove,
-                            tooltip: '-0.1s',
                           ),
-                          Text('${_subtitleDelaySeconds.toStringAsFixed(1)}s'),
-                          miniIconButton(
-                            onPressed: () async {
-                              setState(() {
-                                _subtitleDelaySeconds =
-                                    (_subtitleDelaySeconds + 0.1)
-                                        .clamp(0.0, 60.0)
-                                        .toDouble();
-                              });
-                              await _applyExoSubtitleOptions();
-                              setSheetState(() {});
+                        ),
+                        if (tracksExpanded) ...[
+                          RadioGroup<String>(
+                            groupValue: selectedKey,
+                            onChanged: (value) {
+                              if (value == null) return;
+                              // ignore: unawaited_futures
+                              selectTrackKey(value);
                             },
-                            icon: Icons.add,
-                            tooltip: '+0.1s',
+                            child: Column(
+                              children: [
+                                const RadioListTile<String>(
+                                  value: 'off',
+                                  title: Text('关闭'),
+                                  contentPadding: EdgeInsets.zero,
+                                  dense: true,
+                                ),
+                                if (tracks.isEmpty)
+                                  const Padding(
+                                    padding: EdgeInsets.fromLTRB(40, 0, 0, 8),
+                                    child: Text('暂无字幕'),
+                                  ),
+                                for (final t in tracks)
+                                  RadioListTile<String>(
+                                    value: '${t.groupIndex}_${t.trackIndex}',
+                                    title: Text(_subtitleTrackTitle(t)),
+                                    subtitle: Text(_subtitleTrackSubtitle(t)),
+                                    contentPadding: EdgeInsets.zero,
+                                    dense: true,
+                                  ),
+                              ],
+                            ),
                           ),
-                          const SizedBox(width: 6),
-                          miniIconButton(
-                            onPressed: editSubtitleDelay,
-                            icon: Icons.edit_outlined,
-                            tooltip: '输入',
-                          ),
-                          miniIconButton(
-                            onPressed: () async {
-                              setState(() => _subtitleDelaySeconds = 0.0);
-                              await _applyExoSubtitleOptions();
-                              setSheetState(() {});
-                            },
-                            icon: Icons.history,
-                            tooltip: '重置',
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.add),
+                            title: const Text('添加字幕'),
+                            onTap: pickAndAddSubtitle,
                           ),
                         ],
-                      ),
+                        const Divider(height: 1),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('字幕同步'),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              miniIconButton(
+                                onPressed: () async {
+                                  setState(() {
+                                    _subtitleDelaySeconds =
+                                        (_subtitleDelaySeconds - 0.1)
+                                            .clamp(0.0, 60.0)
+                                            .toDouble();
+                                  });
+                                  await _applyExoSubtitleOptions();
+                                  setSheetState(() {});
+                                },
+                                icon: Icons.remove,
+                                tooltip: '-0.1s',
+                              ),
+                              Text(
+                                  '${_subtitleDelaySeconds.toStringAsFixed(1)}s'),
+                              miniIconButton(
+                                onPressed: () async {
+                                  setState(() {
+                                    _subtitleDelaySeconds =
+                                        (_subtitleDelaySeconds + 0.1)
+                                            .clamp(0.0, 60.0)
+                                            .toDouble();
+                                  });
+                                  await _applyExoSubtitleOptions();
+                                  setSheetState(() {});
+                                },
+                                icon: Icons.add,
+                                tooltip: '+0.1s',
+                              ),
+                              const SizedBox(width: 6),
+                              miniIconButton(
+                                onPressed: editSubtitleDelay,
+                                icon: Icons.edit_outlined,
+                                tooltip: '输入',
+                              ),
+                              miniIconButton(
+                                onPressed: () async {
+                                  setState(() => _subtitleDelaySeconds = 0.0);
+                                  await _applyExoSubtitleOptions();
+                                  setSheetState(() {});
+                                },
+                                icon: Icons.history,
+                                tooltip: '重置',
+                              ),
+                            ],
+                          ),
+                        ),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('字幕大小'),
+                          subtitle: AppSlider(
+                            value: _subtitleFontSize.clamp(12.0, 60.0),
+                            min: 12.0,
+                            max: 60.0,
+                            divisions: 48,
+                            onChanged: (v) {
+                              setState(() => _subtitleFontSize = v);
+                              setSheetState(() {});
+                            },
+                            onChangeEnd: (_) async {
+                              await _applyExoSubtitleOptions();
+                              setSheetState(() {});
+                            },
+                          ),
+                          trailing: Text('${_subtitleFontSize.round()}'),
+                        ),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('字幕位置'),
+                          subtitle: AppSlider(
+                            value:
+                                _subtitlePositionStep.toDouble().clamp(0, 20),
+                            min: 0,
+                            max: 20,
+                            divisions: 20,
+                            onChanged: (v) {
+                              setState(() => _subtitlePositionStep = v.round());
+                              setSheetState(() {});
+                            },
+                            onChangeEnd: (_) async {
+                              await _applyExoSubtitleOptions();
+                              setSheetState(() {});
+                            },
+                          ),
+                          trailing: Text('$_subtitlePositionStep'),
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('粗体'),
+                          value: _subtitleBold,
+                          onChanged: (v) async {
+                            setState(() => _subtitleBold = v);
+                            await _applyExoSubtitleOptions();
+                            setSheetState(() {});
+                          },
+                        ),
+                        const ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          enabled: false,
+                          title: Text('强制覆盖 ASS/SSA 字幕'),
+                          subtitle: Text('仅 MPV 支持'),
+                        ),
+                      ],
                     ),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('字幕大小'),
-                      subtitle: AppSlider(
-                        value: _subtitleFontSize.clamp(12.0, 60.0),
-                        min: 12.0,
-                        max: 60.0,
-                        divisions: 48,
-                        onChanged: (v) {
-                          setState(() => _subtitleFontSize = v);
-                          setSheetState(() {});
-                        },
-                        onChangeEnd: (_) async {
-                          await _applyExoSubtitleOptions();
-                          setSheetState(() {});
-                        },
-                      ),
-                      trailing: Text('${_subtitleFontSize.round()}'),
-                    ),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('字幕位置'),
-                      subtitle: AppSlider(
-                        value: _subtitlePositionStep.toDouble().clamp(0, 20),
-                        min: 0,
-                        max: 20,
-                        divisions: 20,
-                        onChanged: (v) {
-                          setState(() => _subtitlePositionStep = v.round());
-                          setSheetState(() {});
-                        },
-                        onChangeEnd: (_) async {
-                          await _applyExoSubtitleOptions();
-                          setSheetState(() {});
-                        },
-                      ),
-                      trailing: Text('$_subtitlePositionStep'),
-                    ),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('粗体'),
-                      value: _subtitleBold,
-                      onChanged: (v) async {
-                        setState(() => _subtitleBold = v);
-                        await _applyExoSubtitleOptions();
-                        setSheetState(() {});
-                      },
-                    ),
-                    const ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      enabled: false,
-                      title: Text('强制覆盖 ASS/SSA 字幕'),
-                      subtitle: Text('仅 MPV 支持'),
-                    ),
-                  ],
-                ),
-              ),
+                  ),
+                );
+              },
             );
           },
-        );
-      },
-    );
+        ));
   }
 
   String _mobileTopTitleText() {
@@ -1915,6 +1919,17 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     _showControls(scheduleHide: scheduleHide);
   }
 
+  Future<T?> _showPinnedControlsModal<T>(Future<T?> Function() builder) async {
+    _showControls(scheduleHide: false);
+    try {
+      return await builder();
+    } finally {
+      if (mounted) {
+        _scheduleControlsHide();
+      }
+    }
+  }
+
   Future<void> _restoreMobileVideoDisplayMode() async {
     final mode = await VideoDisplayModePreferences.load();
     if (!mounted || mode == _mobileVideoDisplayMode) return;
@@ -1930,81 +1945,80 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   Future<void> _showMobileVideoDisplaySheet({
     required bool controlsEnabled,
   }) async {
-    _showControls(scheduleHide: false);
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black54,
-      builder: (sheetContext) {
-        return SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(24),
-                color: Colors.black.withValues(alpha: 0.88),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.14),
-                ),
-              ),
+    await _showPinnedControlsModal(() => showModalBottomSheet<void>(
+          context: context,
+          backgroundColor: Colors.transparent,
+          barrierColor: Colors.black54,
+          builder: (sheetContext) {
+            return SafeArea(
+              top: false,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(24),
+                    color: Colors.black.withValues(alpha: 0.88),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.14),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Expanded(
-                          child: Text(
-                            '画面模式',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
+                        Row(
+                          children: [
+                            const Expanded(
+                              child: Text(
+                                '画面模式',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                             ),
+                            IconButton(
+                              tooltip: '关闭',
+                              onPressed: () => Navigator.of(sheetContext).pop(),
+                              icon: const Icon(Icons.close_rounded),
+                              color: Colors.white,
+                              splashRadius: 20,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        for (final mode in VideoDisplayMode.values) ...[
+                          MobilePlayerOptionTile(
+                            title: mode.label,
+                            subtitle: mode.description,
+                            selected: mode == _mobileVideoDisplayMode,
+                            trailing: mode == _mobileVideoDisplayMode
+                                ? const Icon(
+                                    Icons.check_circle_rounded,
+                                    color: Colors.white,
+                                  )
+                                : null,
+                            onTap: !controlsEnabled ||
+                                    mode == _mobileVideoDisplayMode
+                                ? null
+                                : () {
+                                    _setMobileVideoDisplayMode(mode);
+                                    Navigator.of(sheetContext).pop();
+                                  },
                           ),
-                        ),
-                        IconButton(
-                          tooltip: '关闭',
-                          onPressed: () => Navigator.of(sheetContext).pop(),
-                          icon: const Icon(Icons.close_rounded),
-                          color: Colors.white,
-                          splashRadius: 20,
-                        ),
+                          if (mode != VideoDisplayMode.values.last)
+                            const SizedBox(height: 8),
+                        ],
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    for (final mode in VideoDisplayMode.values) ...[
-                      MobilePlayerOptionTile(
-                        title: mode.label,
-                        subtitle: mode.description,
-                        selected: mode == _mobileVideoDisplayMode,
-                        trailing: mode == _mobileVideoDisplayMode
-                            ? const Icon(
-                                Icons.check_circle_rounded,
-                                color: Colors.white,
-                              )
-                            : null,
-                        onTap: !controlsEnabled ||
-                                mode == _mobileVideoDisplayMode
-                            ? null
-                            : () {
-                                _setMobileVideoDisplayMode(mode);
-                                Navigator.of(sheetContext).pop();
-                              },
-                      ),
-                      if (mode != VideoDisplayMode.values.last)
-                        const SizedBox(height: 8),
-                    ],
-                  ],
+                  ),
                 ),
               ),
-            ),
-          ),
-        );
-      },
-    );
+            );
+          },
+        ));
   }
 
   Size _mobileVideoSurfaceSize(VideoPlayerController controller) {

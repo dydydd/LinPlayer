@@ -689,6 +689,17 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _showControls(scheduleHide: scheduleHide);
   }
 
+  Future<T?> _showPinnedControlsModal<T>(Future<T?> Function() builder) async {
+    _showControls(scheduleHide: false);
+    try {
+      return await builder();
+    } finally {
+      if (mounted) {
+        _scheduleControlsHide();
+      }
+    }
+  }
+
   Future<void> _restoreMobileVideoDisplayMode() async {
     final mode = await VideoDisplayModePreferences.load();
     if (!mounted || mode == _mobileVideoDisplayMode) return;
@@ -704,81 +715,80 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   Future<void> _showMobileVideoDisplaySheet({
     required bool controlsEnabled,
   }) async {
-    _showControls(scheduleHide: false);
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black54,
-      builder: (sheetContext) {
-        return SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(24),
-                color: Colors.black.withValues(alpha: 0.88),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.14),
-                ),
-              ),
+    await _showPinnedControlsModal(() => showModalBottomSheet<void>(
+          context: context,
+          backgroundColor: Colors.transparent,
+          barrierColor: Colors.black54,
+          builder: (sheetContext) {
+            return SafeArea(
+              top: false,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(24),
+                    color: Colors.black.withValues(alpha: 0.88),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.14),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Expanded(
-                          child: Text(
-                            '画面模式',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
+                        Row(
+                          children: [
+                            const Expanded(
+                              child: Text(
+                                '画面模式',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                             ),
+                            IconButton(
+                              tooltip: '关闭',
+                              onPressed: () => Navigator.of(sheetContext).pop(),
+                              icon: const Icon(Icons.close_rounded),
+                              color: Colors.white,
+                              splashRadius: 20,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        for (final mode in VideoDisplayMode.values) ...[
+                          MobilePlayerOptionTile(
+                            title: mode.label,
+                            subtitle: mode.description,
+                            selected: mode == _mobileVideoDisplayMode,
+                            trailing: mode == _mobileVideoDisplayMode
+                                ? const Icon(
+                                    Icons.check_circle_rounded,
+                                    color: Colors.white,
+                                  )
+                                : null,
+                            onTap: !controlsEnabled ||
+                                    mode == _mobileVideoDisplayMode
+                                ? null
+                                : () {
+                                    _setMobileVideoDisplayMode(mode);
+                                    Navigator.of(sheetContext).pop();
+                                  },
                           ),
-                        ),
-                        IconButton(
-                          tooltip: '关闭',
-                          onPressed: () => Navigator.of(sheetContext).pop(),
-                          icon: const Icon(Icons.close_rounded),
-                          color: Colors.white,
-                          splashRadius: 20,
-                        ),
+                          if (mode != VideoDisplayMode.values.last)
+                            const SizedBox(height: 8),
+                        ],
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    for (final mode in VideoDisplayMode.values) ...[
-                      MobilePlayerOptionTile(
-                        title: mode.label,
-                        subtitle: mode.description,
-                        selected: mode == _mobileVideoDisplayMode,
-                        trailing: mode == _mobileVideoDisplayMode
-                            ? const Icon(
-                                Icons.check_circle_rounded,
-                                color: Colors.white,
-                              )
-                            : null,
-                        onTap: !controlsEnabled ||
-                                mode == _mobileVideoDisplayMode
-                            ? null
-                            : () {
-                                _setMobileVideoDisplayMode(mode);
-                                Navigator.of(sheetContext).pop();
-                              },
-                      ),
-                      if (mode != VideoDisplayMode.values.last)
-                        const SizedBox(height: 8),
-                    ],
-                  ],
+                  ),
                 ),
               ),
-            ),
-          ),
-        );
-      },
-    );
+            );
+          },
+        ));
   }
 
   Size _mobileVideoSurfaceSize(VideoPlayerController controller) {
@@ -838,8 +848,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   }
 
   String? get _seriesSkipServerId {
-    final value = (widget.server?.id ?? widget.appState.activeServerId ?? '')
-        .trim();
+    final value =
+        (widget.server?.id ?? widget.appState.activeServerId ?? '').trim();
     return value.isEmpty ? null : value;
   }
 
@@ -941,13 +951,15 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           );
     if (!mounted) return null;
 
-    final result = await showSeriesSkipConfigDialog(
-      context,
-      seriesTitle: _seriesSkipDisplayTitle,
-      segment:
-          opening ? SeriesSkipSegment.opening : SeriesSkipSegment.ending,
-      initialSeconds:
-          opening ? initialProfile.openingSeconds : initialProfile.endingSeconds,
+    final result = await _showPinnedControlsModal(
+      () => showSeriesSkipConfigDialog(
+        context,
+        seriesTitle: _seriesSkipDisplayTitle,
+        segment: opening ? SeriesSkipSegment.opening : SeriesSkipSegment.ending,
+        initialSeconds: opening
+            ? initialProfile.openingSeconds
+            : initialProfile.endingSeconds,
+      ),
     );
     if (result == null) return null;
 
@@ -3319,6 +3331,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           : null,
     );
   }
+
   String _mobilePanelTitle(_MobilePlayerPanel panel) {
     return switch (panel) {
       _MobilePlayerPanel.route => '线路',
@@ -3409,6 +3422,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       onDecreaseHoldEnd: _stopMobilePlaybackRateAdjust,
     );
   }
+
   Widget _buildMobileCorePanel({required bool controlsEnabled}) {
     final current = widget.appState.playerCore;
 

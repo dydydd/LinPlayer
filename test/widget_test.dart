@@ -13,6 +13,15 @@ import 'package:lin_player_ui/lin_player_ui.dart';
 const _emptyStateTitle = '\u8fd8\u6ca1\u6709\u670d\u52a1\u5668';
 const _addLabel = '\u6dfb\u52a0';
 const _connectAndEnterLabel = '\u8fde\u63a5\u5e76\u8fdb\u5165';
+const _serverAddressLabel = '\u670d\u52a1\u5668\u5730\u5740';
+const _usernameLabel = '\u8d26\u53f7';
+
+Finder _fieldWithLabel(String label) {
+  return find.ancestor(
+    of: find.text(label),
+    matching: find.byType(TextFormField),
+  );
+}
 
 void main() {
   testWidgets('Shows server screen by default', (WidgetTester tester) async {
@@ -48,12 +57,13 @@ void main() {
 
     expect(find.byType(MobileAddServerPage), findsOneWidget);
 
-    final fields = find.byType(TextFormField);
-    expect(fields, findsNWidgets(5));
+    final addressField = _fieldWithLabel(_serverAddressLabel);
+    final usernameField = _fieldWithLabel(_usernameLabel);
+    expect(addressField, findsOneWidget);
+    expect(usernameField, findsOneWidget);
 
-    // Order in the mobile add-server page: name, address, remark, username, password.
-    await tester.enterText(fields.at(1), 'emby.example.com');
-    await tester.enterText(fields.at(3), 'demo');
+    await tester.enterText(addressField, 'emby.example.com');
+    await tester.enterText(usernameField, 'demo');
 
     await tester.ensureVisible(find.text(_connectAndEnterLabel));
     await tester.tap(find.text(_connectAndEnterLabel));
