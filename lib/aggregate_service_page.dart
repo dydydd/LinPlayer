@@ -37,30 +37,59 @@ class _AggregateServicePageState extends State<AggregateServicePage> {
     final scheme = theme.colorScheme;
     final isDark = scheme.brightness == Brightness.dark;
 
-    return TabBar(
-      dividerColor: embedded ? Colors.transparent : null,
-      indicatorSize: TabBarIndicatorSize.tab,
-      indicatorColor: scheme.primary.withValues(alpha: isDark ? 0.90 : 0.96),
-      indicatorWeight: embedded ? 0 : 3,
-      splashBorderRadius: BorderRadius.circular(16),
-      labelStyle: theme.textTheme.labelLarge?.copyWith(
-        fontWeight: FontWeight.w700,
-      ),
-      unselectedLabelStyle: theme.textTheme.labelLarge?.copyWith(
-        fontWeight: FontWeight.w600,
-      ),
-      labelColor: scheme.onSurface,
-      unselectedLabelColor: scheme.onSurfaceVariant,
-      indicator: embedded
-          ? BoxDecoration(
-              color: scheme.primary.withValues(alpha: isDark ? 0.22 : 0.14),
+    return PreferredSize(
+      preferredSize: const Size.fromHeight(50),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest.withValues(
+            alpha: embedded ? (isDark ? 0.46 : 0.72) : (isDark ? 0.74 : 0.92),
+          ),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: TabBar(
+            dividerColor: Colors.transparent,
+            indicatorSize: TabBarIndicatorSize.tab,
+            indicatorPadding: EdgeInsets.zero,
+            splashBorderRadius: BorderRadius.circular(16),
+            labelPadding: EdgeInsets.zero,
+            labelStyle: theme.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.1,
+            ),
+            unselectedLabelStyle: theme.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+            labelColor: scheme.onPrimaryContainer,
+            unselectedLabelColor: scheme.onSurfaceVariant,
+            indicator: BoxDecoration(
+              color: scheme.primaryContainer.withValues(
+                alpha: isDark ? 0.88 : 0.94,
+              ),
               borderRadius: BorderRadius.circular(16),
-            )
-          : null,
-      tabs: const [
-        Tab(text: '观看记录'),
-        Tab(text: '聚合搜索'),
-      ],
+              boxShadow: [
+                BoxShadow(
+                  color: scheme.shadow.withValues(alpha: isDark ? 0.14 : 0.08),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8),
+                  spreadRadius: -12,
+                ),
+              ],
+            ),
+            tabs: const [
+              SizedBox(
+                height: 42,
+                child: Center(child: Text('观看记录')),
+              ),
+              SizedBox(
+                height: 42,
+                child: Center(child: Text('聚合搜索')),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -136,6 +165,19 @@ class _ServerContinueWatchingState {
     required this.items,
   });
 }
+
+class _AggregateServerSearchSection {
+  const _AggregateServerSearchSection({
+    required this.server,
+    required this.items,
+  });
+
+  final ServerProfile server;
+  final List<MediaItem> items;
+}
+
+bool _useCompactAggregateLayout(BuildContext context) =>
+    !DeviceType.isTv && MediaQuery.sizeOf(context).shortestSide < 700;
 
 class _AggregateWatchHistoryTab extends StatefulWidget {
   const _AggregateWatchHistoryTab({required this.appState});
@@ -286,9 +328,172 @@ class _AggregateWatchHistoryTabState extends State<_AggregateWatchHistoryTab> {
   Widget build(BuildContext context) {
     final servers = widget.appState.servers;
     final isTv = DeviceType.isTv;
+    final useCompactLayout = _useCompactAggregateLayout(context);
 
     if (servers.isEmpty) {
       return const Center(child: Text('暂无服务器'));
+    }
+
+    if (useCompactLayout) {
+      return RefreshIndicator(
+        onRefresh: _reload,
+        child: ListView.separated(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+          itemCount: servers.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 14),
+          itemBuilder: (context, index) {
+            final server = servers[index];
+            final state = _stateByServer[server.id] ??
+                const _ServerContinueWatchingState(
+                  loading: true,
+                  error: null,
+                  items: [],
+                );
+            final visibleItems = _latestWatchPerSeries(state.items);
+            final access = resolveServerAccess(
+              appState: widget.appState,
+              server: server,
+            );
+            final cardWidth = ((MediaQuery.sizeOf(context).width - 64) / 3.15)
+                .clamp(92.0, 118.0)
+                .toDouble();
+            final rowHeight = cardWidth / (2 / 3) + 52;
+
+            return _AggregateSectionSurface(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _AggregateServerHeader(
+                      server: server,
+                      trailing: state.loading
+                          ? Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  '更新中',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                ),
+                              ],
+                            )
+                          : Text(
+                              visibleItems.isEmpty
+                                  ? '暂无记录'
+                                  : '${visibleItems.length} 条',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                            ),
+                    ),
+                    const SizedBox(height: 14),
+                    if (state.error != null)
+                      Text(
+                        state.error!,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context).colorScheme.error,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      )
+                    else if (state.loading && visibleItems.isEmpty)
+                      const SizedBox(
+                        height: 108,
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    else if (visibleItems.isEmpty)
+                      Text(
+                        '这个服务器还没有观看记录',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                            ),
+                      )
+                    else
+                      SizedBox(
+                        height: rowHeight,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: visibleItems.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(width: 10),
+                          itemBuilder: (context, i) {
+                            final item = visibleItems[i];
+                            final isEpisode =
+                                item.type.toLowerCase() == 'episode';
+                            final title =
+                                isEpisode && item.seriesName.trim().isNotEmpty
+                                    ? item.seriesName.trim()
+                                    : item.name;
+                            final pos =
+                                _ticksToDuration(item.playbackPositionTicks);
+                            final tag = isEpisode ? _episodeTag(item) : '';
+                            final captionParts = <String>[
+                              if (tag.isNotEmpty) tag,
+                              if (pos > Duration.zero) '看到 ${_fmtClock(pos)}',
+                            ];
+
+                            return SizedBox(
+                              width: cardWidth,
+                              child: _AggregatePosterCard(
+                                item: item,
+                                access: access,
+                                titleOverride: title,
+                                caption: captionParts.join(' · '),
+                                onTap: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => isEpisode
+                                          ? EpisodeDetailPage(
+                                              episode: item,
+                                              appState: widget.appState,
+                                              server: server,
+                                              isTv: false,
+                                            )
+                                          : ShowDetailPage(
+                                              itemId: item.id,
+                                              title: item.name,
+                                              appState: widget.appState,
+                                              server: server,
+                                              isTv: false,
+                                            ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      );
     }
 
     return RefreshIndicator(
@@ -545,6 +750,7 @@ class _AggregateSearchTabStatefulState
   bool _loading = false;
   String? _error;
   List<_WorkGroup> _groups = const [];
+  List<_AggregateServerSearchSection> _serverSections = const [];
   Map<String, String> _serverErrors = const {};
 
   final Map<String, Future<_LatestEpisodeResult?>> _latestEpisodeFutures = {};
@@ -592,6 +798,30 @@ class _AggregateSearchTabStatefulState
       if (y != null && y > 1800 && y < 2200) return y;
     }
     return null;
+  }
+
+  List<MediaItem> _filterVisibleItems(
+    Iterable<MediaItem> items, {
+    required Set<String> hiddenLibraries,
+    required String query,
+  }) {
+    final visibleItems = items.where((item) {
+      final type = item.type.toLowerCase();
+      if (type != 'series' && type != 'movie') return false;
+
+      final parentId = (item.parentId ?? '').trim();
+      if (parentId.isNotEmpty && hiddenLibraries.contains(parentId)) {
+        return false;
+      }
+      return true;
+    }).toList(growable: false);
+
+    final normalizedQuery = query.toLowerCase();
+    final exactMatches = visibleItems
+        .where((item) => item.name.trim().toLowerCase() == normalizedQuery)
+        .toList(growable: false);
+
+    return exactMatches.isNotEmpty ? exactMatches : visibleItems;
   }
 
   static String _normalizeTitle(String raw) {
@@ -730,6 +960,7 @@ class _AggregateSearchTabStatefulState
         _loading = false;
         _error = null;
         _groups = const [];
+        _serverSections = const [];
         _serverErrors = const {};
       });
       return;
@@ -739,8 +970,9 @@ class _AggregateSearchTabStatefulState
     if (servers.isEmpty) {
       setState(() {
         _loading = false;
-        _error = null;
+        _error = '暂无服务器';
         _groups = const [];
+        _serverSections = const [];
         _serverErrors = const {};
       });
       return;
@@ -753,6 +985,7 @@ class _AggregateSearchTabStatefulState
     });
 
     final hits = <_ServerSearchHit>[];
+    final sectionItemsByServer = <String, List<MediaItem>>{};
     final serverErrors = <String, String>{};
 
     await Future.wait<void>(
@@ -782,14 +1015,15 @@ class _AggregateSearchTabStatefulState
             sortBy: 'SortName',
             sortOrder: 'Ascending',
           );
-          final hiddenLibraries = server.hiddenLibraries;
-          for (final item in res.items) {
-            final t = item.type.toLowerCase();
-            if (t != 'series' && t != 'movie') continue;
-            final parentId = (item.parentId ?? '').trim();
-            if (parentId.isNotEmpty && hiddenLibraries.contains(parentId)) {
-              continue;
-            }
+          final items = _filterVisibleItems(
+            res.items,
+            hiddenLibraries: server.hiddenLibraries,
+            query: query,
+          );
+          if (items.isNotEmpty) {
+            sectionItemsByServer[server.id] = items;
+          }
+          for (final item in items) {
             hits.add(_ServerSearchHit(server: server, item: item));
           }
         } catch (e) {
@@ -800,10 +1034,22 @@ class _AggregateSearchTabStatefulState
 
     if (!mounted || seq != _searchSeq) return;
 
+    final sections = <_AggregateServerSearchSection>[
+      for (final server in servers)
+        if ((sectionItemsByServer[server.id] ?? const <MediaItem>[]).isNotEmpty)
+          _AggregateServerSearchSection(
+            server: server,
+            items: sectionItemsByServer[server.id]!,
+          ),
+    ];
+
     if (hits.isEmpty) {
+      final allFailed = serverErrors.length == servers.length;
       setState(() {
         _loading = false;
+        _error = allFailed ? '聚合搜索失败' : null;
         _groups = const [];
+        _serverSections = sections;
         _serverErrors = serverErrors;
       });
       return;
@@ -833,7 +1079,9 @@ class _AggregateSearchTabStatefulState
 
     setState(() {
       _loading = false;
+      _error = null;
       _groups = groups;
+      _serverSections = sections;
       _serverErrors = serverErrors;
     });
   }
@@ -896,14 +1144,94 @@ class _AggregateSearchTabStatefulState
     final isTv = DeviceType.isTv;
     final query = _controller.text.trim();
     final groups = _sortedGroups(_groups);
+    final useCompactLayout = _useCompactAggregateLayout(context);
 
     Widget content;
     if (query.isEmpty) {
       content = const Center(child: Text('输入剧名开始搜索'));
-    } else if (_groups.isEmpty) {
+    } else if (useCompactLayout ? _serverSections.isEmpty : _groups.isEmpty) {
       content = _loading
           ? const Center(child: CircularProgressIndicator())
           : const Center(child: Text('没有结果'));
+    } else if (useCompactLayout) {
+      content = ListView.separated(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+        itemCount: _serverSections.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 14),
+        itemBuilder: (context, index) {
+          final section = _serverSections[index];
+          final access = resolveServerAccess(
+            appState: widget.appState,
+            server: section.server,
+          );
+          final cardWidth = ((MediaQuery.sizeOf(context).width - 64) / 3.15)
+              .clamp(92.0, 118.0)
+              .toDouble();
+          final rowHeight = cardWidth / (2 / 3) + 52;
+
+          return _AggregateSectionSurface(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _AggregateServerHeader(
+                    server: section.server,
+                    trailing: Text(
+                      '${section.items.length} 项',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    height: rowHeight,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: section.items.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 10),
+                      itemBuilder: (context, i) {
+                        final item = section.items[i];
+                        final type = item.type.toLowerCase();
+                        final badgeText = type == 'series'
+                            ? '剧集'
+                            : (type == 'movie' ? '电影' : '');
+                        final year = _yearOf(item)?.toString() ?? '';
+
+                        return SizedBox(
+                          width: cardWidth,
+                          child: _AggregatePosterCard(
+                            item: item,
+                            access: access,
+                            badgeText: badgeText,
+                            caption: year,
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => ShowDetailPage(
+                                    itemId: item.id,
+                                    title: item.name,
+                                    appState: widget.appState,
+                                    server: section.server,
+                                    isTv: false,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
     } else {
       content = ListView.builder(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
@@ -1131,10 +1459,213 @@ class _AggregateSearchTabStatefulState
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ),
-        if (_loading && query.isNotEmpty && _groups.isNotEmpty)
+        if (_loading &&
+            query.isNotEmpty &&
+            (useCompactLayout
+                ? _serverSections.isNotEmpty
+                : _groups.isNotEmpty))
           const LinearProgressIndicator(minHeight: 2),
         Expanded(child: content),
       ],
+    );
+  }
+}
+
+class _AggregateSectionSurface extends StatelessWidget {
+  const _AggregateSectionSurface({
+    required this.child,
+  });
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: isDark
+            ? scheme.surfaceContainerHigh.withValues(alpha: 0.9)
+            : scheme.surfaceContainerHighest.withValues(alpha: 0.96),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: scheme.shadow.withValues(alpha: isDark ? 0.14 : 0.08),
+            blurRadius: 24,
+            offset: const Offset(0, 12),
+            spreadRadius: -14,
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+}
+
+class _AggregateServerHeader extends StatelessWidget {
+  const _AggregateServerHeader({
+    required this.server,
+    required this.trailing,
+  });
+
+  final ServerProfile server;
+  final Widget trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Row(
+      children: [
+        ServerIconAvatar(
+          iconUrl: server.iconUrl,
+          name: server.name,
+          radius: 18,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            server.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        trailing,
+      ],
+    );
+  }
+}
+
+class _AggregatePosterCard extends StatelessWidget {
+  const _AggregatePosterCard({
+    required this.item,
+    required this.access,
+    required this.onTap,
+    this.titleOverride,
+    this.caption,
+    this.badgeText,
+  });
+
+  final MediaItem item;
+  final ServerAccess? access;
+  final VoidCallback onTap;
+  final String? titleOverride;
+  final String? caption;
+  final String? badgeText;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final imageUrl = item.hasImage && access != null
+        ? access!.adapter.imageUrl(
+            access!.auth,
+            itemId: item.id,
+            imageType: 'Primary',
+            maxWidth: 320,
+          )
+        : null;
+    final title = (titleOverride ?? item.name).trim();
+    final meta = (caption ?? '').trim();
+    final badge = (badgeText ?? '').trim();
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            AspectRatio(
+              aspectRatio: 2 / 3,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: scheme.shadow.withValues(alpha: 0.12),
+                      blurRadius: 18,
+                      offset: const Offset(0, 10),
+                      spreadRadius: -12,
+                    ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      if (imageUrl == null)
+                        const ColoredBox(
+                          color: Colors.black12,
+                          child: Center(child: Icon(Icons.image_outlined)),
+                        )
+                      else
+                        CachedNetworkImage(
+                          imageUrl: imageUrl,
+                          cacheManager: CoverCacheManager.instance,
+                          httpHeaders: {
+                            'User-Agent': LinHttpClientFactory.userAgent,
+                          },
+                          fit: BoxFit.cover,
+                          placeholder: (_, __) => const ColoredBox(
+                            color: Colors.black12,
+                            child: Center(child: Icon(Icons.image_outlined)),
+                          ),
+                          errorWidget: (_, __, ___) => const ColoredBox(
+                            color: Colors.black12,
+                            child: Center(
+                                child: Icon(Icons.broken_image_outlined)),
+                          ),
+                          useOldImageOnUrlChange: true,
+                          fadeInDuration: Duration.zero,
+                          fadeOutDuration: Duration.zero,
+                          placeholderFadeInDuration: Duration.zero,
+                        ),
+                      if (badge.isNotEmpty)
+                        Positioned(
+                          left: 8,
+                          top: 8,
+                          child: MediaLabelBadge(text: badge),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (meta.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Text(
+                  meta,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

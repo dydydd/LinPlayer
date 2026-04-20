@@ -116,6 +116,11 @@ class MobileHomeBottomNav extends StatelessWidget {
     final scheme = theme.colorScheme;
     final progress = visibility.clamp(0.0, 1.0);
     final isDark = scheme.brightness == Brightness.dark;
+    final shellColor = isDark
+        ? scheme.surfaceContainerHigh.withValues(alpha: 0.94)
+        : scheme.surfaceContainerHighest.withValues(alpha: 0.98);
+    final shellBorder =
+        scheme.outlineVariant.withValues(alpha: isDark ? 0.22 : 0.36);
     final indicatorColor =
         scheme.primary.withValues(alpha: isDark ? 0.94 : 0.98);
     final indicatorShadow =
@@ -140,11 +145,11 @@ class MobileHomeBottomNav extends StatelessWidget {
                 left: false,
                 right: false,
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                  padding: const EdgeInsets.fromLTRB(14, 6, 14, 10),
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      final navWidth = constraints.maxWidth > 380
-                          ? 380.0
+                      final navWidth = constraints.maxWidth > 360
+                          ? 360.0
                           : constraints.maxWidth;
 
                       return Row(
@@ -152,87 +157,113 @@ class MobileHomeBottomNav extends StatelessWidget {
                         children: [
                           SizedBox(
                             width: navWidth,
-                            child: Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 6),
-                              child: SizedBox(
-                                height: 60,
-                                child: LayoutBuilder(
-                                  builder: (context, innerConstraints) {
-                                    final slotWidth =
-                                        innerConstraints.maxWidth /
-                                            _destinations.length;
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: shellColor,
+                                borderRadius: BorderRadius.circular(28),
+                                border: Border.all(color: shellBorder),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color:
+                                        scheme.shadow.withValues(alpha: 0.12),
+                                    blurRadius: 26,
+                                    offset: const Offset(0, 12),
+                                    spreadRadius: -14,
+                                  ),
+                                ],
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  6,
+                                  5,
+                                  6,
+                                  5,
+                                ),
+                                child: SizedBox(
+                                  height: 52,
+                                  child: LayoutBuilder(
+                                    builder: (context, innerConstraints) {
+                                      final slotWidth =
+                                          innerConstraints.maxWidth /
+                                              _destinations.length;
 
-                                    return Stack(
-                                      children: [
-                                        AnimatedPositioned(
-                                          duration: animationDuration,
-                                          curve: Curves.easeOutCubic,
-                                          left: hasVisibleSelection
-                                              ? activeSlot * slotWidth
-                                              : slotWidth,
-                                          top: 0,
-                                          bottom: 0,
-                                          width: slotWidth,
-                                          child: AnimatedOpacity(
+                                      return Stack(
+                                        children: [
+                                          AnimatedPositioned(
                                             duration: animationDuration,
-                                            curve: Curves.easeOut,
-                                            opacity:
-                                                hasVisibleSelection ? 1 : 0,
-                                            child: Padding(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                horizontal: 2,
-                                              ),
-                                              child: DecoratedBox(
-                                                decoration: BoxDecoration(
-                                                  color: indicatorColor,
-                                                  borderRadius:
-                                                      BorderRadius.circular(24),
-                                                  boxShadow: [
-                                                    BoxShadow(
-                                                      color: indicatorShadow,
-                                                      blurRadius: 20,
-                                                      offset: const Offset(
-                                                        0,
-                                                        8,
-                                                      ),
-                                                      spreadRadius: -8,
+                                            curve: Curves.easeOutCubic,
+                                            left: hasVisibleSelection
+                                                ? activeSlot * slotWidth
+                                                : slotWidth,
+                                            top: 0,
+                                            bottom: 0,
+                                            width: slotWidth,
+                                            child: AnimatedOpacity(
+                                              duration: animationDuration,
+                                              curve: Curves.easeOut,
+                                              opacity:
+                                                  hasVisibleSelection ? 1 : 0,
+                                              child: Padding(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 2,
+                                                  vertical: 1,
+                                                ),
+                                                child: DecoratedBox(
+                                                  decoration: BoxDecoration(
+                                                    color: indicatorColor,
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                      22,
                                                     ),
-                                                  ],
+                                                    boxShadow: [
+                                                      BoxShadow(
+                                                        color: indicatorShadow,
+                                                        blurRadius: 18,
+                                                        offset: const Offset(
+                                                          0,
+                                                          8,
+                                                        ),
+                                                        spreadRadius: -10,
+                                                      ),
+                                                    ],
+                                                  ),
                                                 ),
                                               ),
                                             ),
                                           ),
-                                        ),
-                                        Row(
-                                          children: [
-                                            for (final destination
-                                                in _destinations)
-                                              Expanded(
-                                                child: _SegmentedNavButton(
-                                                  destination: destination,
-                                                  selected:
-                                                      destination.pageIndex ==
-                                                          selectedIndex,
-                                                  labelStyle: theme
-                                                      .textTheme.labelSmall,
-                                                  selectedColor:
-                                                      scheme.onPrimary,
-                                                  unselectedColor:
-                                                      scheme.onSurfaceVariant,
-                                                  animationDuration:
-                                                      animationDuration,
-                                                  onTap: () => onSelected(
-                                                    destination.pageIndex,
+                                          Row(
+                                            children: [
+                                              for (final destination
+                                                  in _destinations)
+                                                Expanded(
+                                                  child: _SegmentedNavButton(
+                                                    destination: destination,
+                                                    selected:
+                                                        destination.pageIndex ==
+                                                            selectedIndex,
+                                                    labelStyle: theme
+                                                        .textTheme.labelSmall
+                                                        ?.copyWith(
+                                                      fontSize: 10.5,
+                                                    ),
+                                                    selectedColor:
+                                                        scheme.onPrimary,
+                                                    unselectedColor:
+                                                        scheme.onSurfaceVariant,
+                                                    animationDuration:
+                                                        animationDuration,
+                                                    onTap: () => onSelected(
+                                                      destination.pageIndex,
+                                                    ),
                                                   ),
                                                 ),
-                                              ),
-                                          ],
-                                        ),
-                                      ],
-                                    );
-                                  },
+                                            ],
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                  ),
                                 ),
                               ),
                             ),
@@ -503,7 +534,7 @@ class _SegmentedNavButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(24),
             onTap: onTap,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -514,15 +545,15 @@ class _SegmentedNavButton extends StatelessWidget {
                     child: AnimatedScale(
                       duration: animationDuration,
                       curve: Curves.easeOutCubic,
-                      scale: selected ? 1.0 : 0.94,
+                      scale: selected ? 1.0 : 0.92,
                       child: Icon(
                         destination.icon,
-                        size: 21,
+                        size: 18,
                         color: foregroundColor,
                       ),
                     ),
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 2),
                   AnimatedDefaultTextStyle(
                     duration: animationDuration,
                     curve: Curves.easeOutCubic,
