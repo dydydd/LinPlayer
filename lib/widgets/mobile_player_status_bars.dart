@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
@@ -165,6 +166,102 @@ class MobilePlayerTopStatusBar extends StatelessWidget {
   }
 }
 
+enum MobilePlayerSidePanelVariant {
+  standard,
+  moreOptions,
+}
+
+class MobilePlayerOverlaySheet extends StatelessWidget {
+  const MobilePlayerOverlaySheet({
+    super.key,
+    required this.visible,
+    required this.onDismiss,
+    required this.child,
+  });
+
+  final bool visible;
+  final VoidCallback onDismiss;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final panelWidth = size.width / 3;
+
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          IgnorePointer(
+            ignoring: !visible,
+            child: AnimatedOpacity(
+              opacity: visible ? 1 : 0,
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onDismiss,
+                child: ClipRect(
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                    child: ColoredBox(
+                      color: Colors.black.withValues(alpha: 0.28),
+                      child: const SizedBox.expand(),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            top: 0,
+            bottom: 0,
+            right: visible ? 0 : -panelWidth - 12,
+            width: panelWidth,
+            child: IgnorePointer(
+              ignoring: !visible,
+              child: SafeArea(
+                left: false,
+                minimum: const EdgeInsets.fromLTRB(0, 8, 8, 8),
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 10),
+                  child: _MobilePlayerPanelSurface(child: child),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MobilePlayerPanelSurface extends StatelessWidget {
+  const _MobilePlayerPanelSurface({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    const radius = 24.0;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(radius),
+            color: Colors.white.withValues(alpha: 0.08),
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
 class MobilePlayerSidePanel extends StatelessWidget {
   const MobilePlayerSidePanel({
     super.key,
@@ -181,135 +278,61 @@ class MobilePlayerSidePanel extends StatelessWidget {
   final VoidCallback onDismiss;
   final Widget child;
   final Widget? headerTrailing;
-
-  /// [moreOptions]：贴右侧较宽面板、弱遮罩、无描边（用于「更多选项」）。
   final MobilePlayerSidePanelVariant variant;
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    final panelWidth = switch (variant) {
-      MobilePlayerSidePanelVariant.standard => math.min(
-          336.0,
-          size.width * (size.width > size.height ? 0.38 : 0.50),
-        ),
+    final contentPadding = switch (variant) {
+      MobilePlayerSidePanelVariant.standard =>
+        const EdgeInsets.fromLTRB(16, 12, 12, 12),
       MobilePlayerSidePanelVariant.moreOptions =>
-        size.width * (2 / 3),
+        const EdgeInsets.fromLTRB(14, 12, 12, 12),
     };
-    final barrierOpacity = switch (variant) {
-      MobilePlayerSidePanelVariant.standard => 0.22,
-      MobilePlayerSidePanelVariant.moreOptions => 0.14,
-    };
-    final radius = switch (variant) {
-      MobilePlayerSidePanelVariant.standard => 24.0,
-      MobilePlayerSidePanelVariant.moreOptions => 18.0,
-    };
-    final showBorder = variant == MobilePlayerSidePanelVariant.standard;
+    final headerSpacing =
+        variant == MobilePlayerSidePanelVariant.moreOptions ? 8.0 : 10.0;
 
-    return Positioned.fill(
-      child: Stack(
-        children: [
-          IgnorePointer(
-            ignoring: !visible,
-            child: AnimatedOpacity(
-              opacity: visible ? 1 : 0,
-              duration: const Duration(milliseconds: 180),
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: onDismiss,
-                child: ColoredBox(
-                  color: Colors.black.withValues(alpha: barrierOpacity),
-                  child: const SizedBox.expand(),
-                ),
-              ),
-            ),
-          ),
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
-            top: 0,
-            bottom: 0,
-            right: visible ? 0 : -panelWidth - 12,
-            width: panelWidth,
-            child: IgnorePointer(
-              ignoring: !visible,
-              child: SafeArea(
-                left: false,
-                minimum: const EdgeInsets.fromLTRB(0, 8, 0, 8),
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 10),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(radius),
-                      color: Colors.black.withValues(alpha: 0.10),
-                      border: showBorder
-                          ? Border.all(
-                              color: Colors.white.withValues(alpha: 0.16),
-                            )
-                          : null,
-                      gradient: LinearGradient(
-                        begin: Alignment.topRight,
-                        end: Alignment.bottomLeft,
-                        colors: [
-                          Colors.white.withValues(alpha: 0.08),
-                          Colors.white.withValues(alpha: 0.02),
-                        ],
-                      ),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(radius),
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
-                        child: Column(
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: _overlayLabelStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w700,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                                if (headerTrailing != null) ...[
-                                  const SizedBox(width: 8),
-                                  headerTrailing!,
-                                ],
-                                const SizedBox(width: 4),
-                                IconButton(
-                                  tooltip: 'Close',
-                                  onPressed: onDismiss,
-                                  icon: const Icon(Icons.close_rounded),
-                                  color: Colors.white,
-                                  splashRadius: 20,
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            Expanded(child: child),
-                          ],
-                        ),
-                      ),
+    return MobilePlayerOverlaySheet(
+      visible: visible,
+      onDismiss: onDismiss,
+      child: Padding(
+        padding: contentPadding,
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: _overlayLabelStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
                     ),
                   ),
                 ),
-              ),
+                if (headerTrailing != null) ...[
+                  const SizedBox(width: 8),
+                  headerTrailing!,
+                ],
+                const SizedBox(width: 4),
+                IconButton(
+                  tooltip: 'Close',
+                  onPressed: onDismiss,
+                  icon: const Icon(Icons.close_rounded),
+                  color: Colors.white,
+                  splashRadius: 20,
+                ),
+              ],
             ),
-          ),
-        ],
+            SizedBox(height: headerSpacing),
+            Expanded(child: child),
+          ],
+        ),
       ),
     );
   }
-}
-
-enum MobilePlayerSidePanelVariant {
-  standard,
-  moreOptions,
 }
 
 class MobilePlayerOptionTile extends StatelessWidget {
@@ -334,66 +357,70 @@ class MobilePlayerOptionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final borderColor = selected
-        ? Colors.white.withValues(alpha: 0.32)
-        : Colors.white.withValues(alpha: 0.10);
+    final enabled = onTap != null;
+    final surfaceColor = Colors.white.withValues(
+      alpha: selected
+          ? 0.16
+          : enabled
+              ? 0.08
+              : 0.05,
+    );
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Ink(
-          decoration: BoxDecoration(
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+        child: Material(
+          color: surfaceColor,
+          child: InkWell(
+            onTap: onTap,
             borderRadius: BorderRadius.circular(20),
-            color: Colors.black.withValues(alpha: selected ? 0.16 : 0.08),
-            border: Border.all(color: borderColor),
-          ),
-          child: Padding(
-            padding: contentPadding ??
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(
-              children: [
-                if (leading != null) ...[
-                  leading!,
-                  const SizedBox(width: 12),
-                ],
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: _overlayLabelStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                        ),
-                      ),
-                      if ((subtitle ?? '').trim().isNotEmpty) ...[
-                        const SizedBox(height: 4),
+            child: Padding(
+              padding: contentPadding ??
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  if (leading != null) ...[
+                    leading!,
+                    const SizedBox(width: 12),
+                  ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
                         Text(
-                          subtitle!,
-                          maxLines: 2,
+                          title,
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: _overlayLabelStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.white70,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
                           ),
                         ),
+                        if ((subtitle ?? '').trim().isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            subtitle!,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: _overlayLabelStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: Colors.white70,
+                            ),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-                ),
-                if (trailing != null) ...[
-                  const SizedBox(width: 12),
-                  trailing!,
+                  if (trailing != null) ...[
+                    const SizedBox(width: 12),
+                    trailing!,
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         ),
@@ -665,11 +692,14 @@ class MobilePlayerEdgeSpeedBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
-    final segmentWidth = math.min(76.0, size.width * 0.18).toDouble();
-    final bodyHeight = math.min(
-      math.max(112.0, size.height * 0.18),
-      150.0,
-    ).toDouble();
+    final segmentWidth =
+        math.min(50.0, math.max(42.0, size.width * 0.12)).toDouble();
+    final bodyHeight = math
+        .min(
+          math.max(112.0, size.height * 0.18),
+          148.0,
+        )
+        .toDouble();
 
     return Align(
       alignment: Alignment.centerRight,
@@ -691,71 +721,63 @@ class MobilePlayerEdgeSpeedBar extends StatelessWidget {
                 children: [
                   _MobileSpeedSegmentButton(
                     width: segmentWidth,
-                    icon: Icons.add_rounded,
-                    label: '+0.1',
+                    label: '+0.1x',
                     enabled: enabled,
                     onTap: onIncrease,
                     onHoldStart: onIncreaseHoldStart,
                     onHoldEnd: onIncreaseHoldEnd,
                   ),
                   const SizedBox(height: 8),
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(20),
-                      color: Colors.black.withValues(alpha: 0.22),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.16),
-                      ),
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.white.withValues(alpha: 0.09),
-                          Colors.white.withValues(alpha: 0.03),
-                        ],
-                      ),
-                    ),
-                    child: SizedBox(
-                      width: segmentWidth,
-                      height: bodyHeight,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 14,
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(20),
+                          color: Colors.white.withValues(alpha: 0.08),
                         ),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              _formatRate(currentRate),
-                              textAlign: TextAlign.center,
-                              style: _overlayLabelStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white,
-                                tabular: true,
-                              ),
+                        child: SizedBox(
+                          width: segmentWidth,
+                          height: bodyHeight,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 14,
                             ),
-                            const SizedBox(height: 6),
-                            Text(
-                              '倍速',
-                              textAlign: TextAlign.center,
-                              style: _overlayLabelStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.white70,
-                              ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  _formatRate(currentRate),
+                                  textAlign: TextAlign.center,
+                                  style: _overlayLabelStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                    tabular: true,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  '倍速',
+                                  textAlign: TextAlign.center,
+                                  style: _overlayLabelStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white70,
+                                  ),
+                                ),
+                              ],
                             ),
-                          ],
+                          ),
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 8),
                   _MobileSpeedSegmentButton(
                     width: segmentWidth,
-                    icon: Icons.remove_rounded,
-                    label: '-0.1',
+                    label: '-0.1x',
                     enabled: enabled,
                     onTap: onDecrease,
                     onHoldStart: onDecreaseHoldStart,
@@ -806,11 +828,15 @@ class MobilePlayerSpeedOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
-    final segmentWidth = math.min(94.0, size.width * 0.24).toDouble();
-    final bodyHeight = math.min(
-      math.max(152.0, size.height * 0.26),
-      220.0,
-    ).toDouble();
+    final panelWidth =
+        math.min(60.0, math.max(48.0, size.width * 0.14)).toDouble();
+    final segmentWidth = panelWidth;
+    final bodyHeight = math
+        .min(
+          math.max(136.0, size.height * 0.22),
+          188.0,
+        )
+        .toDouble();
 
     return Positioned.fill(
       child: Stack(
@@ -823,9 +849,14 @@ class MobilePlayerSpeedOverlay extends StatelessWidget {
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: onDismiss,
-                child: ColoredBox(
-                  color: Colors.black.withValues(alpha: 0.18),
-                  child: const SizedBox.expand(),
+                child: ClipRect(
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                    child: ColoredBox(
+                      color: Colors.black.withValues(alpha: 0.32),
+                      child: const SizedBox.expand(),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -844,100 +875,98 @@ class MobilePlayerSpeedOverlay extends StatelessWidget {
                   child: AnimatedOpacity(
                     opacity: visible ? 1 : 0,
                     duration: const Duration(milliseconds: 180),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _MobileSpeedSegmentButton(
-                          width: segmentWidth,
-                          icon: Icons.add_rounded,
-                          label: '+0.1',
-                          enabled: enabled,
-                          onTap: onIncrease,
-                          onHoldStart: onIncreaseHoldStart,
-                          onHoldEnd: onIncreaseHoldEnd,
-                        ),
-                        const SizedBox(height: 8),
-                        DecoratedBox(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(22),
-                            color: Colors.black.withValues(alpha: 0.22),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.16),
-                            ),
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [
-                                Colors.white.withValues(alpha: 0.10),
-                                Colors.white.withValues(alpha: 0.03),
-                              ],
-                            ),
-                          ),
-                          child: SizedBox(
+                    child: SizedBox(
+                      width: panelWidth,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _MobileSpeedSegmentButton(
                             width: segmentWidth,
-                            height: bodyHeight,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 18,
-                              ),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.speed_rounded,
-                                    size: 18,
-                                    color: Colors.white.withValues(alpha: 0.76),
-                                  ),
-                                  const SizedBox(height: 14),
-                                  Text(
-                                    _formatRate(currentRate),
-                                    textAlign: TextAlign.center,
-                                    style: _overlayLabelStyle(
-                                      fontSize: 24,
-                                      fontWeight: FontWeight.w800,
-                                      color: Colors.white,
-                                      tabular: true,
+                            label: '+0.1x',
+                            enabled: enabled,
+                            onTap: onIncrease,
+                            onHoldStart: onIncreaseHoldStart,
+                            onHoldEnd: onIncreaseHoldEnd,
+                          ),
+                          const SizedBox(height: 8),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(22),
+                            child: BackdropFilter(
+                              filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(22),
+                                  color: Colors.white.withValues(alpha: 0.08),
+                                ),
+                                child: SizedBox(
+                                  width: segmentWidth,
+                                  height: bodyHeight,
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 18,
+                                    ),
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.speed_rounded,
+                                          size: 18,
+                                          color: Colors.white
+                                              .withValues(alpha: 0.76),
+                                        ),
+                                        const SizedBox(height: 14),
+                                        Text(
+                                          _formatRate(currentRate),
+                                          textAlign: TextAlign.center,
+                                          style: _overlayLabelStyle(
+                                            fontSize: 24,
+                                            fontWeight: FontWeight.w800,
+                                            color: Colors.white,
+                                            tabular: true,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          '播放速度',
+                                          textAlign: TextAlign.center,
+                                          style: _overlayLabelStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          '单次 0.1x',
+                                          textAlign: TextAlign.center,
+                                          style: _overlayLabelStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.white.withValues(
+                                              alpha: 0.62,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    '播放速度',
-                                    textAlign: TextAlign.center,
-                                    style: _overlayLabelStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w700,
-                                      color: Colors.white70,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    '单次 0.1x',
-                                    textAlign: TextAlign.center,
-                                    style: _overlayLabelStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.white.withValues(
-                                        alpha: 0.62,
-                                      ),
-                                    ),
-                                  ),
-                                ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 8),
-                        _MobileSpeedSegmentButton(
-                          width: segmentWidth,
-                          icon: Icons.remove_rounded,
-                          label: '-0.1',
-                          enabled: enabled,
-                          onTap: onDecrease,
-                          onHoldStart: onDecreaseHoldStart,
-                          onHoldEnd: onDecreaseHoldEnd,
-                        ),
-                      ],
+                          const SizedBox(height: 8),
+                          _MobileSpeedSegmentButton(
+                            width: segmentWidth,
+                            label: '-0.1x',
+                            enabled: enabled,
+                            onTap: onDecrease,
+                            onHoldStart: onDecreaseHoldStart,
+                            onHoldEnd: onDecreaseHoldEnd,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -959,7 +988,6 @@ class MobilePlayerSpeedOverlay extends StatelessWidget {
 class _MobileSpeedSegmentButton extends StatelessWidget {
   const _MobileSpeedSegmentButton({
     required this.width,
-    required this.icon,
     required this.label,
     required this.enabled,
     required this.onTap,
@@ -968,7 +996,6 @@ class _MobileSpeedSegmentButton extends StatelessWidget {
   });
 
   final double width;
-  final IconData icon;
   final String label;
   final bool enabled;
   final VoidCallback onTap;
@@ -982,44 +1009,33 @@ class _MobileSpeedSegmentButton extends StatelessWidget {
       onLongPressStart: enabled ? (_) => onHoldStart() : null,
       onLongPressEnd: enabled ? (_) => onHoldEnd() : null,
       onLongPressCancel: enabled ? onHoldEnd : null,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: Colors.black.withValues(alpha: enabled ? 0.20 : 0.12),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: enabled ? 0.16 : 0.08),
-          ),
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Colors.white.withValues(alpha: enabled ? 0.09 : 0.05),
-              Colors.white.withValues(alpha: enabled ? 0.03 : 0.01),
-            ],
-          ),
-        ),
-        child: SizedBox(
-          width: width,
-          height: 42,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 18,
-                color: enabled ? Colors.white : Colors.white38,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              color: Colors.white.withValues(alpha: enabled ? 0.08 : 0.04),
+            ),
+            child: SizedBox(
+              width: width,
+              height: 36,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    label,
+                    style: _overlayLabelStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: enabled ? Colors.white : Colors.white38,
+                      tabular: true,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 4),
-              Text(
-                label,
-                style: _overlayLabelStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: enabled ? Colors.white : Colors.white38,
-                  tabular: true,
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),

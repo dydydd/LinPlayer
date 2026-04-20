@@ -1723,6 +1723,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   }
 
   bool get _mobileSidePanelVisible =>
+      (_mobilePanel != null && _mobilePanel != _MobilePlayerPanel.speed) ||
+      _episodePickerVisible;
+
+  bool get _mobileOverlayVisible =>
       _mobilePanel != null || _episodePickerVisible;
 
   Future<List<RouteEntry>> _ensureMobileRouteEntriesLoaded({
@@ -1768,7 +1772,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   void _closeMobilePanels({bool scheduleHide = true}) {
     _mobileSpeedAdjustTimer?.cancel();
     _mobileSpeedAdjustTimer = null;
-    if (!_mobileSidePanelVisible) return;
+    if (!_mobileOverlayVisible) return;
     setState(() {
       _mobilePanel = null;
       _episodePickerVisible = false;
@@ -1835,8 +1839,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       return;
     }
     try {
-      await _playerService.player
-          .setPlaylistMode(_mobileLoopMode.playlistMode);
+      await _playerService.player.setPlaylistMode(_mobileLoopMode.playlistMode);
     } catch (_) {}
   }
 
@@ -2365,15 +2368,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   }
 
   Widget _buildEpisodePickerOverlay({required bool enableBlur}) {
-    final size = MediaQuery.sizeOf(context);
-    final drawerWidth = math.min(
-      344.0,
-      size.width * (size.width > size.height ? 0.40 : 0.54),
-    );
-
     final theme = Theme.of(context);
     final accent = theme.colorScheme.secondary;
     final showTitle = widget.appState.episodePickerShowTitle;
+    final visible = _controlsVisible && _episodePickerVisible;
 
     final seasons = _episodeSeasons;
     final selectedSeasonId = _episodeSelectedSeasonId;
@@ -2388,544 +2386,456 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     }
     selectedSeason ??= seasons.isNotEmpty ? seasons.first : null;
 
-    return Positioned.fill(
-      child: Stack(
+    return MobilePlayerOverlaySheet(
+      visible: visible,
+      onDismiss: () => setState(() => _episodePickerVisible = false),
+      child: Column(
         children: [
-          IgnorePointer(
-            ignoring: !_episodePickerVisible,
-            child: AnimatedOpacity(
-              opacity: _episodePickerVisible ? 1 : 0,
-              duration: const Duration(milliseconds: 180),
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => setState(() => _episodePickerVisible = false),
-                child: ColoredBox(
-                  color: Colors.black.withValues(alpha: 0.25),
-                  child: const SizedBox.expand(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 12, 8),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.format_list_numbered,
+                  color: Colors.white,
+                  size: 18,
                 ),
-              ),
-            ),
-          ),
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
-            top: 0,
-            bottom: 0,
-            right: _episodePickerVisible ? 0 : -drawerWidth - 12,
-            width: drawerWidth,
-            child: IgnorePointer(
-              ignoring: !_episodePickerVisible,
-              child: SafeArea(
-                left: false,
-                minimum: const EdgeInsets.fromLTRB(0, 8, 0, 8),
-                child: GlassCard(
-                  enableBlur: enableBlur,
-                  margin: EdgeInsets.zero,
-                  elevation: 0,
-                  shadowColor: Colors.transparent,
-                  surfaceTintColor: Colors.transparent,
-                  color: Colors.black.withValues(alpha: 0.35),
-                  shape: const RoundedRectangleBorder(
-                    borderRadius: BorderRadius.horizontal(
-                      left: Radius.circular(16),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    '选集',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                  child: Column(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
-                        child: Row(
-                          children: [
-                            const Icon(
-                              Icons.format_list_numbered,
-                              color: Colors.white,
-                              size: 18,
-                            ),
-                            const SizedBox(width: 8),
-                            const Text(
-                              '选集',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            if (selectedSeason != null)
-                              Expanded(
-                                child: Container(
-                                  height: 36,
-                                  padding:
-                                      const EdgeInsets.symmetric(horizontal: 8),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black.withValues(alpha: 0.18),
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(
-                                      color:
-                                          Colors.white.withValues(alpha: 0.12),
-                                    ),
-                                  ),
-                                  child: DropdownButtonHideUnderline(
-                                    child: DropdownButton<String>(
-                                      value: selectedSeason.id,
-                                      isExpanded: true,
-                                      isDense: true,
-                                      dropdownColor: const Color(0xFF202020),
-                                      iconEnabledColor: Colors.white70,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 12,
-                                      ),
-                                      items: [
-                                        for (final entry
-                                            in seasons.asMap().entries)
-                                          DropdownMenuItem(
-                                            value: entry.value.id,
-                                            child: Text(
-                                              _seasonLabel(
-                                                entry.value,
-                                                entry.key,
-                                              ),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                      ],
-                                      onChanged: (v) {
-                                        if (v == null || v.isEmpty) return;
-                                        if (v == _episodeSelectedSeasonId) {
-                                          return;
-                                        }
-                                        setState(() {
-                                          _episodeSelectedSeasonId = v;
-                                        });
-                                      },
-                                    ),
-                                  ),
-                                ),
-                              )
-                            else
-                              const Spacer(),
-                            IconButton(
-                              tooltip: showTitle ? '仅显示集数' : '显示标题+封面',
-                              icon: Icon(
-                                showTitle
-                                    ? Icons.grid_view_outlined
-                                    : Icons.view_agenda_outlined,
-                              ),
-                              color: Colors.white,
-                              onPressed: () {
-                                final next =
-                                    !widget.appState.episodePickerShowTitle;
-                                // ignore: unawaited_futures
-                                widget.appState.setEpisodePickerShowTitle(next);
-                                setState(() {});
-                              },
-                            ),
-                            IconButton(
-                              tooltip: '关闭',
-                              icon: const Icon(Icons.close),
-                              color: Colors.white,
-                              onPressed: () =>
-                                  setState(() => _episodePickerVisible = false),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (_episodePickerLoading)
-                        const Padding(
-                          padding: EdgeInsets.all(16),
-                          child: Center(child: CircularProgressIndicator()),
-                        )
-                      else if (_episodePickerError != null)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Text(
-                                _episodePickerError!,
-                                style: const TextStyle(color: Colors.white70),
-                              ),
-                              const SizedBox(height: 10),
-                              OutlinedButton.icon(
-                                onPressed: _ensureEpisodePickerLoaded,
-                                icon: const Icon(Icons.refresh),
-                                label: const Text('重试'),
-                              ),
-                            ],
-                          ),
-                        )
-                      else if (selectedSeason == null)
-                        const Padding(
-                          padding: EdgeInsets.all(16),
+                ),
+                IconButton(
+                  tooltip: showTitle ? '仅显示集数' : '显示标题和封面',
+                  icon: Icon(
+                    showTitle
+                        ? Icons.grid_view_outlined
+                        : Icons.view_agenda_outlined,
+                  ),
+                  color: Colors.white,
+                  onPressed: () {
+                    final next = !widget.appState.episodePickerShowTitle;
+                    // ignore: unawaited_futures
+                    widget.appState.setEpisodePickerShowTitle(next);
+                    setState(() {});
+                  },
+                ),
+                IconButton(
+                  tooltip: '关闭',
+                  icon: const Icon(Icons.close),
+                  color: Colors.white,
+                  onPressed: () =>
+                      setState(() => _episodePickerVisible = false),
+                ),
+              ],
+            ),
+          ),
+          if (selectedSeason != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Container(
+                height: 40,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: selectedSeason.id,
+                    isExpanded: true,
+                    isDense: true,
+                    dropdownColor: const Color(0xFF202020),
+                    iconEnabledColor: Colors.white70,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                    ),
+                    items: [
+                      for (final entry in seasons.asMap().entries)
+                        DropdownMenuItem(
+                          value: entry.value.id,
                           child: Text(
-                            '暂无剧集信息',
-                            style: TextStyle(color: Colors.white70),
+                            _seasonLabel(
+                              entry.value,
+                              entry.key,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        )
-                      else ...[
-                        Expanded(
-                          child: FutureBuilder<List<MediaItem>>(
-                            future:
-                                _episodesFutureForSeasonId(selectedSeason.id),
-                            builder: (ctx, snapshot) {
-                              if (snapshot.connectionState !=
-                                  ConnectionState.done) {
-                                return const Center(
-                                  child: CircularProgressIndicator(),
-                                );
-                              }
-                              if (snapshot.hasError) {
-                                return Padding(
-                                  padding:
-                                      const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
-                                    children: [
-                                      Text(
-                                        '加载失败：${snapshot.error}',
-                                        style: const TextStyle(
-                                          color: Colors.white70,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 10),
-                                      OutlinedButton.icon(
-                                        onPressed: () => setState(() {
-                                          final season = selectedSeason;
-                                          if (season == null) return;
-                                          _episodeEpisodesCache
-                                              .remove(season.id);
-                                          _episodeEpisodesFutureCache
-                                              .remove(season.id);
-                                        }),
-                                        icon: const Icon(Icons.refresh),
-                                        label: const Text('重试'),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              }
+                        ),
+                    ],
+                    onChanged: (v) {
+                      if (v == null || v.isEmpty) return;
+                      if (v == _episodeSelectedSeasonId) return;
+                      setState(() {
+                        _episodeSelectedSeasonId = v;
+                      });
+                    },
+                  ),
+                ),
+              ),
+            )
+          else
+            const SizedBox(height: 4),
+          if (_episodePickerLoading)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_episodePickerError != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    _episodePickerError!,
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: _ensureEpisodePickerLoaded,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('重试'),
+                  ),
+                ],
+              ),
+            )
+          else if (selectedSeason == null)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                '暂无剧集信息',
+                style: TextStyle(color: Colors.white70),
+              ),
+            )
+          else ...[
+            Expanded(
+              child: FutureBuilder<List<MediaItem>>(
+                future: _episodesFutureForSeasonId(selectedSeason.id),
+                builder: (ctx, snapshot) {
+                  if (snapshot.connectionState != ConnectionState.done) {
+                    return const Center(
+                      child: CircularProgressIndicator(),
+                    );
+                  }
+                  if (snapshot.hasError) {
+                    return Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            '加载失败：${snapshot.error}',
+                            style: const TextStyle(
+                              color: Colors.white70,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          OutlinedButton.icon(
+                            onPressed: () => setState(() {
+                              final season = selectedSeason;
+                              if (season == null) return;
+                              _episodeEpisodesCache.remove(season.id);
+                              _episodeEpisodesFutureCache.remove(season.id);
+                            }),
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('重试'),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
 
-                              final eps = snapshot.data ?? const <MediaItem>[];
-                              if (eps.isEmpty) {
-                                return const Center(
-                                  child: Text(
-                                    '暂无剧集',
-                                    style: TextStyle(color: Colors.white70),
-                                  ),
-                                );
-                              }
+                  final eps = snapshot.data ?? const <MediaItem>[];
+                  if (eps.isEmpty) {
+                    return const Center(
+                      child: Text(
+                        '暂无剧集',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                    );
+                  }
 
-                              if (showTitle) {
-                                return ListView.separated(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    12,
-                                    0,
-                                    12,
-                                    12,
-                                  ),
-                                  itemCount: eps.length,
-                                  separatorBuilder: (_, __) =>
-                                      const SizedBox(height: 10),
-                                  itemBuilder: (ctx, index) {
-                                    final e = eps[index];
-                                    final epNo = e.episodeNumber ?? (index + 1);
-                                    final episodeTitle = e.name.trim().isEmpty
-                                        ? '第$epNo集'
-                                        : e.name.trim();
-                                    final isCurrent = e.id == widget.itemId;
-                                    final borderColor = isCurrent
-                                        ? accent.withValues(alpha: 0.85)
-                                        : Colors.white.withValues(alpha: 0.10);
-                                    final access = _serverAccess;
-                                    final img = access?.adapter.imageUrl(
-                                      access.auth,
-                                      itemId: e.hasImage
-                                          ? e.id
-                                          : selectedSeason!.id,
-                                      maxWidth: 520,
-                                    );
-                                    return Material(
-                                      color:
-                                          Colors.black.withValues(alpha: 0.18),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                        side: BorderSide(color: borderColor),
-                                      ),
-                                      clipBehavior: Clip.antiAlias,
-                                      child: InkWell(
-                                        onTap: () => _playEpisodeFromPicker(e),
-                                        child: Padding(
-                                          padding: const EdgeInsets.all(10),
-                                          child: Row(
-                                            children: [
-                                              ClipRRect(
-                                                borderRadius:
-                                                    BorderRadius.circular(10),
-                                                child: SizedBox(
-                                                  width: 110,
-                                                  height: 62,
-                                                  child: Stack(
-                                                    fit: StackFit.expand,
-                                                    children: [
-                                                      if (img != null)
-                                                        LinNetworkImage(
-                                                          imageUrl: img,
-                                                          fit: BoxFit.cover,
-                                                          errorWidget:
-                                                              const ColoredBox(
-                                                            color: Color(
-                                                              0x22000000,
-                                                            ),
-                                                            child: Center(
-                                                              child: Icon(
-                                                                Icons
-                                                                    .image_not_supported_outlined,
-                                                                color: Colors
-                                                                    .white54,
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        )
-                                                      else
-                                                        const ColoredBox(
-                                                          color:
-                                                              Color(0x22000000),
-                                                          child: Center(
-                                                            child: Icon(
-                                                              Icons
-                                                                  .image_outlined,
-                                                              color: Colors
-                                                                  .white54,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      Positioned(
-                                                        left: 6,
-                                                        bottom: 6,
-                                                        child: DecoratedBox(
-                                                          decoration:
-                                                              BoxDecoration(
-                                                            color: const Color(
-                                                              0xAA000000,
-                                                            ),
-                                                            borderRadius:
-                                                                BorderRadius
-                                                                    .circular(
-                                                              6,
-                                                            ),
-                                                          ),
-                                                          child: Padding(
-                                                            padding:
-                                                                const EdgeInsets
-                                                                    .symmetric(
-                                                              horizontal: 6,
-                                                              vertical: 3,
-                                                            ),
-                                                            child: Text(
-                                                              'E$epNo',
-                                                              style:
-                                                                  const TextStyle(
-                                                                color: Colors
-                                                                    .white,
-                                                                fontSize: 11,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w700,
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ),
-                                                      if (isCurrent)
-                                                        const Positioned(
-                                                          right: 6,
-                                                          top: 6,
-                                                          child: Icon(
-                                                            Icons.play_circle,
-                                                            color: Colors.white,
-                                                          ),
-                                                        ),
-                                                    ],
+                  if (showTitle) {
+                    return ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(
+                        12,
+                        0,
+                        12,
+                        12,
+                      ),
+                      itemCount: eps.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (ctx, index) {
+                        final e = eps[index];
+                        final epNo = e.episodeNumber ?? (index + 1);
+                        final episodeTitle =
+                            e.name.trim().isEmpty ? '第$epNo集' : e.name.trim();
+                        final isCurrent = e.id == widget.itemId;
+                        final borderColor = isCurrent
+                            ? accent.withValues(alpha: 0.85)
+                            : Colors.white.withValues(alpha: 0.10);
+                        final access = _serverAccess;
+                        final img = access?.adapter.imageUrl(
+                          access.auth,
+                          itemId: e.hasImage ? e.id : selectedSeason!.id,
+                          maxWidth: 520,
+                        );
+                        return Material(
+                          color: Colors.black.withValues(alpha: 0.18),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: BorderSide(color: borderColor),
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: InkWell(
+                            onTap: () => _playEpisodeFromPicker(e),
+                            child: Padding(
+                              padding: const EdgeInsets.all(10),
+                              child: Row(
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(10),
+                                    child: SizedBox(
+                                      width: 110,
+                                      height: 62,
+                                      child: Stack(
+                                        fit: StackFit.expand,
+                                        children: [
+                                          if (img != null)
+                                            LinNetworkImage(
+                                              imageUrl: img,
+                                              fit: BoxFit.cover,
+                                              errorWidget: const ColoredBox(
+                                                color: Color(
+                                                  0x22000000,
+                                                ),
+                                                child: Center(
+                                                  child: Icon(
+                                                    Icons
+                                                        .image_not_supported_outlined,
+                                                    color: Colors.white54,
                                                   ),
                                                 ),
                                               ),
-                                              const SizedBox(width: 12),
-                                              Expanded(
-                                                child: Column(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
-                                                  mainAxisAlignment:
-                                                      MainAxisAlignment.center,
-                                                  children: [
-                                                    Text(
-                                                      'E${epNo.toString().padLeft(2, '0')}',
-                                                      style: const TextStyle(
-                                                        color: Colors.white,
-                                                        fontSize: 14,
-                                                        fontWeight:
-                                                            FontWeight.w800,
-                                                        letterSpacing: 0.3,
-                                                      ),
-                                                    ),
-                                                    const SizedBox(height: 4),
-                                                    Text(
-                                                      episodeTitle,
-                                                      maxLines: 2,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                      style: const TextStyle(
-                                                        color: Colors.white,
-                                                        fontSize: 13,
-                                                        fontWeight:
-                                                            FontWeight.w700,
-                                                        height: 1.25,
-                                                      ),
-                                                    ),
-                                                    const SizedBox(height: 8),
-                                                    FutureBuilder<
-                                                        _EpisodeMediaSpec>(
-                                                      future:
-                                                          _episodeMediaSpecFuture(
-                                                        e,
-                                                      ),
-                                                      builder:
-                                                          (context, snapshot) {
-                                                        final spec =
-                                                            snapshot.data;
-                                                        return Wrap(
-                                                          spacing: 6,
-                                                          runSpacing: 6,
-                                                          children: [
-                                                            MobilePlayerInfoTag(
-                                                              label:
-                                                                  _formatBytes(
-                                                                spec?.sizeBytes,
-                                                              ),
-                                                            ),
-                                                            MobilePlayerInfoTag(
-                                                              label:
-                                                                  _formatBitrateMbps(
-                                                                spec?.bitrateBitsPerSecond,
-                                                              ),
-                                                            ),
-                                                          ],
-                                                        );
-                                                      },
-                                                    ),
-                                                  ],
+                                            )
+                                          else
+                                            const ColoredBox(
+                                              color: Color(0x22000000),
+                                              child: Center(
+                                                child: Icon(
+                                                  Icons.image_outlined,
+                                                  color: Colors.white54,
                                                 ),
                                               ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                );
-                              }
-
-                              return ListView.separated(
-                                padding: const EdgeInsets.fromLTRB(
-                                  12,
-                                  0,
-                                  12,
-                                  12,
-                                ),
-                                itemCount: eps.length,
-                                separatorBuilder: (_, __) =>
-                                    const SizedBox(height: 8),
-                                itemBuilder: (ctx, index) {
-                                  final e = eps[index];
-                                  final epNo = e.episodeNumber ?? (index + 1);
-                                  final episodeTitle = e.name.trim().isEmpty
-                                      ? '第$epNo集'
-                                      : e.name.trim();
-                                  final isCurrent = e.id == widget.itemId;
-                                  final borderColor = isCurrent
-                                      ? accent.withValues(alpha: 0.85)
-                                      : Colors.white.withValues(alpha: 0.10);
-
-                                  return Material(
-                                    color: Colors.black.withValues(alpha: 0.18),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      side: BorderSide(color: borderColor),
-                                    ),
-                                    clipBehavior: Clip.antiAlias,
-                                    child: InkWell(
-                                      onTap: () => _playEpisodeFromPicker(e),
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 14,
-                                          vertical: 12,
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                horizontal: 10,
-                                                vertical: 6,
-                                              ),
+                                            ),
+                                          Positioned(
+                                            left: 6,
+                                            bottom: 6,
+                                            child: DecoratedBox(
                                               decoration: BoxDecoration(
-                                                color: Colors.white.withValues(
-                                                  alpha: 0.10,
+                                                color: const Color(
+                                                  0xAA000000,
                                                 ),
                                                 borderRadius:
-                                                    BorderRadius.circular(999),
-                                              ),
-                                              child: Text(
-                                                'E${epNo.toString().padLeft(2, '0')}',
-                                                style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.w800,
-                                                  letterSpacing: 0.2,
+                                                    BorderRadius.circular(
+                                                  6,
                                                 ),
                                               ),
-                                            ),
-                                            const SizedBox(width: 10),
-                                            Expanded(
-                                              child: Text(
-                                                episodeTitle,
-                                                maxLines: 2,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 13,
-                                                  fontWeight: FontWeight.w700,
-                                                  height: 1.25,
-                                                ),
-                                              ),
-                                            ),
-                                            if (isCurrent)
-                                              const Padding(
+                                              child: Padding(
                                                 padding:
-                                                    EdgeInsets.only(left: 10),
-                                                child: Icon(
-                                                  Icons.play_circle,
-                                                  color: Colors.white,
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 6,
+                                                  vertical: 3,
+                                                ),
+                                                child: Text(
+                                                  'E$epNo',
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
                                                 ),
                                               ),
-                                          ],
-                                        ),
+                                            ),
+                                          ),
+                                          if (isCurrent)
+                                            const Positioned(
+                                              right: 6,
+                                              top: 6,
+                                              child: Icon(
+                                                Icons.play_circle,
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                        ],
                                       ),
                                     ),
-                                  );
-                                },
-                              );
-                            },
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Text(
+                                          'E${epNo.toString().padLeft(2, '0')}',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w800,
+                                            letterSpacing: 0.3,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          episodeTitle,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w700,
+                                            height: 1.25,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        FutureBuilder<_EpisodeMediaSpec>(
+                                          future: _episodeMediaSpecFuture(
+                                            e,
+                                          ),
+                                          builder: (context, snapshot) {
+                                            final spec = snapshot.data;
+                                            return Wrap(
+                                              spacing: 6,
+                                              runSpacing: 6,
+                                              children: [
+                                                MobilePlayerInfoTag(
+                                                  label: _formatBytes(
+                                                    spec?.sizeBytes,
+                                                  ),
+                                                ),
+                                                MobilePlayerInfoTag(
+                                                  label: _formatBitrateMbps(
+                                                    spec?.bitrateBitsPerSecond,
+                                                  ),
+                                                ),
+                                              ],
+                                            );
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  }
+
+                  return ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(
+                      12,
+                      0,
+                      12,
+                      12,
+                    ),
+                    itemCount: eps.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (ctx, index) {
+                      final e = eps[index];
+                      final epNo = e.episodeNumber ?? (index + 1);
+                      final episodeTitle =
+                          e.name.trim().isEmpty ? '第$epNo集' : e.name.trim();
+                      final isCurrent = e.id == widget.itemId;
+                      final borderColor = isCurrent
+                          ? accent.withValues(alpha: 0.85)
+                          : Colors.white.withValues(alpha: 0.10);
+
+                      return Material(
+                        color: Colors.black.withValues(alpha: 0.18),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(color: borderColor),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: () => _playEpisodeFromPicker(e),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(
+                                      alpha: 0.10,
+                                    ),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    'E${epNo.toString().padLeft(2, '0')}',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 0.2,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    episodeTitle,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      height: 1.25,
+                                    ),
+                                  ),
+                                ),
+                                if (isCurrent)
+                                  const Padding(
+                                    padding: EdgeInsets.only(left: 10),
+                                    child: Icon(
+                                      Icons.play_circle,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
                         ),
-                      ],
-                    ],
-                  ),
-                ),
+                      );
+                    },
+                  );
+                },
               ),
             ),
-          ),
+          ],
         ],
       ),
     );
@@ -6584,7 +6494,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                         ),
                                       ),
                                     ),
-                                  if (!widget.isTv && !_mobileSidePanelVisible)
+                                  if (!widget.isTv)
                                     Align(
                                       alignment: Alignment.topCenter,
                                       child: SafeArea(
@@ -6592,19 +6502,24 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                         minimum: const EdgeInsets.fromLTRB(
                                             12, 12, 12, 0),
                                         child: AnimatedSlide(
-                                          offset: _controlsVisible
+                                          offset: (_controlsVisible &&
+                                                  !_mobileOverlayVisible)
                                               ? Offset.zero
                                               : const Offset(0, -0.18),
                                           duration:
                                               const Duration(milliseconds: 200),
                                           curve: Curves.easeOutCubic,
                                           child: AnimatedOpacity(
-                                            opacity: _controlsVisible ? 1 : 0,
+                                            opacity: (_controlsVisible &&
+                                                    !_mobileOverlayVisible)
+                                                ? 1
+                                                : 0,
                                             duration: const Duration(
                                                 milliseconds: 160),
                                             curve: Curves.easeOut,
                                             child: IgnorePointer(
-                                              ignoring: !_controlsVisible,
+                                              ignoring: !_controlsVisible ||
+                                                  _mobileOverlayVisible,
                                               child: Listener(
                                                 onPointerDown: (_) =>
                                                     _showControls(),
@@ -6953,7 +6868,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                         ),
                                       ),
                                     ),
-                                  if (!widget.isTv && !_mobileSidePanelVisible)
+                                  if (!widget.isTv)
                                     Align(
                                       alignment: Alignment.bottomCenter,
                                       child: SafeArea(
@@ -6961,19 +6876,24 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                         minimum: const EdgeInsets.fromLTRB(
                                             12, 0, 12, 12),
                                         child: AnimatedSlide(
-                                          offset: _controlsVisible
+                                          offset: (_controlsVisible &&
+                                                  !_mobileOverlayVisible)
                                               ? Offset.zero
                                               : const Offset(0, 0.18),
                                           duration:
                                               const Duration(milliseconds: 200),
                                           curve: Curves.easeOutCubic,
                                           child: AnimatedOpacity(
-                                            opacity: _controlsVisible ? 1 : 0,
+                                            opacity: (_controlsVisible &&
+                                                    !_mobileOverlayVisible)
+                                                ? 1
+                                                : 0,
                                             duration: const Duration(
                                                 milliseconds: 160),
                                             curve: Curves.easeOut,
                                             child: IgnorePointer(
-                                              ignoring: !_controlsVisible,
+                                              ignoring: !_controlsVisible ||
+                                                  _mobileOverlayVisible,
                                               child: Listener(
                                                 onPointerDown: (_) =>
                                                     _showControls(),
@@ -8368,8 +8288,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    onTap: controlsEnabled &&
-                            _mobileLoopMode != entry.$1
+                    onTap: controlsEnabled && _mobileLoopMode != entry.$1
                         ? () => unawaited(_setMobileLoopMode(entry.$1))
                         : null,
                     borderRadius: BorderRadius.circular(16),
@@ -8381,8 +8300,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                         ),
                         border: Border.all(
                           color: Colors.white.withValues(
-                            alpha:
-                                _mobileLoopMode == entry.$1 ? 0.28 : 0.10,
+                            alpha: _mobileLoopMode == entry.$1 ? 0.28 : 0.10,
                           ),
                         ),
                       ),
@@ -8397,9 +8315,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: controlsEnabled
-                                ? Colors.white
-                                : Colors.white38,
+                            color:
+                                controlsEnabled ? Colors.white : Colors.white38,
                             fontSize: 11.5,
                             fontWeight: FontWeight.w700,
                           ),
@@ -8437,9 +8354,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                       ),
                       border: Border.all(
                         color: Colors.white.withValues(
-                          alpha: _mobileVideoDisplayMode == mode
-                              ? 0.28
-                              : 0.10,
+                          alpha: _mobileVideoDisplayMode == mode ? 0.28 : 0.10,
                         ),
                       ),
                     ),
@@ -8450,8 +8365,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                     child: Text(
                       mode.label,
                       style: TextStyle(
-                        color:
-                            controlsEnabled ? Colors.white : Colors.white38,
+                        color: controlsEnabled ? Colors.white : Colors.white38,
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
                       ),
@@ -8597,7 +8511,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
     return MobilePlayerSidePanel(
       title: _mobilePanelTitle(effectivePanel),
-      visible: visibleSidePanel,
+      visible: _controlsVisible && visibleSidePanel,
       onDismiss: _closeMobilePanels,
       headerTrailing: headerTrailing,
       variant: effectivePanel == _MobilePlayerPanel.moreOptions

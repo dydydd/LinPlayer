@@ -1919,6 +1919,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   bool get _mobileSidePanelVisible =>
       _mobilePanel != null && _mobilePanel != _MobilePlayerPanel.speed;
 
+  bool get _mobileOverlayVisible => _mobilePanel != null;
+
   void _openMobilePanel(_MobilePlayerPanel panel) {
     _showControls(scheduleHide: false);
     setState(() => _mobilePanel = panel);
@@ -2566,8 +2568,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    onTap: controlsEnabled &&
-                            _mobileLoopMode != entry.$1
+                    onTap: controlsEnabled && _mobileLoopMode != entry.$1
                         ? () => unawaited(_setMobileLoopMode(entry.$1))
                         : null,
                     borderRadius: BorderRadius.circular(16),
@@ -2579,8 +2580,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                         ),
                         border: Border.all(
                           color: Colors.white.withValues(
-                            alpha:
-                                _mobileLoopMode == entry.$1 ? 0.28 : 0.10,
+                            alpha: _mobileLoopMode == entry.$1 ? 0.28 : 0.10,
                           ),
                         ),
                       ),
@@ -2595,9 +2595,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: controlsEnabled
-                                ? Colors.white
-                                : Colors.white38,
+                            color:
+                                controlsEnabled ? Colors.white : Colors.white38,
                             fontSize: 11.5,
                             fontWeight: FontWeight.w700,
                           ),
@@ -2635,9 +2634,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                       ),
                       border: Border.all(
                         color: Colors.white.withValues(
-                          alpha: _mobileVideoDisplayMode == mode
-                              ? 0.28
-                              : 0.10,
+                          alpha: _mobileVideoDisplayMode == mode ? 0.28 : 0.10,
                         ),
                       ),
                     ),
@@ -2648,8 +2645,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                     child: Text(
                       mode.label,
                       style: TextStyle(
-                        color:
-                            controlsEnabled ? Colors.white : Colors.white38,
+                        color: controlsEnabled ? Colors.white : Colors.white38,
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
                       ),
@@ -2804,7 +2800,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     final currentRate =
         (_controller?.value.playbackSpeed ?? 1.0).clamp(0.1, 10.0).toDouble();
     return MobilePlayerSpeedOverlay(
-      visible: _mobilePanel == _MobilePlayerPanel.speed,
+      visible: _controlsVisible && _mobilePanel == _MobilePlayerPanel.speed,
       currentRate: currentRate,
       enabled: controlsEnabled,
       onDismiss: _closeMobilePanels,
@@ -2838,7 +2834,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
           child = _buildMobileCorePanel(controlsEnabled: controlsEnabled);
           break;
         case _MobilePlayerPanel.moreOptions:
-          child = _buildMobileMoreOptionsPanel(controlsEnabled: controlsEnabled);
+          child =
+              _buildMobileMoreOptionsPanel(controlsEnabled: controlsEnabled);
           break;
         case _MobilePlayerPanel.danmaku:
           child = _buildMobileDanmakuPanel(controlsEnabled: controlsEnabled);
@@ -2856,7 +2853,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
         _buildMobileSpeedOverlay(controlsEnabled: controlsEnabled),
         MobilePlayerSidePanel(
           title: _mobilePanelTitle(effectivePanel),
-          visible: visibleSidePanel,
+          visible: _controlsVisible && visibleSidePanel,
           onDismiss: _closeMobilePanels,
           variant: effectivePanel == _MobilePlayerPanel.moreOptions
               ? MobilePlayerSidePanelVariant.moreOptions
@@ -3946,65 +3943,71 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                           ),
                         ),
                       ),
-                    if (!_mobileSidePanelVisible)
-                      Align(
-                        alignment: Alignment.topCenter,
-                        child: SafeArea(
-                          bottom: false,
-                          minimum: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                          child: AnimatedSlide(
-                            offset: _controlsVisible
-                                ? Offset.zero
-                                : const Offset(0, -0.18),
-                            duration: const Duration(milliseconds: 200),
-                            curve: Curves.easeOutCubic,
-                            child: AnimatedOpacity(
-                              opacity: _controlsVisible ? 1 : 0,
-                              duration: const Duration(milliseconds: 160),
-                              curve: Curves.easeOut,
-                              child: IgnorePointer(
-                                ignoring: !_controlsVisible,
-                                child: Listener(
-                                  onPointerDown: (_) => _showControls(),
-                                  child: _buildMobileTopStatusBar(
-                                    controlsEnabled: controlsEnabled,
-                                  ),
+                    Align(
+                      alignment: Alignment.topCenter,
+                      child: SafeArea(
+                        bottom: false,
+                        minimum: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                        child: AnimatedSlide(
+                          offset: (_controlsVisible && !_mobileOverlayVisible)
+                              ? Offset.zero
+                              : const Offset(0, -0.18),
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeOutCubic,
+                          child: AnimatedOpacity(
+                            opacity:
+                                (_controlsVisible && !_mobileOverlayVisible)
+                                    ? 1
+                                    : 0,
+                            duration: const Duration(milliseconds: 160),
+                            curve: Curves.easeOut,
+                            child: IgnorePointer(
+                              ignoring:
+                                  !_controlsVisible || _mobileOverlayVisible,
+                              child: Listener(
+                                onPointerDown: (_) => _showControls(),
+                                child: _buildMobileTopStatusBar(
+                                  controlsEnabled: controlsEnabled,
                                 ),
                               ),
                             ),
                           ),
                         ),
                       ),
-                    if (!_mobileSidePanelVisible)
-                      Align(
-                        alignment: Alignment.bottomCenter,
-                        child: SafeArea(
-                          top: false,
-                          minimum: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                          child: AnimatedSlide(
-                            offset: _controlsVisible
-                                ? Offset.zero
-                                : const Offset(0, 0.18),
-                            duration: const Duration(milliseconds: 200),
-                            curve: Curves.easeOutCubic,
-                            child: AnimatedOpacity(
-                              opacity: _controlsVisible ? 1 : 0,
-                              duration: const Duration(milliseconds: 160),
-                              curve: Curves.easeOut,
-                              child: IgnorePointer(
-                                ignoring: !_controlsVisible,
-                                child: Listener(
-                                  onPointerDown: (_) => _showControls(),
-                                  child: _buildMobileBottomStatusBar(
-                                    controlsEnabled: controlsEnabled,
-                                    controller: controller!,
-                                  ),
+                    ),
+                    Align(
+                      alignment: Alignment.bottomCenter,
+                      child: SafeArea(
+                        top: false,
+                        minimum: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                        child: AnimatedSlide(
+                          offset: (_controlsVisible && !_mobileOverlayVisible)
+                              ? Offset.zero
+                              : const Offset(0, 0.18),
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeOutCubic,
+                          child: AnimatedOpacity(
+                            opacity:
+                                (_controlsVisible && !_mobileOverlayVisible)
+                                    ? 1
+                                    : 0,
+                            duration: const Duration(milliseconds: 160),
+                            curve: Curves.easeOut,
+                            child: IgnorePointer(
+                              ignoring:
+                                  !_controlsVisible || _mobileOverlayVisible,
+                              child: Listener(
+                                onPointerDown: (_) => _showControls(),
+                                child: _buildMobileBottomStatusBar(
+                                  controlsEnabled: controlsEnabled,
+                                  controller: controller!,
                                 ),
                               ),
                             ),
                           ),
                         ),
                       ),
+                    ),
                     _buildMobileSidePanelOverlay(
                       controlsEnabled: controlsEnabled,
                     ),
