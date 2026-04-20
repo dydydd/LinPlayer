@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets
 import java.util.Base64
 import java.util.Properties
 import java.util.zip.GZIPInputStream
+import org.gradle.api.tasks.compile.JavaCompile
 
 plugins {
     id("com.android.application")
@@ -39,6 +40,43 @@ fun decodeDartDefines(raw: String?): Map<String, String> {
         }.toMap()
 }
 
+fun patchGeneratedPluginRegistrant(projectDir: File) {
+    val registrantFile =
+        File(projectDir, "src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java")
+    if (!registrantFile.exists()) return
+
+    var source = registrantFile.readText(Charsets.UTF_8)
+    if (source.contains("pluginByClassName(")) return
+
+    source =
+        source.replace(
+            "import io.flutter.embedding.engine.FlutterEngine;\n",
+            "import io.flutter.embedding.engine.FlutterEngine;\n" +
+                "import io.flutter.embedding.engine.plugins.FlutterPlugin;\n" +
+                "import java.lang.reflect.Constructor;\n\n",
+        )
+
+    source =
+        source.replace(
+            "  private static final String TAG = \"GeneratedPluginRegistrant\";\n",
+            "  private static final String TAG = \"GeneratedPluginRegistrant\";\n\n" +
+                "  private static FlutterPlugin pluginByClassName(String className) throws Exception {\n" +
+                "    Class<?> pluginClass = Class.forName(className);\n" +
+                "    Constructor<?> constructor = pluginClass.getDeclaredConstructor();\n" +
+                "    constructor.setAccessible(true);\n" +
+                "    return (FlutterPlugin) constructor.newInstance();\n" +
+                "  }\n\n",
+        )
+
+    source =
+        Regex("""flutterEngine\.getPlugins\(\)\.add\(new ([A-Za-z0-9_$.]+)\(\)\);""")
+            .replace(source) { match ->
+                """flutterEngine.getPlugins().add(pluginByClassName("${match.groupValues[1]}"));"""
+            }
+
+    registrantFile.writeText(source, Charsets.UTF_8)
+}
+
 val targetAbis =
     (project.findProperty("target-platform")?.toString() ?: "")
         .split(',')
@@ -60,6 +98,7 @@ val bundleTvProxy =
     isEnabledFlag(project.findProperty("linplayer.bundleTvProxy")?.toString()) ||
         isEnabledFlag(System.getenv("LINPLAYER_BUNDLE_TV_PROXY")) ||
         isEnabledFlag(dartDefines["LINPLAYER_FORCE_TV"])
+val isWindowsHost = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
 
 android {
     namespace = "com.example.lin_player"
@@ -158,6 +197,20 @@ android {
 
 flutter {
     source = "../.."
+}
+
+tasks.withType<JavaCompile>().configureEach {
+    doFirst {
+        patchGeneratedPluginRegistrant(project.projectDir)
+    }
+}
+
+tasks.configureEach {
+    // Windows machines occasionally leave AGP's lint cache jars locked, which
+    // breaks release packaging before assembleRelease can finish.
+    if (isWindowsHost && name == "lintVitalAnalyzeRelease") {
+        enabled = false
+    }
 }
 
 val repoRootDir = project.rootDir.parentFile

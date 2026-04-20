@@ -36,6 +36,9 @@ import 'tv/tv_background.dart';
 import 'tv/tv_shell.dart';
 
 final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
+const Duration _bootstrapChannelTimeout = Duration(seconds: 3);
+const Duration _bootstrapStorageTimeout = Duration(seconds: 4);
+bool _bootstrapFailureAppShown = false;
 
 final class _SnappedTextScaler implements TextScaler {
   const _SnappedTextScaler(
@@ -92,7 +95,17 @@ void main() async {
   _installDiagnosticsHooks();
   await runZonedGuarded(
     () async {
-      await _bootstrapApp();
+      try {
+        await _bootstrapApp();
+      } catch (error, stackTrace) {
+        AppDiagnosticsLogger.instance.error(
+          'bootstrap',
+          'Application bootstrap failed',
+          error: error,
+          stackTrace: stackTrace,
+        );
+        _showBootstrapFailureApp(error, stackTrace);
+      }
     },
     (error, stackTrace) {
       AppDiagnosticsLogger.instance.error(
@@ -101,6 +114,7 @@ void main() async {
         error: error,
         stackTrace: stackTrace,
       );
+      _showBootstrapFailureApp(error, stackTrace);
     },
     zoneSpecification: ZoneSpecification(
       print: (self, parent, zone, line) {
@@ -156,9 +170,24 @@ Future<void> _bootstrapApp() async {
     return true;
   }());
   // Ensure native media backends (mpv) are ready before any player is created.
-  MediaKit.ensureInitialized();
-  await DeviceType.init();
-  final defaultDeviceName = await DeviceType.deviceDisplayName();
+  await _runBootstrapStep(
+    'media_kit',
+    'MediaKit initialization failed; continuing with degraded playback support',
+    () async {
+      MediaKit.ensureInitialized();
+    },
+  );
+  await _runBootstrapStep(
+    'device',
+    'Device type detection failed; falling back to phone defaults',
+    () => DeviceType.init().timeout(_bootstrapChannelTimeout),
+  );
+  final defaultDeviceName = await _runBootstrapValueStep<String>(
+    'device',
+    'Device name lookup failed; using platform fallback',
+    () => DeviceType.deviceDisplayName().timeout(_bootstrapChannelTimeout),
+    fallback: kIsWeb ? 'Web' : defaultTargetPlatform.name,
+  );
   AppDiagnosticsLogger.instance.info(
     'app',
     'Application bootstrap started',
@@ -205,8 +234,19 @@ Future<void> _bootstrapApp() async {
     EmbyHttpClientFactory.createClient,
   );
 
-  final appState = AppState();
-  await appState.loadFromStorage();
+  var appState = AppState();
+  final loadedState = await _runBootstrapValueStep<bool>(
+    'app_state',
+    'Failed to restore persisted app state; using defaults',
+    () async {
+      await appState.loadFromStorage().timeout(_bootstrapStorageTimeout);
+      return true;
+    },
+    fallback: false,
+  );
+  if (!loadedState) {
+    appState = AppState();
+  }
   if (DesktopShell.isDesktopTarget) {
     await SystemHttpProxyService.instance.refresh();
   }
@@ -262,6 +302,58 @@ Future<void> _bootstrapApp() async {
     config: appConfig,
     child: LinPlayerApp(appState: appState),
   ));
+}
+
+Future<void> _runBootstrapStep(
+  String scope,
+  String message,
+  Future<void> Function() action,
+) async {
+  try {
+    await action();
+  } catch (error, stackTrace) {
+    AppDiagnosticsLogger.instance.warn(
+      scope,
+      message,
+      data: <String, Object?>{
+        'error': AppDiagnosticsLogger.summarizeError(error),
+        'stack': AppDiagnosticsLogger.summarizeStackTrace(stackTrace),
+      },
+    );
+  }
+}
+
+Future<T> _runBootstrapValueStep<T>(
+  String scope,
+  String message,
+  Future<T> Function() action, {
+  required T fallback,
+}) async {
+  try {
+    return await action();
+  } catch (error, stackTrace) {
+    AppDiagnosticsLogger.instance.warn(
+      scope,
+      message,
+      data: <String, Object?>{
+        'error': AppDiagnosticsLogger.summarizeError(error),
+        'stack': AppDiagnosticsLogger.summarizeStackTrace(stackTrace),
+      },
+    );
+    return fallback;
+  }
+}
+
+void _showBootstrapFailureApp(Object error, StackTrace stackTrace) {
+  if (_bootstrapFailureAppShown) return;
+  _bootstrapFailureAppShown = true;
+  runApp(
+    _BootstrapFailureApp(
+      error: error,
+      stackTrace: stackTrace,
+      diagnostics: AppDiagnosticsLogger.instance.dumpText(maxEntries: 80),
+    ),
+  );
 }
 
 class LinPlayerApp extends StatefulWidget {
@@ -557,6 +649,94 @@ class _LinPlayerAppState extends State<LinPlayerApp>
           },
         );
       },
+    );
+  }
+}
+
+class _BootstrapFailureApp extends StatelessWidget {
+  const _BootstrapFailureApp({
+    required this.error,
+    required this.stackTrace,
+    required this.diagnostics,
+  });
+
+  final Object error;
+  final StackTrace stackTrace;
+  final String diagnostics;
+
+  @override
+  Widget build(BuildContext context) {
+    final details = [
+      'LinPlayer 启动失败。',
+      '',
+      '错误信息:',
+      AppDiagnosticsLogger.summarizeError(error),
+      '',
+      '堆栈摘要:',
+      AppDiagnosticsLogger.summarizeStackTrace(stackTrace),
+      '',
+      '诊断日志:',
+      diagnostics,
+    ].join('\n');
+
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: const Color(0xFFF6F7FB),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'LinPlayer 启动失败',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFF131722),
+                      ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  '应用没有正常完成启动。可以复制下面的诊断信息继续排查。',
+                  style: TextStyle(
+                    color: Color(0xFF4A5568),
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: details));
+                  },
+                  child: const Text('复制诊断信息'),
+                ),
+                const SizedBox(height: 16),
+                Expanded(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: const Color(0xFFD7DBE7)),
+                    ),
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(16),
+                      child: SelectableText(
+                        details,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          height: 1.5,
+                          color: Color(0xFF202533),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
