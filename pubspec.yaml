@@ -99,7 +99,3 @@ flutter:
     - assets/shaders/anime4k/
     - assets/tv_remote/
     - assets/tv_remote/images/
-  fonts:
-    - family: Noto Sans SC
-      fonts:
-        - asset: assets/fonts/NotoSansSC-VF.ttf

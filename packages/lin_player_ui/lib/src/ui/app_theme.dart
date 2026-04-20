@@ -6,52 +6,58 @@ import 'app_style.dart';
 
 /// Centralized theme (light/dark + optional Material You dynamic color).
 class AppTheme {
-  static const String _appFontFamily = 'Noto Sans SC';
   static const Color _defaultSeed = Color(0xFFFF6FB1);
   static const Color _defaultSecondarySeed = Color(0xFF7DD9FF);
 
-  static String _fontFamily(TargetPlatform platform) {
-    // Use a bundled CJK+Latin font across all platforms to keep glyphs & weights
-    // consistent.
-    //
-    // Note: emoji are still expected to fall back to platform emoji fonts.
-    return _appFontFamily;
+  static String? _fontFamily(TargetPlatform platform) {
+    return switch (platform) {
+      // Native desktop UI fonts render mixed CJK/Latin text more consistently
+      // than the bundled variable font we previously shipped.
+      TargetPlatform.windows => 'Microsoft YaHei UI',
+      TargetPlatform.macOS => 'PingFang SC',
+      // Let Linux/mobile keep the platform default face and use fallbacks for
+      // missing glyphs rather than forcing a bundled font asset.
+      TargetPlatform.linux => null,
+      TargetPlatform.android => null,
+      TargetPlatform.iOS => null,
+      TargetPlatform.fuchsia => null,
+    };
   }
 
   static List<String> _fontFallback(TargetPlatform platform) {
     return switch (platform) {
       TargetPlatform.windows => const <String>[
-          // System UI fallbacks (best-effort for rare missing glyphs).
           'Segoe UI',
-          'Microsoft YaHei UI',
           'Microsoft YaHei',
           'Microsoft JhengHei UI',
           'Microsoft JhengHei',
-          // Emoji / symbols.
+          'Malgun Gothic',
           'Segoe UI Emoji',
           'Segoe UI Symbol',
         ],
       TargetPlatform.macOS => const <String>[
-          // System UI fallbacks (best-effort for rare missing glyphs).
           '.SF NS Text',
           'SF Pro Text',
           'PingFang SC',
+          'Hiragino Sans GB',
           'Helvetica Neue',
-          // Emoji.
           'Apple Color Emoji',
         ],
       TargetPlatform.linux => const <String>[
-          // System UI fallbacks (best-effort for rare missing glyphs).
+          'Noto Sans CJK SC',
+          'Source Han Sans SC',
+          'WenQuanYi Micro Hei',
           'Noto Sans',
           'DejaVu Sans',
-          // Emoji.
           'Noto Color Emoji',
         ],
       TargetPlatform.android => const <String>[
           'Roboto',
+          'Noto Sans CJK SC',
           'Noto Color Emoji',
         ],
       TargetPlatform.iOS => const <String>[
+          'PingFang SC',
           '.SF Pro Text',
           'Helvetica Neue',
           'Apple Color Emoji',
@@ -140,6 +146,7 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: scheme,
       brightness: scheme.brightness,
+      typography: Typography.material2021(platform: platform),
       visualDensity: effectiveCompact
           ? VisualDensity.compact
           : VisualDensity.adaptivePlatformDensity,
