@@ -2896,7 +2896,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   }
 
   Future<void> _pickDanmakuFile() async {
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['xml'],
       withData: kIsWeb,
@@ -9639,7 +9639,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     final messenger = ScaffoldMessenger.of(context);
 
     Future<void> pickAndAddSubtitle() async {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: kSupportedExternalSubtitleExtensions,
       );
@@ -11095,7 +11095,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                   final current = _playerService.player.state.track.subtitle;
 
                   Future<void> pickAndAddSubtitle() async {
-                    final result = await FilePicker.platform.pickFiles(
+                    final result = await FilePicker.pickFiles(
                       type: FileType.custom,
                       allowedExtensions: kSupportedExternalSubtitleExtensions,
                     );

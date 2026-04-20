@@ -1,4 +1,6 @@
 import 'dart:async';
+// ignore_for_file: unused_element, unused_element_parameter, unused_local_variable
+
 import 'dart:ui' show ImageFilter;
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -14,6 +16,7 @@ import 'aggregate_service_page.dart';
 import 'continue_watching_page.dart';
 import 'library_page.dart';
 import 'library_items_page.dart';
+import 'mobile_ui/home/mobile_home_shell.dart';
 import 'mobile_ui/settings/mobile_settings_page.dart';
 import 'player_screen.dart';
 import 'player_screen_exo.dart';
@@ -535,23 +538,79 @@ class _HomePageState extends State<HomePage> {
         final useMobileSettingsPage = !kIsWeb && !isDesktop;
         const usesGlassSurfaces = true;
         final useRail = widget.desktopLayout;
+        final useEmbeddedMobileShellPages = !isTv && !useRail;
+        final activeServerName = widget.appState.activeServer?.name ??
+            (widget.appState.servers.isNotEmpty
+                ? '閫夋嫨鏈嶅姟鍣?'
+                : AppConfigScope.of(context).displayName);
+        final activeIconUrl = widget.appState.activeServer?.iconUrl;
+        final homeTopBarVisibility = _mobileHomeChromeVisibility;
+        final bottomNavVisibility =
+            _index == 0 ? _mobileHomeChromeVisibility : 1.0;
+        final homePage = !isTv && !useRail
+            ? MobileHomeTopBarPage(
+                topBarHeight: MediaQuery.paddingOf(context).top + 56,
+                topBarVisibility: homeTopBarVisibility,
+                topBar: _MobileHomeAppBar(
+                  topInset: MediaQuery.paddingOf(context).top,
+                  visibility: homeTopBarVisibility,
+                  enableBlur: enableBlur,
+                  useGlass: usesGlassSurfaces,
+                  serverName: activeServerName,
+                  iconUrl: activeIconUrl,
+                  onTapServer: _openServerPage,
+                  onTapSearch: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => SearchPage(appState: widget.appState),
+                      ),
+                    );
+                  },
+                  onTapLibrary: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => LibraryPage(appState: widget.appState),
+                      ),
+                    );
+                  },
+                  onTapRoute: _showRoutePicker,
+                ),
+                child: _HomeBody(
+                  appState: widget.appState,
+                  loading: _loading,
+                  refreshSignal: _homeRefreshSignal,
+                  onRefresh: () => _load(forceRefresh: true),
+                  onScrollDelta: _handleHomeScroll,
+                  isTv: false,
+                  showSearchBar: false,
+                ),
+              )
+            : _HomeBody(
+                appState: widget.appState,
+                loading: _loading,
+                refreshSignal: _homeRefreshSignal,
+                onRefresh: () => _load(forceRefresh: true),
+                onScrollDelta: _handleHomeScroll,
+                isTv: isTv,
+                showSearchBar: false,
+              );
+        final aggregatePage = AggregateServicePage(
+          appState: widget.appState,
+          embeddedInShell: useEmbeddedMobileShellPages,
+        );
+        final settingsPage = useMobileSettingsPage
+            ? MobileSettingsPage(
+                appState: widget.appState,
+                embeddedInShell: useEmbeddedMobileShellPages,
+              )
+            : SettingsPage(appState: widget.appState);
         final pages = [
-          _HomeBody(
-            appState: widget.appState,
-            loading: _loading,
-            refreshSignal: _homeRefreshSignal,
-            onRefresh: () => _load(forceRefresh: true),
-            onScrollDelta: _handleHomeScroll,
-            isTv: isTv,
-            showSearchBar: false,
-          ),
-          AggregateServicePage(appState: widget.appState),
+          homePage,
+          aggregatePage,
           useExoCore
               ? ExoPlayerScreen(appState: widget.appState)
               : PlayerScreen(appState: widget.appState),
-          useMobileSettingsPage
-              ? MobileSettingsPage(appState: widget.appState)
-              : SettingsPage(appState: widget.appState),
+          settingsPage,
         ];
 
         if (isTv) {
@@ -762,16 +821,12 @@ class _HomePageState extends State<HomePage> {
             ),
           );
         }
-        return Scaffold(
-          extendBody: _index == 0,
-          appBar: mobileAppBar,
-          body: pages[_index],
-          bottomNavigationBar: _FloatingBottomNav(
-            selectedIndex: _index,
-            onSelected: _setPageIndex,
-            enableBlur: enableBlur,
-            visibility: homeChromeVisibility,
-          ),
+        return MobileHomeShell(
+          extendBody: _index != 2,
+          selectedIndex: _index,
+          onSelected: _setPageIndex,
+          pages: pages,
+          visibility: bottomNavVisibility,
         );
       },
     );
@@ -1526,7 +1581,7 @@ class _FloatingBottomNav extends StatelessWidget {
     required this.selectedIndex,
     required this.onSelected,
     required this.enableBlur,
-    this.visibility = 1,
+    required this.visibility,
   });
 
   final int selectedIndex;
@@ -1669,6 +1724,381 @@ class _FloatingBottomNav extends StatelessWidget {
                     ],
                   ),
                 ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ModernFloatingBottomNav extends StatelessWidget {
+  const _ModernFloatingBottomNav({
+    required this.selectedIndex,
+    required this.onSelected,
+    required this.enableBlur,
+    this.visibility = 1,
+  });
+
+  static const _destinations = <_MobileNavDestination>[
+    _MobileNavDestination(
+      pageIndex: 0,
+      icon: Icons.home_rounded,
+      label: '首页',
+    ),
+    _MobileNavDestination(
+      pageIndex: 1,
+      icon: Icons.hub_rounded,
+      label: '聚合',
+    ),
+    _MobileNavDestination(
+      pageIndex: 3,
+      icon: Icons.settings_rounded,
+      label: '设置',
+    ),
+  ];
+
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+  final bool enableBlur;
+  final double visibility;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+    final progress = visibility.clamp(0.0, 1.0);
+    final shellColor =
+        scheme.surfaceContainerHigh.withValues(alpha: isDark ? 0.72 : 0.88);
+    final borderColor =
+        scheme.outlineVariant.withValues(alpha: isDark ? 0.30 : 0.52);
+    final shadowColor = scheme.shadow.withValues(alpha: isDark ? 0.28 : 0.10);
+    final indicatorColor =
+        scheme.primary.withValues(alpha: isDark ? 0.94 : 0.98);
+    final indicatorShadow =
+        scheme.primary.withValues(alpha: isDark ? 0.34 : 0.22);
+    final activeSlot = _destinations.indexWhere(
+      (destination) => destination.pageIndex == selectedIndex,
+    );
+    final hasVisibleSelection = activeSlot >= 0;
+
+    return IgnorePointer(
+      ignoring: progress <= 0.02,
+      child: ClipRect(
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          heightFactor: progress,
+          child: Transform.translate(
+            offset: Offset(0, 24 * (1 - progress)),
+            child: Opacity(
+              opacity: progress,
+              child: SafeArea(
+                top: false,
+                left: false,
+                right: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 380),
+                      child: GlassNavigationBar(
+                        enableBlur: enableBlur,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: shellColor,
+                            borderRadius: BorderRadius.circular(30),
+                            border: Border.all(color: borderColor),
+                            boxShadow: [
+                              BoxShadow(
+                                color: shadowColor,
+                                blurRadius: 28,
+                                offset: const Offset(0, 14),
+                                spreadRadius: -10,
+                              ),
+                            ],
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(6),
+                            child: SizedBox(
+                              height: 60,
+                              child: LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final slotWidth = constraints.maxWidth /
+                                      _destinations.length;
+                                  return Stack(
+                                    children: [
+                                      AnimatedPositioned(
+                                        duration: const Duration(
+                                          milliseconds: 300,
+                                        ),
+                                        curve: Curves.easeOutCubic,
+                                        left: hasVisibleSelection
+                                            ? activeSlot * slotWidth
+                                            : slotWidth,
+                                        top: 0,
+                                        bottom: 0,
+                                        width: slotWidth,
+                                        child: AnimatedOpacity(
+                                          duration: const Duration(
+                                            milliseconds: 180,
+                                          ),
+                                          curve: Curves.easeOut,
+                                          opacity: hasVisibleSelection ? 1 : 0,
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 2,
+                                            ),
+                                            child: DecoratedBox(
+                                              decoration: BoxDecoration(
+                                                color: indicatorColor,
+                                                borderRadius:
+                                                    BorderRadius.circular(24),
+                                                boxShadow: [
+                                                  BoxShadow(
+                                                    color: indicatorShadow,
+                                                    blurRadius: 20,
+                                                    offset: const Offset(0, 8),
+                                                    spreadRadius: -8,
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      Row(
+                                        children: [
+                                          for (final destination
+                                              in _destinations)
+                                            Expanded(
+                                              child: _SegmentedNavButton(
+                                                destination: destination,
+                                                selected:
+                                                    destination.pageIndex ==
+                                                        selectedIndex,
+                                                labelStyle:
+                                                    theme.textTheme.labelSmall,
+                                                selectedColor: scheme.onPrimary,
+                                                unselectedColor:
+                                                    scheme.onSurfaceVariant,
+                                                onTap: () => onSelected(
+                                                  destination.pageIndex,
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ],
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MobilePageTransition extends StatefulWidget {
+  const _MobilePageTransition({
+    required this.index,
+    required this.pages,
+    this.duration = const Duration(milliseconds: 240),
+  });
+
+  final int index;
+  final List<Widget> pages;
+  final Duration duration;
+
+  @override
+  State<_MobilePageTransition> createState() => _MobilePageTransitionState();
+}
+
+class _MobilePageTransitionState extends State<_MobilePageTransition>
+    with SingleTickerProviderStateMixin {
+  late int _currentIndex = widget.index;
+  int? _previousIndex;
+  int _direction = 1;
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: widget.duration,
+  )..addStatusListener((status) {
+      if (status == AnimationStatus.completed && mounted) {
+        setState(() => _previousIndex = null);
+      }
+    });
+
+  @override
+  void didUpdateWidget(covariant _MobilePageTransition oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.duration != oldWidget.duration) {
+      _controller.duration = widget.duration;
+    }
+    if (widget.index == _currentIndex) return;
+
+    _direction = widget.index > _currentIndex ? 1 : -1;
+    _previousIndex = _currentIndex;
+    _currentIndex = widget.index;
+    _controller.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final backgroundColor = Theme.of(context).scaffoldBackgroundColor;
+    final currentPage = KeyedSubtree(
+      key: ValueKey('mobile-page-$_currentIndex'),
+      child: widget.pages[_currentIndex],
+    );
+
+    if (_previousIndex == null) {
+      return ColoredBox(color: backgroundColor, child: currentPage);
+    }
+
+    final previousPage = KeyedSubtree(
+      key: ValueKey('mobile-page-$_previousIndex'),
+      child: widget.pages[_previousIndex!],
+    );
+    final animation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+
+    return IgnorePointer(
+      ignoring: true,
+      child: ColoredBox(
+        color: backgroundColor,
+        child: ClipRect(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              FadeTransition(
+                opacity: Tween<double>(begin: 1, end: 0).animate(animation),
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: Offset.zero,
+                    end: Offset(-0.04 * _direction, 0),
+                  ).animate(animation),
+                  child: previousPage,
+                ),
+              ),
+              FadeTransition(
+                opacity: Tween<double>(begin: 0, end: 1).animate(animation),
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: Offset(0.07 * _direction, 0),
+                    end: Offset.zero,
+                  ).animate(animation),
+                  child: currentPage,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileNavDestination {
+  const _MobileNavDestination({
+    required this.pageIndex,
+    required this.icon,
+    required this.label,
+  });
+
+  final int pageIndex;
+  final IconData icon;
+  final String label;
+}
+
+class _SegmentedNavButton extends StatelessWidget {
+  const _SegmentedNavButton({
+    required this.destination,
+    required this.selected,
+    required this.labelStyle,
+    required this.selectedColor,
+    required this.unselectedColor,
+    required this.onTap,
+  });
+
+  final _MobileNavDestination destination;
+  final bool selected;
+  final TextStyle? labelStyle;
+  final Color selectedColor;
+  final Color unselectedColor;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final foregroundColor =
+        selected ? selectedColor : unselectedColor.withValues(alpha: 0.92);
+
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: destination.label,
+      child: Tooltip(
+        message: destination.label,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(24),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  AnimatedSlide(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    offset: selected ? Offset.zero : const Offset(0, 0.08),
+                    child: AnimatedScale(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      scale: selected ? 1.0 : 0.94,
+                      child: Icon(
+                        destination.icon,
+                        size: 21,
+                        color: foregroundColor,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    style: (labelStyle ?? const TextStyle()).copyWith(
+                      color: foregroundColor,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                      letterSpacing: selected ? -0.1 : 0.1,
+                    ),
+                    child: AnimatedOpacity(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOut,
+                      opacity: selected ? 1 : 0.84,
+                      child: Text(destination.label),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -2278,7 +2708,8 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection>
         final items = _loading && _items.isEmpty
             ? (snap.data ?? const <MediaItem>[])
             : _items;
-        final loading = _loading || snap.connectionState == ConnectionState.waiting;
+        final loading =
+            _loading || snap.connectionState == ConnectionState.waiting;
         final hasError = (_error ?? '').trim().isNotEmpty || snap.hasError;
         final theme = Theme.of(context);
 

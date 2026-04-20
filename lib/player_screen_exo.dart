@@ -628,7 +628,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   }
 
   Future<void> _pickDanmakuFile() async {
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['xml'],
       withData: kIsWeb,
@@ -1646,7 +1646,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                 }
 
                 Future<void> pickAndAddSubtitle() async {
-                  final result = await FilePicker.platform.pickFiles(
+                  final result = await FilePicker.pickFiles(
                     type: FileType.custom,
                     allowedExtensions: kSupportedExternalSubtitleExtensions,
                   );
@@ -3061,7 +3061,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   }
 
   Future<void> _pickFiles() async {
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: _kPickableExtensions,
       allowMultiple: true,

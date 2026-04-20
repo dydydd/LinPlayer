@@ -222,7 +222,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final mobileBytes = (Platform.isAndroid || Platform.isIOS)
         ? Uint8List.fromList(utf8.encode(text))
         : null;
-    final path = await FilePicker.platform.saveFile(
+    final path = await FilePicker.saveFile(
       dialogTitle: dialogTitle,
       fileName: fileName,
       type: FileType.custom,
@@ -843,7 +843,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _importBackupFromFile(BuildContext context) async {
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         dialogTitle: '选择备份文件',
         allowMultiple: false,
         withData: false,
@@ -1328,7 +1328,7 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 12),
               FilledButton.tonalIcon(
                 onPressed: () async {
-                  final result = await FilePicker.platform.pickFiles(
+                  final result = await FilePicker.pickFiles(
                     dialogTitle: '选择背景图片',
                     allowMultiple: false,
                     type: FileType.image,
@@ -1388,7 +1388,7 @@ class _SettingsPageState extends State<SettingsPage> {
               FilledButton.tonalIcon(
                 onPressed: () async {
                   final navigator = Navigator.of(dctx);
-                  final result = await FilePicker.platform.pickFiles(
+                  final result = await FilePicker.pickFiles(
                     dialogTitle: '选择背景图片',
                     allowMultiple: false,
                     type: FileType.image,
@@ -1514,7 +1514,7 @@ class _SettingsPageState extends State<SettingsPage> {
     if (_tvProxyBusy) return;
     setState(() => _tvProxyBusy = true);
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         dialogTitle: '选择 mihomo 可执行文件',
         allowMultiple: false,
         withData: false,
@@ -3180,7 +3180,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           ),
                           trailing: const Icon(Icons.folder_open),
                           onTap: () async {
-                            final result = await FilePicker.platform.pickFiles(
+                            final result = await FilePicker.pickFiles(
                               dialogTitle: '选择 mpv 可执行文件',
                               allowMultiple: false,
                               withData: false,

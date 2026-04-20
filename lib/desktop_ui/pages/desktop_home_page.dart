@@ -270,8 +270,7 @@ class _DesktopHomePageState extends State<DesktopHomePage> with RouteAware {
                             children: [
                               FilledButton.tonal(
                                 onPressed: () async {
-                                  final result =
-                                      await FilePicker.platform.pickFiles(
+                                  final result = await FilePicker.pickFiles(
                                     dialogTitle: '选择背景图片',
                                     allowMultiple: false,
                                     type: FileType.image,

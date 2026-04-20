@@ -2407,7 +2407,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   }
 
   Future<void> _pickDanmakuFile() async {
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['xml'],
       withData: kIsWeb,
@@ -2484,7 +2484,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     VideoPlayerController controller,
   ) async {
     final messenger = ScaffoldMessenger.of(context);
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: kSupportedExternalSubtitleExtensions,
       withData: kIsWeb,

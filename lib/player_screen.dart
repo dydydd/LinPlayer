@@ -1371,7 +1371,7 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   Future<void> _pickFile() async {
     final exts = _kLocalVideoExtensions.toList(growable: false);
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: exts,
       allowMultiple: true,
@@ -1488,14 +1488,14 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   Future<void> _pickLocalFolder() async {
-    final dir = await FilePicker.platform.getDirectoryPath();
+    final dir = await FilePicker.getDirectoryPath();
     if (dir == null || dir.trim().isEmpty) return;
     await _setLocalFolder(dir);
   }
 
   Future<void> _pickAndOpenLocalVideo() async {
     final exts = _kLocalVideoExtensions.toList(growable: false);
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: exts,
       allowMultiple: false,
@@ -2407,7 +2407,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   Future<void> _pickDanmakuFile() async {
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['xml'],
       withData: kIsWeb,
@@ -5009,7 +5009,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     final value = current;
 
     Future<void> pickAndAddSubtitle() async {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: kSupportedExternalSubtitleExtensions,
       );
@@ -7461,7 +7461,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                   final current = _playerService.player.state.track.subtitle;
 
                   Future<void> pickAndAddSubtitle() async {
-                    final result = await FilePicker.platform.pickFiles(
+                    final result = await FilePicker.pickFiles(
                       type: FileType.custom,
                       allowedExtensions: kSupportedExternalSubtitleExtensions,
                     );

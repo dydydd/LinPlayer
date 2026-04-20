@@ -6,6 +6,7 @@ import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
 
+import 'mobile_ui/common/mobile_shell_page.dart';
 import 'server_adapters/server_access.dart';
 import 'show_detail_page.dart';
 
@@ -15,17 +16,54 @@ class AggregateServicePage extends StatefulWidget {
     required this.appState,
     this.initialTabIndex,
     this.initialQuery = '',
+    this.embeddedInShell = false,
   });
 
   final AppState appState;
   final int? initialTabIndex;
   final String initialQuery;
+  final bool embeddedInShell;
 
   @override
   State<AggregateServicePage> createState() => _AggregateServicePageState();
 }
 
 class _AggregateServicePageState extends State<AggregateServicePage> {
+  PreferredSizeWidget _buildRootTabBar(
+    BuildContext context, {
+    bool embedded = false,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+
+    return TabBar(
+      dividerColor: embedded ? Colors.transparent : null,
+      indicatorSize: TabBarIndicatorSize.tab,
+      indicatorColor: scheme.primary.withValues(alpha: isDark ? 0.90 : 0.96),
+      indicatorWeight: embedded ? 0 : 3,
+      splashBorderRadius: BorderRadius.circular(16),
+      labelStyle: theme.textTheme.labelLarge?.copyWith(
+        fontWeight: FontWeight.w700,
+      ),
+      unselectedLabelStyle: theme.textTheme.labelLarge?.copyWith(
+        fontWeight: FontWeight.w600,
+      ),
+      labelColor: scheme.onSurface,
+      unselectedLabelColor: scheme.onSurfaceVariant,
+      indicator: embedded
+          ? BoxDecoration(
+              color: scheme.primary.withValues(alpha: isDark ? 0.22 : 0.14),
+              borderRadius: BorderRadius.circular(16),
+            )
+          : null,
+      tabs: const [
+        Tab(text: '观看记录'),
+        Tab(text: '聚合搜索'),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isTv = DeviceType.isTv;
@@ -34,33 +72,55 @@ class _AggregateServicePageState extends State<AggregateServicePage> {
         (widget.initialTabIndex ?? (widget.initialQuery.trim().isEmpty ? 0 : 1))
             .clamp(0, 1)
             .toInt();
+    final body = TabBarView(
+      children: [
+        _AggregateWatchHistoryTab(appState: widget.appState),
+        _AggregateSearchTab(
+          appState: widget.appState,
+          initialQuery: widget.initialQuery,
+        ),
+      ],
+    );
 
     return DefaultTabController(
       length: 2,
       initialIndex: effectiveInitialIndex,
-      child: Scaffold(
-        appBar: GlassAppBar(
-          enableBlur: enableBlur,
-          child: AppBar(
-            title: const Text('\u805a\u5408\u670d\u52a1'),
-            bottom: const TabBar(
-              tabs: [
-                Tab(text: '\u89c2\u770b\u8bb0\u5f55'),
-                Tab(text: '\u805a\u5408\u641c\u7d22'),
-              ],
+      child: widget.embeddedInShell
+          ? Builder(
+              builder: (context) {
+                final colorScheme = Theme.of(context).colorScheme;
+
+                return MobileShellPageFrame(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        colorScheme.surface,
+                        colorScheme.surfaceContainerLowest,
+                      ],
+                    ),
+                  ),
+                  header: MobileShellPageHeader(
+                    title: '聚合服务',
+                    subtitle: '观看记录与跨服搜索',
+                    enableBlur: enableBlur,
+                    bottom: _buildRootTabBar(context, embedded: true),
+                  ),
+                  child: body,
+                );
+              },
+            )
+          : Scaffold(
+              appBar: GlassAppBar(
+                enableBlur: enableBlur,
+                child: AppBar(
+                  title: const Text('\u805a\u5408\u670d\u52a1'),
+                  bottom: _buildRootTabBar(context),
+                ),
+              ),
+              body: body,
             ),
-          ),
-        ),
-        body: TabBarView(
-          children: [
-            _AggregateWatchHistoryTab(appState: widget.appState),
-            _AggregateSearchTab(
-              appState: widget.appState,
-              initialQuery: widget.initialQuery,
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -712,29 +772,29 @@ class _AggregateSearchTabStatefulState
             return;
           }
 
-           final res = await access.adapter.fetchItems(
-             access.auth,
-             searchTerm: query,
-             includeItemTypes: 'Series,Movie',
-             recursive: true,
-             excludeFolders: false,
-             limit: _searchLimitPerServer,
-             sortBy: 'SortName',
-             sortOrder: 'Ascending',
-           );
-           final hiddenLibraries = server.hiddenLibraries;
-           for (final item in res.items) {
-             final t = item.type.toLowerCase();
-             if (t != 'series' && t != 'movie') continue;
-             final parentId = (item.parentId ?? '').trim();
-             if (parentId.isNotEmpty && hiddenLibraries.contains(parentId)) {
-               continue;
-             }
-             hits.add(_ServerSearchHit(server: server, item: item));
-           }
-         } catch (e) {
-           serverErrors[server.id] = e.toString();
-         }
+          final res = await access.adapter.fetchItems(
+            access.auth,
+            searchTerm: query,
+            includeItemTypes: 'Series,Movie',
+            recursive: true,
+            excludeFolders: false,
+            limit: _searchLimitPerServer,
+            sortBy: 'SortName',
+            sortOrder: 'Ascending',
+          );
+          final hiddenLibraries = server.hiddenLibraries;
+          for (final item in res.items) {
+            final t = item.type.toLowerCase();
+            if (t != 'series' && t != 'movie') continue;
+            final parentId = (item.parentId ?? '').trim();
+            if (parentId.isNotEmpty && hiddenLibraries.contains(parentId)) {
+              continue;
+            }
+            hits.add(_ServerSearchHit(server: server, item: item));
+          }
+        } catch (e) {
+          serverErrors[server.id] = e.toString();
+        }
       }),
     );
 
@@ -1381,8 +1441,7 @@ class _AggregateWorkDetailPageState extends State<_AggregateWorkDetailPage> {
                         if (snap.connectionState == ConnectionState.waiting) {
                           return const Text('获取参数信息…');
                         }
-                        final sources =
-                            snap.data ?? _movieSourcesCache[rowKey];
+                        final sources = snap.data ?? _movieSourcesCache[rowKey];
                         if (sources == null || sources.isEmpty) {
                           return Text(_fmtMovieQuality(null));
                         }
@@ -1510,6 +1569,7 @@ class _MovieQualityInfo {
     final height = _AggregateWorkDetailPageState._heightOf(ms);
     final bitrate = _AggregateWorkDetailPageState._bitrateOf(ms);
     final sizeBytes = _AggregateWorkDetailPageState._sizeOf(ms);
-    return _MovieQualityInfo(height: height, bitrate: bitrate, sizeBytes: sizeBytes);
+    return _MovieQualityInfo(
+        height: height, bitrate: bitrate, sizeBytes: sizeBytes);
   }
 }

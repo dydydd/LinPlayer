@@ -15,6 +15,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 import '../../danmaku_settings_page.dart';
+import '../common/mobile_shell_page.dart';
 import '../../plugins/plugins_page.dart';
 import '../../services/app_diagnostics_report.dart';
 import '../../services/app_update_flow.dart';
@@ -32,9 +33,14 @@ enum _MobileSettingsSection {
 }
 
 class MobileSettingsPage extends StatefulWidget {
-  const MobileSettingsPage({super.key, required this.appState});
+  const MobileSettingsPage({
+    super.key,
+    required this.appState,
+    this.embeddedInShell = false,
+  });
 
   final AppState appState;
+  final bool embeddedInShell;
 
   @override
   State<MobileSettingsPage> createState() => _MobileSettingsPageState();
@@ -303,7 +309,7 @@ class _MobileSettingsPageState extends State<MobileSettingsPage> {
     final mobileBytes = (Platform.isAndroid || Platform.isIOS)
         ? Uint8List.fromList(utf8.encode(text))
         : null;
-    final path = await FilePicker.platform.saveFile(
+    final path = await FilePicker.saveFile(
       dialogTitle: dialogTitle,
       fileName: fileName,
       type: FileType.custom,
@@ -1656,16 +1662,71 @@ class _MobileSettingsPageState extends State<MobileSettingsPage> {
         final appState = widget.appState;
         final enableBlur = appState.enableBlurEffects;
         final colorScheme = Theme.of(context).colorScheme;
-
-        return Scaffold(
-          appBar: GlassAppBar(
-            enableBlur: enableBlur,
-            child: AppBar(
-              title: const Text('\u8bbe\u7f6e'),
-              centerTitle: true,
+        final body = DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                colorScheme.surface,
+                colorScheme.surfaceContainerLowest,
+              ],
             ),
           ),
-          body: DecoratedBox(
+          child: ListView(
+            controller: _scrollController,
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+            children: [
+              _buildSectionCard(
+                context,
+                section: _MobileSettingsSection.appearance,
+                icon: Icons.palette_outlined,
+                title: '\u5916\u89c2\u8bbe\u7f6e',
+                subtitle: _appearanceSummary(appState),
+                child: _buildAppearanceSection(context, appState),
+              ),
+              const SizedBox(height: 12),
+              _buildSectionCard(
+                context,
+                section: _MobileSettingsSection.playback,
+                icon: Icons.play_circle_outline_rounded,
+                title: '\u64ad\u653e\u8bbe\u7f6e',
+                subtitle: _playbackSummary(appState),
+                child: _buildPlaybackSection(context, appState),
+              ),
+              const SizedBox(height: 12),
+              _buildSectionCard(
+                context,
+                section: _MobileSettingsSection.interaction,
+                icon: Icons.touch_app_outlined,
+                title: '\u4ea4\u4e92\u8bbe\u7f6e',
+                subtitle: _interactionSummary(appState),
+                child: _buildInteractionSection(context, appState),
+              ),
+              const SizedBox(height: 12),
+              _buildSectionCard(
+                context,
+                section: _MobileSettingsSection.danmaku,
+                icon: Icons.comment_outlined,
+                title: '\u5f39\u5e55\u8bbe\u7f6e',
+                subtitle: _danmakuSummary(appState),
+                child: _buildDanmakuSection(context, appState),
+              ),
+              const SizedBox(height: 12),
+              _buildSectionCard(
+                context,
+                section: _MobileSettingsSection.app,
+                icon: Icons.apps_outlined,
+                title: '\u5e94\u7528\u8bbe\u7f6e',
+                subtitle: _appSummary(appState),
+                child: _buildAppSection(context, appState),
+              ),
+            ],
+          ),
+        );
+
+        if (widget.embeddedInShell) {
+          return MobileShellPageFrame(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
@@ -1676,57 +1737,24 @@ class _MobileSettingsPageState extends State<MobileSettingsPage> {
                 ],
               ),
             ),
-            child: ListView(
-              controller: _scrollController,
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
-              children: [
-                _buildSectionCard(
-                  context,
-                  section: _MobileSettingsSection.appearance,
-                  icon: Icons.palette_outlined,
-                  title: '\u5916\u89c2\u8bbe\u7f6e',
-                  subtitle: _appearanceSummary(appState),
-                  child: _buildAppearanceSection(context, appState),
-                ),
-                const SizedBox(height: 12),
-                _buildSectionCard(
-                  context,
-                  section: _MobileSettingsSection.playback,
-                  icon: Icons.play_circle_outline_rounded,
-                  title: '\u64ad\u653e\u8bbe\u7f6e',
-                  subtitle: _playbackSummary(appState),
-                  child: _buildPlaybackSection(context, appState),
-                ),
-                const SizedBox(height: 12),
-                _buildSectionCard(
-                  context,
-                  section: _MobileSettingsSection.interaction,
-                  icon: Icons.touch_app_outlined,
-                  title: '\u4ea4\u4e92\u8bbe\u7f6e',
-                  subtitle: _interactionSummary(appState),
-                  child: _buildInteractionSection(context, appState),
-                ),
-                const SizedBox(height: 12),
-                _buildSectionCard(
-                  context,
-                  section: _MobileSettingsSection.danmaku,
-                  icon: Icons.comment_outlined,
-                  title: '\u5f39\u5e55\u8bbe\u7f6e',
-                  subtitle: _danmakuSummary(appState),
-                  child: _buildDanmakuSection(context, appState),
-                ),
-                const SizedBox(height: 12),
-                _buildSectionCard(
-                  context,
-                  section: _MobileSettingsSection.app,
-                  icon: Icons.apps_outlined,
-                  title: '\u5e94\u7528\u8bbe\u7f6e',
-                  subtitle: _appSummary(appState),
-                  child: _buildAppSection(context, appState),
-                ),
-              ],
+            header: MobileShellPageHeader(
+              title: '设置',
+              subtitle: '播放器、交互与应用偏好',
+              enableBlur: enableBlur,
+            ),
+            child: body,
+          );
+        }
+
+        return Scaffold(
+          appBar: GlassAppBar(
+            enableBlur: enableBlur,
+            child: AppBar(
+              title: const Text('\u8bbe\u7f6e'),
+              centerTitle: true,
             ),
           ),
+          body: body,
         );
       },
     );
