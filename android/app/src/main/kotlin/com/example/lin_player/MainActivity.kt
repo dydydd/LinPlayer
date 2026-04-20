@@ -5,12 +5,20 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.Color
 import android.net.TrafficStats
 import android.os.BatteryManager
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
+import android.util.Log
+import android.view.Gravity
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.ScrollView
+import android.widget.TextView
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -26,6 +34,11 @@ import kotlin.system.exitProcess
 class MainActivity : FlutterActivity() {
     private val channelName = "linplayer/app_icon"
     private val deviceChannelName = "linplayer/device"
+    private val startupHandler = Handler(Looper.getMainLooper())
+    private var flutterUiDisplayed = false
+    private var configureFlutterEngineCompleted = false
+    private var startupOverlayShown = false
+    private var startupFailureMessage: String? = null
 
     private data class Alias(
         val id: String,
@@ -40,8 +53,38 @@ class MainActivity : FlutterActivity() {
         Alias(id = "miku", classNameSuffix = ".MainActivityMiku", manifestEnabled = false),
     )
 
+    private val startupWatchdog = Runnable {
+        if (!flutterUiDisplayed) {
+            showStartupOverlay()
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        startupHandler.postDelayed(startupWatchdog, flutterUiWatchdogTimeoutMs)
+    }
+
+    override fun onDestroy() {
+        startupHandler.removeCallbacks(startupWatchdog)
+        super.onDestroy()
+    }
+
+    override fun onFlutterUiDisplayed() {
+        flutterUiDisplayed = true
+        startupHandler.removeCallbacks(startupWatchdog)
+        removeStartupOverlay()
+        super.onFlutterUiDisplayed()
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
+        try {
+            super.configureFlutterEngine(flutterEngine)
+            configureFlutterEngineCompleted = true
+        } catch (e: Exception) {
+            startupFailureMessage = "configureFlutterEngine failed: ${e.javaClass.simpleName}: ${e.message ?: "unknown"}"
+            Log.e(startupTag, "configureFlutterEngine failed", e)
+            return
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
             when (call.method) {
                 "getIcon" -> {
@@ -137,6 +180,75 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun showStartupOverlay() {
+        if (startupOverlayShown) return
+        startupOverlayShown = true
+
+        val root = findViewById<ViewGroup>(android.R.id.content) ?: return
+        val message = buildStartupFailureMessage()
+        Log.e(startupTag, message)
+
+        val textView =
+            TextView(this).apply {
+                id = startupOverlayViewId
+                text = message
+                setTextColor(Color.parseColor("#1F2937"))
+                textSize = 14f
+                gravity = Gravity.START
+                setTextIsSelectable(true)
+                setPadding(48, 48, 48, 48)
+            }
+
+        val scrollView =
+            ScrollView(this).apply {
+                id = startupOverlayViewId
+                setBackgroundColor(Color.parseColor("#F8FAFC"))
+                addView(
+                    textView,
+                    ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ),
+                )
+            }
+
+        root.addView(
+            scrollView,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+    }
+
+    private fun removeStartupOverlay() {
+        val root = findViewById<ViewGroup>(android.R.id.content) ?: return
+        val overlay = root.findViewById<ScrollView>(startupOverlayViewId) ?: return
+        root.removeView(overlay)
+        startupOverlayShown = false
+    }
+
+    private fun buildStartupFailureMessage(): String {
+        val details =
+            startupFailureMessage
+                ?: "Flutter UI did not draw the first frame within ${flutterUiWatchdogTimeoutMs / 1000} seconds."
+        return buildString {
+            appendLine("LinPlayer startup timed out.")
+            appendLine()
+            appendLine(details)
+            appendLine()
+            appendLine("Build:")
+            appendLine("package=${applicationContext.packageName}")
+            appendLine("sdk=${Build.VERSION.SDK_INT}")
+            appendLine("abi=${primaryAbi() ?: "unknown"}")
+            appendLine("configureFlutterEngineCompleted=$configureFlutterEngineCompleted")
+            appendLine("flutterUiDisplayed=$flutterUiDisplayed")
+            appendLine()
+            appendLine("Next step:")
+            appendLine("Capture logcat and search for LinPlayer, Flutter, and GeneratedPluginRegistrant.")
+        }
+    }
+
     private fun deviceName(): String {
         val manufacturer = Build.MANUFACTURER?.trim().orEmpty()
         val brand = Build.BRAND?.trim().orEmpty()
@@ -218,6 +330,9 @@ class MainActivity : FlutterActivity() {
     }
 
     companion object {
+        private const val startupTag = "LinPlayerStartup"
+        private const val flutterUiWatchdogTimeoutMs = 5000L
+        private const val startupOverlayViewId = 0x42F123
         private var originalProxySelector: ProxySelector? = null
     }
 

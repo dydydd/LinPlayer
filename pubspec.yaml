@@ -55,7 +55,10 @@ dependencies:
   qr_flutter: ^4.1.0
   webview_flutter: ^4.4.2
   archive: ^4.0.8
-  desktop_drop: ^0.7.1
+  # Use the local fork so Android builds don't register an unused desktop-only
+  # plugin and become sensitive to plugin registrant codegen changes.
+  desktop_drop:
+    path: packages/desktop_drop_patched
   webview_windows: ^0.4.0
   flutter_js: ^0.8.7
 

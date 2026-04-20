@@ -19,6 +19,7 @@
 .android/
 .gradle-dist/
 .gradle-home/
+.gradle-user/
 .gradle-user-home/
 .tmp/
 

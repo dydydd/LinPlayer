@@ -4,7 +4,6 @@ import java.nio.charset.StandardCharsets
 import java.util.Base64
 import java.util.Properties
 import java.util.zip.GZIPInputStream
-import org.gradle.api.tasks.compile.JavaCompile
 
 plugins {
     id("com.android.application")
@@ -40,43 +39,6 @@ fun decodeDartDefines(raw: String?): Map<String, String> {
         }.toMap()
 }
 
-fun patchGeneratedPluginRegistrant(projectDir: File) {
-    val registrantFile =
-        File(projectDir, "src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java")
-    if (!registrantFile.exists()) return
-
-    var source = registrantFile.readText(Charsets.UTF_8)
-    if (source.contains("pluginByClassName(")) return
-
-    source =
-        source.replace(
-            "import io.flutter.embedding.engine.FlutterEngine;\n",
-            "import io.flutter.embedding.engine.FlutterEngine;\n" +
-                "import io.flutter.embedding.engine.plugins.FlutterPlugin;\n" +
-                "import java.lang.reflect.Constructor;\n\n",
-        )
-
-    source =
-        source.replace(
-            "  private static final String TAG = \"GeneratedPluginRegistrant\";\n",
-            "  private static final String TAG = \"GeneratedPluginRegistrant\";\n\n" +
-                "  private static FlutterPlugin pluginByClassName(String className) throws Exception {\n" +
-                "    Class<?> pluginClass = Class.forName(className);\n" +
-                "    Constructor<?> constructor = pluginClass.getDeclaredConstructor();\n" +
-                "    constructor.setAccessible(true);\n" +
-                "    return (FlutterPlugin) constructor.newInstance();\n" +
-                "  }\n\n",
-        )
-
-    source =
-        Regex("""flutterEngine\.getPlugins\(\)\.add\(new ([A-Za-z0-9_$.]+)\(\)\);""")
-            .replace(source) { match ->
-                """flutterEngine.getPlugins().add(pluginByClassName("${match.groupValues[1]}"));"""
-            }
-
-    registrantFile.writeText(source, Charsets.UTF_8)
-}
-
 val targetAbis =
     (project.findProperty("target-platform")?.toString() ?: "")
         .split(',')
@@ -94,6 +56,7 @@ val targetAbis =
         .distinct()
 
 val dartDefines = decodeDartDefines(project.findProperty("dart-defines")?.toString())
+val defaultReleaseAbis = listOf("arm64-v8a", "armeabi-v7a")
 val bundleTvProxy =
     isEnabledFlag(project.findProperty("linplayer.bundleTvProxy")?.toString()) ||
         isEnabledFlag(System.getenv("LINPLAYER_BUNDLE_TV_PROXY")) ||
@@ -177,6 +140,12 @@ android {
                 )
             }
             signingConfig = releaseSigningConfig ?: signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 
@@ -185,11 +154,12 @@ android {
     // override the allowlist so we don't accidentally bundle native libs for other ABIs
     // (which can make the APK crash on devices that pick the wrong ABI at runtime).
     val isSplitPerAbi = project.hasProperty("split-per-abi")
-    if (!isSplitPerAbi && targetAbis.isNotEmpty()) {
-        buildTypes.configureEach {
+    if (!isSplitPerAbi) {
+        val releaseAbis = if (targetAbis.isNotEmpty()) targetAbis else defaultReleaseAbis
+        buildTypes.named("release") {
             ndk {
                 abiFilters.clear()
-                abiFilters.addAll(targetAbis)
+                abiFilters.addAll(releaseAbis)
             }
         }
     }
@@ -197,12 +167,6 @@ android {
 
 flutter {
     source = "../.."
-}
-
-tasks.withType<JavaCompile>().configureEach {
-    doFirst {
-        patchGeneratedPluginRegistrant(project.projectDir)
-    }
 }
 
 tasks.configureEach {

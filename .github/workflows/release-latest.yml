@@ -262,8 +262,41 @@ jobs:
             fi
           }
 
+          purge_legacy_android_assets() {
+            local target="$1"
+            local legacy_assets=(
+              "LinPlayer-Android.apk"
+              "app-release.apk"
+              "app-arm64-v8a-release.apk"
+              "app-armeabi-v7a-release.apk"
+            )
+
+            mapfile -t current_assets < <(
+              gh_retry api "repos/${GITHUB_REPOSITORY}/releases/tags/${target}" \
+                --jq '.assets[] | "\(.id)\t\(.name)"'
+            )
+
+            if [[ ${#current_assets[@]} -eq 0 ]]; then
+              return
+            fi
+
+            for line in "${current_assets[@]}"; do
+              id="${line%%$'\t'*}"
+              name="${line#*$'\t'}"
+              for legacy in "${legacy_assets[@]}"; do
+                if [[ "$name" == "$legacy" ]]; then
+                  echo "Deleting legacy Android asset from ${target}: ${name}"
+                  gh_retry api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${id}"
+                  break
+                fi
+              done
+            done
+          }
+
           upload_assets "$STABLE_TAG"
+          purge_legacy_android_assets "$STABLE_TAG"
           upload_assets latest
+          purge_legacy_android_assets latest
 
       - name: Update VitePress download page
         shell: bash
