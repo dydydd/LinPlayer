@@ -145,11 +145,11 @@ class MobileHomeBottomNav extends StatelessWidget {
                 left: false,
                 right: false,
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 6, 14, 10),
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      final navWidth = constraints.maxWidth > 360
-                          ? 360.0
+                      final navWidth = constraints.maxWidth > 336
+                          ? 336.0
                           : constraints.maxWidth;
 
                       return Row(
@@ -160,27 +160,27 @@ class MobileHomeBottomNav extends StatelessWidget {
                             child: DecoratedBox(
                               decoration: BoxDecoration(
                                 color: shellColor,
-                                borderRadius: BorderRadius.circular(28),
+                                borderRadius: BorderRadius.circular(24),
                                 border: Border.all(color: shellBorder),
                                 boxShadow: [
                                   BoxShadow(
                                     color:
                                         scheme.shadow.withValues(alpha: 0.12),
-                                    blurRadius: 26,
-                                    offset: const Offset(0, 12),
-                                    spreadRadius: -14,
+                                    blurRadius: 22,
+                                    offset: const Offset(0, 10),
+                                    spreadRadius: -16,
                                   ),
                                 ],
                               ),
                               child: Padding(
                                 padding: const EdgeInsets.fromLTRB(
-                                  6,
                                   5,
-                                  6,
+                                  4,
                                   5,
+                                  4,
                                 ),
                                 child: SizedBox(
-                                  height: 52,
+                                  height: 46,
                                   child: LayoutBuilder(
                                     builder: (context, innerConstraints) {
                                       final slotWidth =
@@ -207,24 +207,24 @@ class MobileHomeBottomNav extends StatelessWidget {
                                                 padding:
                                                     const EdgeInsets.symmetric(
                                                   horizontal: 2,
-                                                  vertical: 1,
+                                                  vertical: 0.5,
                                                 ),
                                                 child: DecoratedBox(
                                                   decoration: BoxDecoration(
                                                     color: indicatorColor,
                                                     borderRadius:
                                                         BorderRadius.circular(
-                                                      22,
+                                                      19,
                                                     ),
                                                     boxShadow: [
                                                       BoxShadow(
                                                         color: indicatorShadow,
-                                                        blurRadius: 18,
+                                                        blurRadius: 16,
                                                         offset: const Offset(
                                                           0,
-                                                          8,
+                                                          7,
                                                         ),
-                                                        spreadRadius: -10,
+                                                        spreadRadius: -11,
                                                       ),
                                                     ],
                                                   ),
@@ -245,7 +245,7 @@ class MobileHomeBottomNav extends StatelessWidget {
                                                     labelStyle: theme
                                                         .textTheme.labelSmall
                                                         ?.copyWith(
-                                                      fontSize: 10.5,
+                                                      fontSize: 9.5,
                                                     ),
                                                     selectedColor:
                                                         scheme.onPrimary,
@@ -573,7 +573,7 @@ class _SegmentedNavButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(24),
             onTap: onTap,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -584,22 +584,23 @@ class _SegmentedNavButton extends StatelessWidget {
                     child: AnimatedScale(
                       duration: animationDuration,
                       curve: Curves.easeOutCubic,
-                      scale: selected ? 1.0 : 0.92,
+                      scale: selected ? 0.98 : 0.88,
                       child: Icon(
                         destination.icon,
-                        size: 18,
+                        size: 16,
                         color: foregroundColor,
                       ),
                     ),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 1),
                   AnimatedDefaultTextStyle(
                     duration: animationDuration,
                     curve: Curves.easeOutCubic,
                     style: (labelStyle ?? const TextStyle()).copyWith(
                       color: foregroundColor,
                       fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-                      letterSpacing: selected ? -0.1 : 0.1,
+                      letterSpacing: selected ? -0.05 : 0.05,
+                      height: 1.0,
                     ),
                     child: AnimatedOpacity(
                       duration: animationDuration,
