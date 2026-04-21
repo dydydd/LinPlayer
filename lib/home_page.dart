@@ -2140,6 +2140,8 @@ class _HomeBody extends StatelessWidget {
   final bool showSearchBar;
   final void Function(double delta, ScrollMetrics metrics)? onScrollDelta;
 
+  static const double _loadingIndicatorHeight = 2;
+
   @override
   Widget build(BuildContext context) {
     final sections = <HomeEntry>[];
@@ -2235,7 +2237,17 @@ class _HomeBody extends StatelessWidget {
                       _LibraryQuickAccessSection(
                           appState: appState, isTv: false),
                   ],
-                  if (loading) const LinearProgressIndicator(),
+                  SizedBox(
+                    height: _loadingIndicatorHeight,
+                    child: AnimatedOpacity(
+                      duration: const Duration(milliseconds: 160),
+                      curve: Curves.easeOut,
+                      opacity: loading ? 1 : 0,
+                      child: const LinearProgressIndicator(
+                        minHeight: _loadingIndicatorHeight,
+                      ),
+                    ),
+                  ),
                   for (final sec in sections)
                     if (sec.items.isNotEmpty) ...[
                       _HomeSectionHeader(

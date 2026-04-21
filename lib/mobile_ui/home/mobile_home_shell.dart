@@ -304,15 +304,10 @@ class _MobileHomePageTransitionState extends State<MobileHomePageTransition>
   late int _currentIndex;
   late int _previousIndex;
   late final AnimationController _controller;
+  int _travelDirection = 0;
 
   bool get _isAnimating =>
       _controller.isAnimating && _currentIndex != _previousIndex;
-
-  int _clampIndex(int index) {
-    final maxIndex = widget.pages.length - 1;
-    if (maxIndex <= 0) return 0;
-    return index.clamp(0, maxIndex).toInt();
-  }
 
   @override
   void initState() {
@@ -324,7 +319,10 @@ class _MobileHomePageTransitionState extends State<MobileHomePageTransition>
       duration: widget.duration,
     )..addStatusListener((status) {
         if (status != AnimationStatus.completed || !mounted) return;
-        setState(() => _previousIndex = _currentIndex);
+        setState(() {
+          _previousIndex = _currentIndex;
+          _travelDirection = 0;
+        });
       });
   }
 
@@ -338,8 +336,10 @@ class _MobileHomePageTransitionState extends State<MobileHomePageTransition>
     _previousIndex = _clampIndex(_previousIndex);
     final nextIndex = _clampIndex(widget.index);
     if (nextIndex == _currentIndex) return;
-    _previousIndex = _currentIndex;
+    final originIndex = _currentIndex;
+    _previousIndex = originIndex;
     _currentIndex = nextIndex;
+    _travelDirection = nextIndex > originIndex ? 1 : -1;
     _controller.forward(from: 0);
   }
 
@@ -352,6 +352,7 @@ class _MobileHomePageTransitionState extends State<MobileHomePageTransition>
   @override
   Widget build(BuildContext context) {
     final backgroundColor = Theme.of(context).scaffoldBackgroundColor;
+
     return ColoredBox(
       color: backgroundColor,
       child: ClipRect(
@@ -361,16 +362,20 @@ class _MobileHomePageTransitionState extends State<MobileHomePageTransition>
             final currentIndex = _clampIndex(_currentIndex);
             final previousIndex = _clampIndex(_previousIndex);
             final isAnimating = _isAnimating;
-            final progress = _controller.value.clamp(0.0, 1.0);
+            final progress = Curves.easeOutCubic.transform(
+              _controller.value.clamp(0.0, 1.0),
+            );
 
             return IgnorePointer(
               ignoring: isAnimating,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  for (int index = 0; index < widget.pages.length; index++)
+                  for (int pageIndex = 0;
+                      pageIndex < widget.pages.length;
+                      pageIndex++)
                     _buildPageLayer(
-                      index: index,
+                      index: pageIndex,
                       currentIndex: currentIndex,
                       previousIndex: previousIndex,
                       isAnimating: isAnimating,
@@ -392,70 +397,56 @@ class _MobileHomePageTransitionState extends State<MobileHomePageTransition>
     required bool isAnimating,
     required double progress,
   }) {
-    final page = KeyedSubtree(
-      key: ValueKey<int>(index),
-      child: widget.pages[index],
-    );
     final isCurrent = index == currentIndex;
     final isPrevious = index == previousIndex;
-    final keepMounted = isCurrent || isPrevious || !isAnimating;
     final showPage = isCurrent || (isAnimating && isPrevious);
-
-    var opacity = 1.0;
-    var scale = 1.0;
-    if (isAnimating && isCurrent) {
-      opacity = Tween<double>(
-        begin: 0.18,
-        end: 1.0,
-      ).transform(Curves.easeOutCubic.transform(progress));
-      scale = Tween<double>(
-        begin: 0.996,
-        end: 1.0,
-      ).transform(Curves.easeOutCubic.transform(progress));
-    } else if (isAnimating && isPrevious) {
-      opacity = Tween<double>(
-        begin: 1.0,
-        end: 0.0,
-      ).transform(Curves.easeInCubic.transform(progress));
-    }
 
     return Offstage(
       offstage: !showPage,
       child: TickerMode(
-        enabled: keepMounted && showPage,
-        child: _MobilePageLayer(
-          opacity: opacity,
-          scale: scale,
-          child: page,
+        enabled: isCurrent,
+        child: FractionalTranslation(
+          translation: _pageOffset(
+            isCurrent: isCurrent,
+            isPrevious: isPrevious,
+            isAnimating: isAnimating,
+            progress: progress,
+          ),
+          child: RepaintBoundary(
+            child: KeyedSubtree(
+              key: ValueKey<int>(index),
+              child: widget.pages[index],
+            ),
+          ),
         ),
       ),
     );
   }
-}
 
-class _MobilePageLayer extends StatelessWidget {
-  const _MobilePageLayer({
-    required this.child,
-    this.opacity = 1,
-    this.scale = 1,
-  });
+  Offset _pageOffset({
+    required bool isCurrent,
+    required bool isPrevious,
+    required bool isAnimating,
+    required double progress,
+  }) {
+    if (!isAnimating || _travelDirection == 0) {
+      return Offset.zero;
+    }
 
-  final Widget child;
-  final double opacity;
-  final double scale;
+    final direction = _travelDirection.toDouble();
+    if (isCurrent) {
+      return Offset(direction * (1 - progress), 0);
+    }
+    if (isPrevious) {
+      return Offset(-direction * progress, 0);
+    }
+    return Offset.zero;
+  }
 
-  @override
-  Widget build(BuildContext context) {
-    return Opacity(
-      opacity: opacity.clamp(0.0, 1.0),
-      child: Transform.scale(
-        scale: scale,
-        alignment: Alignment.center,
-        child: RepaintBoundary(
-          child: child,
-        ),
-      ),
-    );
+  int _clampIndex(int index) {
+    final maxIndex = widget.pages.length - 1;
+    if (maxIndex <= 0) return 0;
+    return index.clamp(0, maxIndex).toInt();
   }
 }
 
