@@ -1,3 +1,4 @@
+import java.io.File
 import java.io.FileInputStream
 import java.util.Properties
 
@@ -48,7 +49,17 @@ android {
             ?.takeIf { it.isNotEmpty() }
             ?: "0.1.0"
 
-    val releaseKeystoreFile = propOrEnv(keystoreProperties, "storeFile", "ANDROID_KEYSTORE_FILE")
+    val releaseKeystorePath = propOrEnv(keystoreProperties, "storeFile", "ANDROID_KEYSTORE_FILE")
+    val releaseKeystoreFile =
+        releaseKeystorePath?.let { configuredPath ->
+            // key.properties lives at the legacy project root, so relative storeFile values
+            // should be resolved from rootProject rather than the :app module directory.
+            if (File(configuredPath).isAbsolute) {
+                file(configuredPath)
+            } else {
+                rootProject.file(configuredPath)
+            }
+        }
     val releaseStorePassword =
         propOrEnv(keystoreProperties, "storePassword", "ANDROID_KEYSTORE_PASSWORD")
     val releaseKeyAlias = propOrEnv(keystoreProperties, "keyAlias", "ANDROID_KEY_ALIAS")
@@ -75,10 +86,10 @@ android {
                 releaseStorePassword != null &&
                 releaseKeyAlias != null &&
                 releaseKeyPassword != null &&
-                file(releaseKeystoreFile).exists()
+                releaseKeystoreFile.exists()
         ) {
             signingConfigs.create("release") {
-                storeFile = file(releaseKeystoreFile)
+                storeFile = releaseKeystoreFile
                 storePassword = releaseStorePassword
                 keyAlias = releaseKeyAlias
                 keyPassword = releaseKeyPassword
