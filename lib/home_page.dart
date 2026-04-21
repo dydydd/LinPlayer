@@ -16,6 +16,7 @@ import 'aggregate_service_page.dart';
 import 'continue_watching_page.dart';
 import 'library_page.dart';
 import 'library_items_page.dart';
+import 'mobile_ui/common/mobile_global_top_bar.dart';
 import 'mobile_ui/home/mobile_home_shell.dart';
 import 'mobile_ui/settings/mobile_settings_page.dart';
 import 'player_screen.dart';
@@ -553,6 +554,34 @@ class _HomePageState extends State<HomePage> {
                 ? '閫夋嫨鏈嶅姟鍣?'
                 : AppConfigScope.of(context).displayName);
         final activeIconUrl = widget.appState.activeServer?.iconUrl;
+        final mobileTopBarHeight = MediaQuery.paddingOf(context).top + 56;
+        Widget buildMobileGlobalTopBar(double visibility) {
+          return MobileGlobalTopBar(
+            topInset: MediaQuery.paddingOf(context).top,
+            visibility: visibility,
+            enableBlur: enableBlur,
+            useGlass: usesGlassSurfaces,
+            serverName: activeServerName,
+            iconUrl: activeIconUrl,
+            onTapServer: _openServerPage,
+            onTapSearch: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => SearchPage(appState: widget.appState),
+                ),
+              );
+            },
+            onTapLibrary: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => LibraryPage(appState: widget.appState),
+                ),
+              );
+            },
+            onTapRoute: _showRoutePicker,
+          );
+        }
+
         final homeTopBarVisibility = _mobileHomeChromeVisibility;
         final bottomNavVisibility =
             _index == 0 ? _mobileHomeChromeVisibility : 1.0;
@@ -560,33 +589,9 @@ class _HomePageState extends State<HomePage> {
             ? DecoratedBox(
                 decoration: mobileShellDecoration,
                 child: MobileHomeTopBarPage(
-                  topBarHeight: MediaQuery.paddingOf(context).top + 56,
+                  topBarHeight: mobileTopBarHeight,
                   topBarVisibility: homeTopBarVisibility,
-                  topBar: _MobileHomeAppBar(
-                    topInset: MediaQuery.paddingOf(context).top,
-                    visibility: homeTopBarVisibility,
-                    enableBlur: enableBlur,
-                    useGlass: usesGlassSurfaces,
-                    serverName: activeServerName,
-                    iconUrl: activeIconUrl,
-                    onTapServer: _openServerPage,
-                    onTapSearch: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => SearchPage(appState: widget.appState),
-                        ),
-                      );
-                    },
-                    onTapLibrary: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              LibraryPage(appState: widget.appState),
-                        ),
-                      );
-                    },
-                    onTapRoute: _showRoutePicker,
-                  ),
+                  topBar: buildMobileGlobalTopBar(homeTopBarVisibility),
                   child: _HomeBody(
                     appState: widget.appState,
                     loading: _loading,
@@ -707,7 +712,7 @@ class _HomePageState extends State<HomePage> {
                 scrolledUnderElevation: 0,
                 shape: const RoundedRectangleBorder(),
                 centerTitle: false,
-                title: _ServerGlassButton(
+                title: MobileServerGlassButton(
                   enableBlur: enableBlur,
                   useGlass: usesGlassSurfaces,
                   serverName: widget.appState.activeServer?.name ??
@@ -718,7 +723,7 @@ class _HomePageState extends State<HomePage> {
                   onTap: _openServerPage,
                 ),
                 actions: [
-                  _GlassActionIconButton(
+                  MobileTopActionIconButton(
                     icon: Icons.search,
                     tooltip: '搜索',
                     enableBlur: enableBlur,
@@ -731,7 +736,7 @@ class _HomePageState extends State<HomePage> {
                       );
                     },
                   ),
-                  _GlassActionIconButton(
+                  MobileTopActionIconButton(
                     icon: Icons.video_library_outlined,
                     tooltip: '媒体库',
                     enableBlur: enableBlur,
@@ -745,14 +750,14 @@ class _HomePageState extends State<HomePage> {
                       );
                     },
                   ),
-                  _GlassActionIconButton(
+                  MobileTopActionIconButton(
                     icon: Icons.alt_route_outlined,
                     tooltip: '线路',
                     enableBlur: enableBlur,
                     useGlass: usesGlassSurfaces,
                     onPressed: _showRoutePicker,
                   ),
-                  _GlassActionIconButton(
+                  MobileTopActionIconButton(
                     icon: Icons.palette_outlined,
                     tooltip: '主题',
                     enableBlur: enableBlur,
@@ -768,35 +773,6 @@ class _HomePageState extends State<HomePage> {
                 ? '选择服务器'
                 : AppConfigScope.of(context).displayName);
         final iconUrl = widget.appState.activeServer?.iconUrl;
-        final homeChromeVisibility =
-            _index == 0 ? _mobileHomeChromeVisibility : 1.0;
-        final mobileAppBar = _index == 0
-            ? _MobileHomeAppBar(
-                topInset: MediaQuery.paddingOf(context).top,
-                visibility: homeChromeVisibility,
-                enableBlur: enableBlur,
-                useGlass: usesGlassSurfaces,
-                serverName: serverName,
-                iconUrl: iconUrl,
-                onTapServer: _openServerPage,
-                onTapSearch: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => SearchPage(appState: widget.appState),
-                    ),
-                  );
-                },
-                onTapLibrary: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => LibraryPage(appState: widget.appState),
-                    ),
-                  );
-                },
-                onTapRoute: _showRoutePicker,
-              )
-            : null;
-
         if (useRail) {
           return Scaffold(
             appBar: appBar,
