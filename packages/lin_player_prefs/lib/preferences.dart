@@ -1,4 +1,5 @@
-import 'package:flutter/foundation.dart' show immutable;
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, immutable, kIsWeb;
 
 enum TvBackgroundMode {
   none,
@@ -57,7 +58,9 @@ enum VideoVersionPreference {
 }
 
 enum PlayerCore {
+  avplayer,
   mpv,
+  vlc,
   exo,
 }
 
@@ -74,12 +77,90 @@ enum PlaybackProxyMode {
 }
 
 PlayerCore playerCoreFromId(String? id) {
-  switch (id) {
+  switch ((id ?? '').trim().toLowerCase()) {
+    case 'avplayer':
+      return PlayerCore.avplayer;
+    case 'vlc':
+      return PlayerCore.vlc;
     case 'exo':
       return PlayerCore.exo;
+    case 'mpv':
     default:
       return PlayerCore.mpv;
   }
+}
+
+bool playerCoreUsesNativeVideoPlayer(PlayerCore core) {
+  return core == PlayerCore.exo || core == PlayerCore.avplayer;
+}
+
+bool playerCoreIsSupportedOnPlatform(
+  PlayerCore core, {
+  TargetPlatform? platform,
+  bool? isWeb,
+}) {
+  final resolvedIsWeb = isWeb ?? kIsWeb;
+  if (resolvedIsWeb) {
+    return core == PlayerCore.mpv;
+  }
+
+  switch (platform ?? defaultTargetPlatform) {
+    case TargetPlatform.android:
+      return core == PlayerCore.mpv || core == PlayerCore.exo;
+    case TargetPlatform.iOS:
+      return core == PlayerCore.avplayer ||
+          core == PlayerCore.mpv ||
+          core == PlayerCore.vlc;
+    case TargetPlatform.macOS:
+    case TargetPlatform.windows:
+    case TargetPlatform.linux:
+    case TargetPlatform.fuchsia:
+      return core == PlayerCore.mpv;
+  }
+}
+
+List<PlayerCore> playerCoresForPlatform({
+  TargetPlatform? platform,
+  bool? isWeb,
+}) {
+  final resolvedIsWeb = isWeb ?? kIsWeb;
+  if (resolvedIsWeb) {
+    return const <PlayerCore>[PlayerCore.mpv];
+  }
+
+  switch (platform ?? defaultTargetPlatform) {
+    case TargetPlatform.android:
+      return const <PlayerCore>[PlayerCore.mpv, PlayerCore.exo];
+    case TargetPlatform.iOS:
+      return const <PlayerCore>[
+        PlayerCore.avplayer,
+        PlayerCore.mpv,
+        PlayerCore.vlc,
+      ];
+    case TargetPlatform.macOS:
+    case TargetPlatform.windows:
+    case TargetPlatform.linux:
+    case TargetPlatform.fuchsia:
+      return const <PlayerCore>[PlayerCore.mpv];
+  }
+}
+
+PlayerCore defaultPlayerCoreForPlatform({
+  TargetPlatform? platform,
+  bool? isWeb,
+}) {
+  return playerCoresForPlatform(platform: platform, isWeb: isWeb).first;
+}
+
+PlayerCore normalizePlayerCoreForPlatform(
+  PlayerCore core, {
+  TargetPlatform? platform,
+  bool? isWeb,
+}) {
+  if (playerCoreIsSupportedOnPlatform(core, platform: platform, isWeb: isWeb)) {
+    return core;
+  }
+  return defaultPlayerCoreForPlatform(platform: platform, isWeb: isWeb);
 }
 
 PlaybackProxyMode playbackProxyModeFromId(String? id) {
@@ -110,8 +191,12 @@ PlaybackBufferPreset playbackBufferPresetFromId(String? id) {
 extension PlayerCoreX on PlayerCore {
   String get id {
     switch (this) {
+      case PlayerCore.avplayer:
+        return 'avplayer';
       case PlayerCore.mpv:
         return 'mpv';
+      case PlayerCore.vlc:
+        return 'vlc';
       case PlayerCore.exo:
         return 'exo';
     }
@@ -119,8 +204,12 @@ extension PlayerCoreX on PlayerCore {
 
   String get label {
     switch (this) {
+      case PlayerCore.avplayer:
+        return 'AVPlayer';
       case PlayerCore.mpv:
         return 'MPV';
+      case PlayerCore.vlc:
+        return 'VLC';
       case PlayerCore.exo:
         return 'Exo';
     }

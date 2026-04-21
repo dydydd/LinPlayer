@@ -24,6 +24,8 @@ import 'services/app_route_observer.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/desktop_window.dart';
 import 'services/playback/mobile_playback_preferences.dart';
+import 'services/playback/player_core_pages.dart';
+import 'services/playback/player_core_ui.dart';
 import 'services/playback/video_display_mode.dart';
 import 'services/playback_proxy/playback_proxy.dart';
 import 'services/subtitle_support.dart';
@@ -1317,16 +1319,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
-  Future<void> _switchCore() async {
+  Future<void> _switchToPlayerCore(PlayerCore core) async {
     final appState = widget.appState;
     if (appState == null) return;
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Exo 内核仅支持 Android')),
-      );
-      return;
-    }
+    final nextCore = normalizePlayerCoreForPlatform(core);
+    if (nextCore == appState.playerCore) return;
 
     final playlist = _playlist
         .where((f) => (f.path ?? '').trim().isNotEmpty)
@@ -1353,7 +1350,26 @@ class _PlayerScreenState extends State<PlayerScreen>
         ),
       );
     }
-    await appState.setPlayerCore(PlayerCore.exo);
+    await appState.setPlayerCore(nextCore);
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => buildLocalPlayerScreen(
+          appState: appState,
+          startFullScreen: widget.startFullScreen,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _switchCore() async {
+    final appState = widget.appState;
+    if (appState == null) return;
+    final current = normalizePlayerCoreForPlatform(appState.playerCore);
+    final candidates =
+        playerCoresForPlatform().where((core) => core != current);
+    final next = candidates.isEmpty ? current : candidates.first;
+    await _switchToPlayerCore(next);
   }
 
   void _applyDanmakuPauseState(bool pause) {
@@ -6436,7 +6452,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       ),
       MobilePlayerActionButton(
         icon: Icons.tune,
-        label: currentCore == PlayerCore.exo ? '内核 Exo' : '内核 mpv',
+        label: playerCoreOverlayLabel(
+          normalizePlayerCoreForPlatform(currentCore),
+        ),
         compact: true,
         onTap: () => _openMobilePanel(_MobilePlayerPanel.core),
       ),
@@ -6920,33 +6938,46 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   Widget _buildMobileCorePanel({required bool controlsEnabled}) {
-    final current = widget.appState?.playerCore ?? PlayerCore.mpv;
+    final current = normalizePlayerCoreForPlatform(
+      widget.appState?.playerCore ?? PlayerCore.mpv,
+    );
+    final cores = playerCoresForPlatform();
     return ListView(
       padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
       children: [
-        MobilePlayerOptionTile(
-          title: 'mpv',
-          subtitle: '当前使用 media_kit / mpv 本地播放',
-          selected: current == PlayerCore.mpv,
-          trailing: current == PlayerCore.mpv
-              ? const Icon(Icons.check_circle, color: Colors.white)
-              : null,
-        ),
-        const SizedBox(height: 8),
-        MobilePlayerOptionTile(
-          title: 'Exo',
-          subtitle: '切换到 Android Exo 本地播放内核',
-          selected: current == PlayerCore.exo,
-          trailing: current == PlayerCore.exo
-              ? const Icon(Icons.check_circle, color: Colors.white)
-              : null,
-          onTap: current == PlayerCore.exo
-              ? null
-              : () {
-                  _closeMobilePanels(scheduleHide: false);
-                  unawaited(_switchCore());
-                },
-        ),
+        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) ...[
+          MobilePlayerOptionTile(
+            title: 'iOS 内核优先级',
+            subtitle: '默认优先 AVPlayer，其次 MPV，最后 VLC。切换后会保留当前播放队列与进度。',
+            leading: const Icon(
+              Icons.auto_awesome_rounded,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+        for (final core in cores) ...[
+          MobilePlayerOptionTile(
+            title: core.label,
+            subtitle: playerCorePanelSubtitle(
+              core,
+              active: current == core,
+              localPlayback: true,
+            ),
+            leading: Icon(playerCoreIcon(core), color: Colors.white),
+            selected: current == core,
+            trailing: current == core
+                ? const Icon(Icons.check_circle, color: Colors.white)
+                : null,
+            onTap: current == core
+                ? null
+                : () {
+                    _closeMobilePanels(scheduleHide: false);
+                    unawaited(_switchToPlayerCore(core));
+                  },
+          ),
+          if (core != cores.last) const SizedBox(height: 8),
+        ],
         const SizedBox(height: 8),
         MobilePlayerOptionTile(
           title: '硬件解码',

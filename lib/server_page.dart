@@ -9,9 +9,8 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'mobile_ui/server/mobile_server_page.dart';
-import 'player_screen.dart';
-import 'player_screen_exo.dart';
 import 'settings_page.dart';
+import 'services/playback/player_core_pages.dart';
 import 'services/tv_remote/tv_remote_service.dart';
 import 'server_text_import_sheet.dart';
 import 'package:lin_player_server_api/services/plex_api.dart';
@@ -59,14 +58,9 @@ class _ServerPageState extends State<ServerPage> {
   }
 
   Future<void> _openLocalPlayer() async {
-    final useExoCore = !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android &&
-        widget.appState.playerCore == PlayerCore.exo;
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => useExoCore
-            ? ExoPlayerScreen(appState: widget.appState)
-            : PlayerScreen(appState: widget.appState),
+        builder: (_) => buildLocalPlayerScreen(appState: widget.appState),
       ),
     );
   }
@@ -1074,9 +1068,6 @@ class _ServerPageState extends State<ServerPage> {
         final maxCrossAxisExtent = (isTv ? 160.0 : 180.0) * uiScale;
 
         if (useDesktopLayout) {
-          final useExoCore = !kIsWeb &&
-              defaultTargetPlatform == TargetPlatform.android &&
-              widget.appState.playerCore == PlayerCore.exo;
           final railExtended = MediaQuery.of(context).size.width >= 1280;
 
           return Scaffold(
@@ -1136,9 +1127,7 @@ class _ServerPageState extends State<ServerPage> {
                           maxCrossAxisExtent: maxCrossAxisExtent,
                         ),
                         _desktopPagesBuilt[1]
-                            ? (useExoCore
-                                ? ExoPlayerScreen(appState: widget.appState)
-                                : PlayerScreen(appState: widget.appState))
+                            ? buildLocalPlayerScreen(appState: widget.appState)
                             : const SizedBox.shrink(),
                         _desktopPagesBuilt[2]
                             ? SettingsPage(appState: widget.appState)

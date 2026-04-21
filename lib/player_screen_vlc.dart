@@ -11,7 +11,6 @@ import 'package:lin_player_player/lin_player_player.dart';
 import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
-import 'package:video_player/video_player.dart';
 import 'package:video_player_android/exo_tracks.dart' as vp_android;
 import 'package:video_player_platform_interface/video_player_platform_interface.dart'
     as vp_platform;
@@ -22,6 +21,7 @@ import 'services/playback/mobile_playback_preferences.dart';
 import 'services/playback/player_core_pages.dart';
 import 'services/playback/player_core_ui.dart';
 import 'services/playback/video_display_mode.dart';
+import 'services/playback/vlc_video_player_adapter.dart';
 import 'services/subtitle_support.dart';
 import 'services/stream_proxy/local_http_stream_proxy.dart';
 import 'services/stream_resolver/stream_resolver.dart';
@@ -29,8 +29,8 @@ import 'widgets/danmaku_manual_search_dialog.dart';
 import 'widgets/list_picker_dialog.dart';
 import 'widgets/mobile_player_status_bars.dart';
 
-class ExoPlayerScreen extends StatefulWidget {
-  const ExoPlayerScreen({
+class VlcPlayerScreen extends StatefulWidget {
+  const VlcPlayerScreen({
     super.key,
     required this.appState,
     this.startFullScreen = false,
@@ -40,10 +40,10 @@ class ExoPlayerScreen extends StatefulWidget {
   final bool startFullScreen;
 
   @override
-  State<ExoPlayerScreen> createState() => _ExoPlayerScreenState();
+  State<VlcPlayerScreen> createState() => _VlcPlayerScreenState();
 }
 
-class _ExoPlayerScreenState extends State<ExoPlayerScreen>
+class _VlcPlayerScreenState extends State<VlcPlayerScreen>
     with WidgetsBindingObserver, RouteAware {
   static const List<String> _kPickableExtensions = <String>[
     '3gp',
@@ -160,15 +160,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   bool get _isAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
   bool get _isIos => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
-  bool get _supportsNativeVideoPlayer => _isAndroid || _isIos;
-  PlayerCore get _nativeCore {
-    final current = normalizePlayerCoreForPlatform(widget.appState.playerCore);
-    return current == PlayerCore.avplayer
-        ? PlayerCore.avplayer
-        : PlayerCore.exo;
-  }
-
-  String get _nativeCoreName => _nativeCore.label;
+  bool get _supportsVlcCore => _isAndroid || _isIos;
 
   @override
   void initState() {
@@ -1358,9 +1350,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(content: Text('$_nativeCoreName 内核暂不支持：$feature')),
-      );
+      ..showSnackBar(SnackBar(content: Text('VLC 内核暂不支持：$feature')));
   }
 
   String _audioTrackTitle(vp_platform.VideoAudioTrack t) {
@@ -2699,7 +2689,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
         Text('Anime4K 超分', style: sectionStyle()),
         const SizedBox(height: 8),
         const MobilePlayerOptionTile(
-          title: '原生内核暂不支持实时超分',
+          title: 'VLC 内核暂不支持实时超分',
           subtitle: '如需 Anime4K，请在「内核」中切换到 mpv',
         ),
       ],
@@ -2841,7 +2831,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
         const SizedBox(height: 8),
         const MobilePlayerOptionTile(
           title: '软硬解切换',
-          subtitle: 'Exo 本地页暂不支持单独切换软硬解',
+          subtitle: 'VLC 页面暂不支持单独切换软硬解',
         ),
       ],
     );
@@ -3469,15 +3459,12 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
 
     final fileName = _currentIndex >= 0 && _currentIndex < _playlist.length
         ? _playlist[_currentIndex].name
-        : '本地播放（$_nativeCoreName）';
+        : '本地播放（VLC）';
 
-    if (!_supportsNativeVideoPlayer) {
+    if (!_supportsVlcCore) {
       return Scaffold(
-        appBar: AppBar(
-          title: Text('本地播放（$_nativeCoreName）'),
-          centerTitle: true,
-        ),
-        body: Center(child: Text('$_nativeCoreName 内核仅支持移动端原生播放器')),
+        appBar: AppBar(title: const Text('本地播放（VLC）'), centerTitle: true),
+        body: const Center(child: Text('VLC 内核仅支持 iOS / Android')),
       );
     }
 

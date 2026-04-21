@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:lin_player_core/state/media_server_type.dart';
 import 'package:lin_player_prefs/lin_player_prefs.dart';
@@ -10,8 +9,7 @@ import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../home_page.dart';
-import '../../player_screen.dart';
-import '../../player_screen_exo.dart';
+import '../../services/playback/player_core_pages.dart';
 import '../../webdav_home_page.dart';
 import 'mobile_add_server_page.dart';
 
@@ -49,14 +47,9 @@ class _MobileServerPageState extends State<MobileServerPage> {
   }
 
   Future<void> _openLocalPlayer() async {
-    final useExoCore = !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android &&
-        widget.appState.playerCore == PlayerCore.exo;
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => useExoCore
-            ? ExoPlayerScreen(appState: widget.appState)
-            : PlayerScreen(appState: widget.appState),
+        builder: (_) => buildLocalPlayerScreen(appState: widget.appState),
       ),
     );
   }

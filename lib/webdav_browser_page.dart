@@ -1,15 +1,12 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
 
-import 'player_screen.dart';
-import 'player_screen_exo.dart';
 import 'package:lin_player_server_api/services/webdav_api.dart';
 import 'package:lin_player_server_api/services/webdav_proxy.dart';
+import 'services/playback/player_core_pages.dart';
 
 class WebDavBrowserPage extends StatefulWidget {
   const WebDavBrowserPage({
@@ -186,15 +183,12 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
 
     if (!mounted) return;
 
-    final useExoCore = !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android &&
-        widget.appState.playerCore == PlayerCore.exo;
-
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => useExoCore
-            ? ExoPlayerScreen(appState: widget.appState, startFullScreen: true)
-            : PlayerScreen(appState: widget.appState, startFullScreen: true),
+        builder: (_) => buildLocalPlayerScreen(
+          appState: widget.appState,
+          startFullScreen: true,
+        ),
       ),
     );
   }

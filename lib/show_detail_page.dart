@@ -19,10 +19,9 @@ import 'plugins/plugin_slot_area.dart';
 import 'server_adapters/server_access.dart';
 import 'services/browsing_cache_service.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
+import 'services/playback/player_core_pages.dart';
 import 'services/preload/playback_preload_coordinator.dart';
 import 'person_page.dart';
-import 'play_network_page.dart';
-import 'play_network_page_exo.dart';
 import 'tv/tv_focusable.dart';
 
 class _DetailUiTokens {
@@ -245,10 +244,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
   String? get _userId => widget.server?.userId ?? widget.appState.userId;
 
   PlaybackSourcePlayerCoreKind get _moviePlaybackCoreKind {
-    final useExoCore = !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android &&
-        widget.appState.playerCore == PlayerCore.exo;
-    return useExoCore
+    final useNativeCore =
+        playerCoreUsesNativeVideoPlayer(widget.appState.playerCore);
+    return useNativeCore
         ? PlaybackSourcePlayerCoreKind.exo
         : PlaybackSourcePlayerCoreKind.mpv;
   }
@@ -955,35 +953,20 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
         ? _ticksToDuration(item.playbackPositionTicks)
         : null;
     final preparedPreload = _preparedMoviePreloadForPlayback(item);
-    final useExoCore =
-        _moviePlaybackCoreKind == PlaybackSourcePlayerCoreKind.exo;
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => useExoCore
-            ? ExoPlayNetworkPage(
-                title: item.name,
-                itemId: item.id,
-                appState: widget.appState,
-                server: widget.server,
-                isTv: widget.isTv,
-                startPosition: start,
-                mediaSourceId: _selectedMediaSourceId,
-                audioStreamIndex: _selectedAudioStreamIndex,
-                subtitleStreamIndex: _selectedSubtitleStreamIndex,
-                preparedPreload: preparedPreload,
-              )
-            : PlayNetworkPage(
-                title: item.name,
-                itemId: item.id,
-                appState: widget.appState,
-                server: widget.server,
-                isTv: widget.isTv,
-                startPosition: start,
-                mediaSourceId: _selectedMediaSourceId,
-                audioStreamIndex: _selectedAudioStreamIndex,
-                subtitleStreamIndex: _selectedSubtitleStreamIndex,
-                preparedPreload: preparedPreload,
-              ),
+        builder: (_) => buildNetworkPlayerPage(
+          title: item.name,
+          itemId: item.id,
+          appState: widget.appState,
+          server: widget.server,
+          isTv: widget.isTv,
+          startPosition: start,
+          mediaSourceId: _selectedMediaSourceId,
+          audioStreamIndex: _selectedAudioStreamIndex,
+          subtitleStreamIndex: _selectedSubtitleStreamIndex,
+          preparedPreload: preparedPreload,
+        ),
       ),
     );
     if (!mounted) return;
@@ -3666,8 +3649,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
 
     final canSwitchCore =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
-    final coreLabel =
-        widget.appState.playerCore == PlayerCore.exo ? '内核：Exo' : '内核：mpv';
+    final coreLabel = '内核：${widget.appState.playerCore.label}';
 
     final posterWidth = (320 * uiScale).clamp(220.0, 420.0);
     final posterRadius = (20 * uiScale).clamp(14.0, 26.0);
@@ -5716,10 +5698,9 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   }
 
   PlaybackSourcePlayerCoreKind get _episodePlaybackCoreKind {
-    final useExoCore = !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android &&
-        widget.appState.playerCore == PlayerCore.exo;
-    return useExoCore
+    final useNativeCore =
+        playerCoreUsesNativeVideoPlayer(widget.appState.playerCore);
+    return useNativeCore
         ? PlaybackSourcePlayerCoreKind.exo
         : PlaybackSourcePlayerCoreKind.mpv;
   }
@@ -6559,37 +6540,21 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   Future<void> _playCurrentEpisode({Duration? startPosition}) async {
     final ep = _detail ?? _episode;
     final preparedPreload = _preparedEpisodePreloadForPlayback(ep.id);
-    final useExoCore =
-        _episodePlaybackCoreKind == PlaybackSourcePlayerCoreKind.exo;
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => useExoCore
-            ? ExoPlayNetworkPage(
-                title: ep.name,
-                itemId: ep.id,
-                appState: widget.appState,
-                server: widget.server,
-                isTv: widget.isTv,
-                seriesId: _seriesId,
-                startPosition: startPosition,
-                mediaSourceId: _selectedMediaSourceId,
-                audioStreamIndex: _selectedAudioStreamIndex,
-                subtitleStreamIndex: _selectedSubtitleStreamIndex,
-                preparedPreload: preparedPreload,
-              )
-            : PlayNetworkPage(
-                title: ep.name,
-                itemId: ep.id,
-                appState: widget.appState,
-                server: widget.server,
-                isTv: widget.isTv,
-                seriesId: _seriesId,
-                startPosition: startPosition,
-                mediaSourceId: _selectedMediaSourceId,
-                audioStreamIndex: _selectedAudioStreamIndex,
-                subtitleStreamIndex: _selectedSubtitleStreamIndex,
-                preparedPreload: preparedPreload,
-              ),
+        builder: (_) => buildNetworkPlayerPage(
+          title: ep.name,
+          itemId: ep.id,
+          appState: widget.appState,
+          server: widget.server,
+          isTv: widget.isTv,
+          seriesId: _seriesId,
+          startPosition: startPosition,
+          mediaSourceId: _selectedMediaSourceId,
+          audioStreamIndex: _selectedAudioStreamIndex,
+          subtitleStreamIndex: _selectedSubtitleStreamIndex,
+          preparedPreload: preparedPreload,
+        ),
       ),
     );
     if (!mounted) return;
@@ -6983,8 +6948,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
 
     final canSwitchCore =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
-    final coreLabel =
-        widget.appState.playerCore == PlayerCore.exo ? '内核：Exo' : '内核：mpv';
+    final coreLabel = '内核：${widget.appState.playerCore.label}';
 
     final posterWidth = (320 * uiScale).clamp(220.0, 420.0);
     final posterRadius = (20 * uiScale).clamp(14.0, 26.0);

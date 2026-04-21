@@ -7,7 +7,6 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
@@ -19,14 +18,13 @@ import 'library_items_page.dart';
 import 'mobile_ui/common/mobile_global_top_bar.dart';
 import 'mobile_ui/home/mobile_home_shell.dart';
 import 'mobile_ui/settings/mobile_settings_page.dart';
-import 'player_screen.dart';
-import 'player_screen_exo.dart';
 import 'search_page.dart';
 import 'server_page.dart';
 import 'settings_page.dart';
 import 'plugins/plugin_slot_area.dart';
 import 'server_adapters/server_access.dart';
 import 'services/app_route_observer.dart';
+import 'services/playback/player_core_pages.dart';
 import 'show_detail_page.dart';
 import 'tv/tv_bangumi_page.dart';
 import 'tv/tv_tmdb_page.dart';
@@ -532,9 +530,6 @@ class _HomePageState extends State<HomePage> {
                 defaultTargetPlatform == TargetPlatform.macOS);
         final blurAllowed = !isTv;
         final enableBlur = blurAllowed && widget.appState.enableBlurEffects;
-        final useExoCore = !kIsWeb &&
-            defaultTargetPlatform == TargetPlatform.android &&
-            widget.appState.playerCore == PlayerCore.exo;
         final useMobileSettingsPage = !kIsWeb && !isDesktop;
         const usesGlassSurfaces = true;
         final useRail = widget.desktopLayout;
@@ -625,9 +620,7 @@ class _HomePageState extends State<HomePage> {
         final pages = [
           homePage,
           aggregatePage,
-          useExoCore
-              ? ExoPlayerScreen(appState: widget.appState)
-              : PlayerScreen(appState: widget.appState),
+          buildLocalPlayerScreen(appState: widget.appState),
           settingsPage,
         ];
 

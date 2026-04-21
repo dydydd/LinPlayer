@@ -266,7 +266,7 @@ class AppState extends ChangeNotifier {
   bool _useDynamicColor = true;
   bool _compactMode = _defaultCompactModeForPlatform();
   bool _preferHardwareDecode = true;
-  PlayerCore _playerCore = PlayerCore.mpv;
+  PlayerCore _playerCore = defaultPlayerCoreForPlatform();
   String _preferredAudioLang = '';
   String _preferredSubtitleLang = '';
   VideoVersionPreference _preferredVideoVersion =
@@ -1019,7 +1019,9 @@ class AppState extends ChangeNotifier {
     _compactMode =
         prefs.getBool(_kCompactModeKey) ?? _defaultCompactModeForPlatform();
     _preferHardwareDecode = prefs.getBool(_kPreferHardwareDecodeKey) ?? true;
-    _playerCore = playerCoreFromId(prefs.getString(_kPlayerCoreKey));
+    _playerCore = normalizePlayerCoreForPlatform(
+      playerCoreFromId(prefs.getString(_kPlayerCoreKey)),
+    );
     _preferredAudioLang = prefs.getString(_kPreferredAudioLangKey) ?? '';
     _preferredSubtitleLang = prefs.getString(_kPreferredSubtitleLangKey) ?? '';
     _preferredVideoVersion = videoVersionPreferenceFromId(
@@ -1672,7 +1674,9 @@ class AppState extends ChangeNotifier {
     );
     final nextPreferHardware =
         _readBool(data['preferHardwareDecode'], fallback: true);
-    final nextPlayerCore = playerCoreFromId(data['playerCore']?.toString());
+    final nextPlayerCore = normalizePlayerCoreForPlatform(
+      playerCoreFromId(data['playerCore']?.toString()),
+    );
     final nextPreferredAudioLang =
         (data['preferredAudioLang'] ?? '').toString().trim();
     final nextPreferredSubtitleLang =
@@ -4272,10 +4276,11 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> setPlayerCore(PlayerCore core) async {
-    if (_playerCore == core) return;
-    _playerCore = core;
+    final normalized = normalizePlayerCoreForPlatform(core);
+    if (_playerCore == normalized) return;
+    _playerCore = normalized;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kPlayerCoreKey, core.id);
+    await prefs.setString(_kPlayerCoreKey, normalized.id);
     notifyListeners();
   }
 

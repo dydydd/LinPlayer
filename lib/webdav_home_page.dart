@@ -1,12 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 
 import 'mobile_ui/settings/mobile_settings_page.dart';
-import 'player_screen.dart';
-import 'player_screen_exo.dart';
 import 'settings_page.dart';
+import 'services/playback/player_core_pages.dart';
 import 'webdav_browser_page.dart';
 
 class WebDavHomePage extends StatefulWidget {
@@ -26,9 +24,6 @@ class _WebDavHomePageState extends State<WebDavHomePage> {
     final appState = widget.appState;
     final server = appState.activeServer;
 
-    final useExoCore = !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android &&
-        appState.playerCore == PlayerCore.exo;
     final useMobileSettingsPage = !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.android ||
             defaultTargetPlatform == TargetPlatform.iOS);
@@ -38,9 +33,7 @@ class _WebDavHomePageState extends State<WebDavHomePage> {
         const Center(child: Text('No active server'))
       else
         WebDavBrowserPage(appState: appState, server: server),
-      useExoCore
-          ? ExoPlayerScreen(appState: appState)
-          : PlayerScreen(appState: appState),
+      buildLocalPlayerScreen(appState: appState),
       useMobileSettingsPage
           ? MobileSettingsPage(appState: appState)
           : SettingsPage(appState: appState),

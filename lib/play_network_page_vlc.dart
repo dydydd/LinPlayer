@@ -12,7 +12,6 @@ import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:video_player/video_player.dart';
 import 'package:video_player_android/exo_tracks.dart' as vp_android;
 import 'package:video_player_platform_interface/video_player_platform_interface.dart'
     as vp_platform;
@@ -24,6 +23,7 @@ import 'services/playback/mobile_playback_preferences.dart';
 import 'services/playback/player_core_pages.dart';
 import 'services/playback/player_core_ui.dart';
 import 'services/playback/video_display_mode.dart';
+import 'services/playback/vlc_video_player_adapter.dart';
 import 'services/playback/playback_thresholds.dart';
 import 'services/playback/video_display_hint.dart';
 import 'services/series_skip_preferences.dart';
@@ -36,8 +36,8 @@ import 'widgets/danmaku_manual_search_dialog.dart';
 import 'widgets/mobile_player_status_bars.dart';
 import 'widgets/series_skip_config_dialog.dart';
 
-class ExoPlayNetworkPage extends StatefulWidget {
-  const ExoPlayNetworkPage({
+class VlcPlayNetworkPage extends StatefulWidget {
+  const VlcPlayNetworkPage({
     super.key,
     required this.title,
     required this.itemId,
@@ -67,10 +67,10 @@ class ExoPlayNetworkPage extends StatefulWidget {
   final PreparedPlaybackPreload? preparedPreload;
 
   @override
-  State<ExoPlayNetworkPage> createState() => _ExoPlayNetworkPageState();
+  State<VlcPlayNetworkPage> createState() => _VlcPlayNetworkPageState();
 }
 
-class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
+class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
     with WidgetsBindingObserver, RouteAware {
   static const String _kLocalPlaybackProgressPrefix =
       'networkPlaybackProgress_v1:';
@@ -263,15 +263,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   bool get _isAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
   bool get _isIos => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
-  bool get _supportsNativeVideoPlayer => _isAndroid || _isIos;
-  PlayerCore get _nativeCore {
-    final current = normalizePlayerCoreForPlatform(widget.appState.playerCore);
-    return current == PlayerCore.avplayer
-        ? PlayerCore.avplayer
-        : PlayerCore.exo;
-  }
-
-  String get _nativeCoreName => _nativeCore.label;
+  bool get _supportsVlcCore => _isAndroid || _isIos;
 
   bool get _isPlaying => _controller?.value.isPlaying ?? false;
 
@@ -1256,7 +1248,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _preserveOrientationForReplacementRoute();
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
-        builder: (_) => ExoPlayNetworkPage(
+        builder: (_) => buildNetworkPlayerPage(
           title: episode.name,
           itemId: episode.id,
           appState: widget.appState,
@@ -3848,7 +3840,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         Text('Anime4K 超分', style: sectionStyle()),
         const SizedBox(height: 8),
         const MobilePlayerOptionTile(
-          title: '原生内核暂不支持实时超分',
+          title: 'VLC 内核暂不支持实时超分',
           subtitle: '如需 Anime4K，请在「内核」中切换到 mpv',
         ),
       ],
@@ -5391,8 +5383,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     final startupStopwatch = Stopwatch()..start();
 
     try {
-      if (!_supportsNativeVideoPlayer) {
-        throw Exception('$_nativeCoreName 内核仅支持移动端原生播放器');
+      if (!_supportsVlcCore) {
+        throw Exception('VLC 内核仅支持 iOS / Android');
       }
       final initialPrepared = _takeInitialPreparedPreloadForPlayback();
       PlayableSource? preparedPlaybackSource;

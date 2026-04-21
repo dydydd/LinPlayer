@@ -17,13 +17,14 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'play_network_page_exo.dart';
 import 'server_adapters/server_access.dart';
 import 'services/app_diagnostics_log.dart';
 import 'services/app_route_observer.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/desktop_window.dart';
 import 'services/playback/mobile_playback_preferences.dart';
+import 'services/playback/player_core_pages.dart';
+import 'services/playback/player_core_ui.dart';
 import 'services/playback/video_display_mode.dart';
 import 'services/playback/playback_thresholds.dart';
 import 'services/playback/video_display_hint.dart';
@@ -5900,23 +5901,17 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     }
   }
 
-  Future<void> _switchCore() async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Exo 内核仅支持 Android')),
-      );
-      return;
-    }
-
+  Future<void> _switchToPlayerCore(PlayerCore core) async {
+    final nextCore = normalizePlayerCoreForPlatform(core);
+    if (nextCore == widget.appState.playerCore) return;
     final pos = _lastPosition;
     _maybeReportPlaybackProgress(pos, force: true);
-    await widget.appState.setPlayerCore(PlayerCore.exo);
+    await widget.appState.setPlayerCore(nextCore);
     if (!mounted) return;
     _preserveOrientationForReplacementRoute();
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
-        builder: (_) => ExoPlayNetworkPage(
+        builder: (_) => buildNetworkPlayerPage(
           title: widget.title,
           itemId: widget.itemId,
           appState: widget.appState,
@@ -5932,6 +5927,14 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         ),
       ),
     );
+  }
+
+  Future<void> _switchCore() async {
+    final current = normalizePlayerCoreForPlatform(widget.appState.playerCore);
+    final candidates =
+        playerCoresForPlatform().where((core) => core != current);
+    final next = candidates.isEmpty ? current : candidates.first;
+    await _switchToPlayerCore(next);
   }
 
   Future<List<Map<String, dynamic>>> _ensureMediaSourcesLoaded({
@@ -7577,8 +7580,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       ),
       MobilePlayerActionButton(
         icon: Icons.tune,
-        label:
-            widget.appState.playerCore == PlayerCore.mpv ? '内核 mpv' : '内核 Exo',
+        label: playerCoreOverlayLabel(
+          normalizePlayerCoreForPlatform(widget.appState.playerCore),
+        ),
         compact: true,
         onTap: controlsEnabled
             ? () => _openMobilePanel(_MobilePlayerPanel.core)
@@ -7767,34 +7771,45 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   }
 
   Widget _buildMobileCorePanel({required bool controlsEnabled}) {
-    final current = widget.appState.playerCore;
+    final current = normalizePlayerCoreForPlatform(widget.appState.playerCore);
+    final cores = playerCoresForPlatform();
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
       children: [
-        MobilePlayerOptionTile(
-          title: 'mpv',
-          subtitle: '当前使用 media_kit / mpv 播放内核',
-          selected: current == PlayerCore.mpv,
-          trailing: current == PlayerCore.mpv
-              ? const Icon(Icons.check_circle, color: Colors.white)
-              : null,
-        ),
-        const SizedBox(height: 8),
-        MobilePlayerOptionTile(
-          title: 'Exo',
-          subtitle: '切换到 Android Exo 播放内核',
-          selected: current == PlayerCore.exo,
-          trailing: current == PlayerCore.exo
-              ? const Icon(Icons.check_circle, color: Colors.white)
-              : null,
-          onTap: current == PlayerCore.exo || !controlsEnabled
-              ? null
-              : () {
-                  _closeMobilePanels(scheduleHide: false);
-                  unawaited(_switchCore());
-                },
-        ),
+        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) ...[
+          MobilePlayerOptionTile(
+            title: 'iOS 内核优先级',
+            subtitle: '默认优先 AVPlayer，其次 MPV，最后 VLC。遇到兼容问题时可随时切换。',
+            leading: const Icon(
+              Icons.auto_awesome_rounded,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+        for (final core in cores) ...[
+          MobilePlayerOptionTile(
+            title: core.label,
+            subtitle: playerCorePanelSubtitle(
+              core,
+              active: current == core,
+              localPlayback: false,
+            ),
+            leading: Icon(playerCoreIcon(core), color: Colors.white),
+            selected: current == core,
+            trailing: current == core
+                ? const Icon(Icons.check_circle, color: Colors.white)
+                : null,
+            onTap: current == core || !controlsEnabled
+                ? null
+                : () {
+                    _closeMobilePanels(scheduleHide: false);
+                    unawaited(_switchToPlayerCore(core));
+                  },
+          ),
+          if (core != cores.last) const SizedBox(height: 8),
+        ],
       ],
     );
   }
