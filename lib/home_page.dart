@@ -116,7 +116,6 @@ class _HomePageState extends State<HomePage> {
     if (!mounted) return;
     setState(() {
       _index = index;
-      _mobileHomeChromeVisibility = 1.0;
     });
   }
 
@@ -539,6 +538,16 @@ class _HomePageState extends State<HomePage> {
         const usesGlassSurfaces = true;
         final useRail = widget.desktopLayout;
         final useEmbeddedMobileShellPages = !isTv && !useRail;
+        final mobileShellDecoration = BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Theme.of(context).colorScheme.surface,
+              Theme.of(context).colorScheme.surfaceContainerLowest,
+            ],
+          ),
+        );
         final activeServerName = widget.appState.activeServer?.name ??
             (widget.appState.servers.isNotEmpty
                 ? '閫夋嫨鏈嶅姟鍣?'
@@ -548,41 +557,45 @@ class _HomePageState extends State<HomePage> {
         final bottomNavVisibility =
             _index == 0 ? _mobileHomeChromeVisibility : 1.0;
         final homePage = !isTv && !useRail
-            ? MobileHomeTopBarPage(
-                topBarHeight: MediaQuery.paddingOf(context).top + 56,
-                topBarVisibility: homeTopBarVisibility,
-                topBar: _MobileHomeAppBar(
-                  topInset: MediaQuery.paddingOf(context).top,
-                  visibility: homeTopBarVisibility,
-                  enableBlur: enableBlur,
-                  useGlass: usesGlassSurfaces,
-                  serverName: activeServerName,
-                  iconUrl: activeIconUrl,
-                  onTapServer: _openServerPage,
-                  onTapSearch: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => SearchPage(appState: widget.appState),
-                      ),
-                    );
-                  },
-                  onTapLibrary: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => LibraryPage(appState: widget.appState),
-                      ),
-                    );
-                  },
-                  onTapRoute: _showRoutePicker,
-                ),
-                child: _HomeBody(
-                  appState: widget.appState,
-                  loading: _loading,
-                  refreshSignal: _homeRefreshSignal,
-                  onRefresh: () => _load(forceRefresh: true),
-                  onScrollDelta: _handleHomeScroll,
-                  isTv: false,
-                  showSearchBar: false,
+            ? DecoratedBox(
+                decoration: mobileShellDecoration,
+                child: MobileHomeTopBarPage(
+                  topBarHeight: MediaQuery.paddingOf(context).top + 56,
+                  topBarVisibility: homeTopBarVisibility,
+                  topBar: _MobileHomeAppBar(
+                    topInset: MediaQuery.paddingOf(context).top,
+                    visibility: homeTopBarVisibility,
+                    enableBlur: enableBlur,
+                    useGlass: usesGlassSurfaces,
+                    serverName: activeServerName,
+                    iconUrl: activeIconUrl,
+                    onTapServer: _openServerPage,
+                    onTapSearch: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => SearchPage(appState: widget.appState),
+                        ),
+                      );
+                    },
+                    onTapLibrary: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              LibraryPage(appState: widget.appState),
+                        ),
+                      );
+                    },
+                    onTapRoute: _showRoutePicker,
+                  ),
+                  child: _HomeBody(
+                    appState: widget.appState,
+                    loading: _loading,
+                    refreshSignal: _homeRefreshSignal,
+                    onRefresh: () => _load(forceRefresh: true),
+                    onScrollDelta: _handleHomeScroll,
+                    isTv: false,
+                    showSearchBar: false,
+                  ),
                 ),
               )
             : _HomeBody(

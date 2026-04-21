@@ -301,9 +301,6 @@ class MobileHomePageTransition extends StatefulWidget {
 
 class _MobileHomePageTransitionState extends State<MobileHomePageTransition>
     with SingleTickerProviderStateMixin {
-  static const _iosIncomingCurve = Cubic(0.32, 0.72, 0.0, 1.0);
-  static const _iosOutgoingCurve = Cubic(0.22, 0.61, 0.36, 1.0);
-
   late int _currentIndex;
   late int _previousIndex;
   late final AnimationController _controller;
@@ -364,13 +361,7 @@ class _MobileHomePageTransitionState extends State<MobileHomePageTransition>
             final currentIndex = _clampIndex(_currentIndex);
             final previousIndex = _clampIndex(_previousIndex);
             final isAnimating = _isAnimating;
-            final isForward = currentIndex > previousIndex;
-            final incomingProgress = _iosIncomingCurve.transform(
-              _controller.value.clamp(0.0, 1.0),
-            );
-            final outgoingProgress = _iosOutgoingCurve.transform(
-              _controller.value.clamp(0.0, 1.0),
-            );
+            final progress = _controller.value.clamp(0.0, 1.0);
 
             return IgnorePointer(
               ignoring: isAnimating,
@@ -383,9 +374,7 @@ class _MobileHomePageTransitionState extends State<MobileHomePageTransition>
                       currentIndex: currentIndex,
                       previousIndex: previousIndex,
                       isAnimating: isAnimating,
-                      isForward: isForward,
-                      incomingProgress: incomingProgress,
-                      outgoingProgress: outgoingProgress,
+                      progress: progress,
                     ),
                 ],
               ),
@@ -401,9 +390,7 @@ class _MobileHomePageTransitionState extends State<MobileHomePageTransition>
     required int currentIndex,
     required int previousIndex,
     required bool isAnimating,
-    required bool isForward,
-    required double incomingProgress,
-    required double outgoingProgress,
+    required double progress,
   }) {
     final page = KeyedSubtree(
       key: ValueKey<int>(index),
@@ -414,52 +401,33 @@ class _MobileHomePageTransitionState extends State<MobileHomePageTransition>
     final keepMounted = isCurrent || isPrevious || !isAnimating;
     final showPage = isCurrent || (isAnimating && isPrevious);
 
-    Widget child = page;
-    if (isAnimating && isForward) {
-      if (isPrevious) {
-        child = FractionalTranslation(
-          translation: Offset(-0.30 * outgoingProgress, 0),
-          child: _MobilePageLayer(
-            overlayOpacity: 0.05 * outgoingProgress,
-            child: child,
-          ),
-        );
-      } else if (isCurrent) {
-        child = FractionalTranslation(
-          translation: Offset(1 - incomingProgress, 0),
-          child: _MobilePageLayer(
-            edgeShadowOpacity: 0.18 * (1 - incomingProgress),
-            shadowOnLeadingEdge: true,
-            child: child,
-          ),
-        );
-      }
-    } else if (isAnimating) {
-      if (isCurrent) {
-        child = FractionalTranslation(
-          translation: Offset(-0.08 * (1 - incomingProgress), 0),
-          child: _MobilePageLayer(
-            overlayOpacity: 0.02 * (1 - incomingProgress),
-            child: child,
-          ),
-        );
-      } else if (isPrevious) {
-        child = FractionalTranslation(
-          translation: Offset(outgoingProgress, 0),
-          child: _MobilePageLayer(
-            edgeShadowOpacity: 0.18 * (1 - outgoingProgress),
-            shadowOnLeadingEdge: true,
-            child: child,
-          ),
-        );
-      }
+    var opacity = 1.0;
+    var scale = 1.0;
+    if (isAnimating && isCurrent) {
+      opacity = Tween<double>(
+        begin: 0.18,
+        end: 1.0,
+      ).transform(Curves.easeOutCubic.transform(progress));
+      scale = Tween<double>(
+        begin: 0.996,
+        end: 1.0,
+      ).transform(Curves.easeOutCubic.transform(progress));
+    } else if (isAnimating && isPrevious) {
+      opacity = Tween<double>(
+        begin: 1.0,
+        end: 0.0,
+      ).transform(Curves.easeInCubic.transform(progress));
     }
 
     return Offstage(
       offstage: !showPage,
       child: TickerMode(
         enabled: keepMounted && showPage,
-        child: child,
+        child: _MobilePageLayer(
+          opacity: opacity,
+          scale: scale,
+          child: page,
+        ),
       ),
     );
   }
@@ -468,59 +436,25 @@ class _MobileHomePageTransitionState extends State<MobileHomePageTransition>
 class _MobilePageLayer extends StatelessWidget {
   const _MobilePageLayer({
     required this.child,
-    this.overlayOpacity = 0,
-    this.edgeShadowOpacity = 0,
-    this.shadowOnLeadingEdge = true,
+    this.opacity = 1,
+    this.scale = 1,
   });
 
   final Widget child;
-  final double overlayOpacity;
-  final double edgeShadowOpacity;
-  final bool shadowOnLeadingEdge;
+  final double opacity;
+  final double scale;
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        child,
-        if (overlayOpacity > 0.0001)
-          Positioned.fill(
-            child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: overlayOpacity),
-                ),
-              ),
-            ),
-          ),
-        if (edgeShadowOpacity > 0.0001)
-          Positioned(
-            top: 0,
-            bottom: 0,
-            left: shadowOnLeadingEdge ? 0 : null,
-            right: shadowOnLeadingEdge ? null : 0,
-            width: 28,
-            child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: shadowOnLeadingEdge
-                        ? Alignment.centerLeft
-                        : Alignment.centerRight,
-                    end: shadowOnLeadingEdge
-                        ? Alignment.centerRight
-                        : Alignment.centerLeft,
-                    colors: [
-                      Colors.black.withValues(alpha: edgeShadowOpacity),
-                      Colors.black.withValues(alpha: 0),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-      ],
+    return Opacity(
+      opacity: opacity.clamp(0.0, 1.0),
+      child: Transform.scale(
+        scale: scale,
+        alignment: Alignment.center,
+        child: RepaintBoundary(
+          child: child,
+        ),
+      ),
     );
   }
 }
