@@ -17,6 +17,7 @@ import 'mobile_ui/show_detail/mobile_text_widgets.dart';
 import 'mobile_ui/show_detail/show_detail_mobile_view.dart';
 import 'plugins/plugin_slot_area.dart';
 import 'server_adapters/server_access.dart';
+import 'services/browsing_cache_service.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/preload/playback_preload_coordinator.dart';
 import 'person_page.dart';
@@ -51,6 +52,18 @@ String _mediaYearText(MediaItem item) {
   if (parsed != null) return parsed.year.toString();
   if (date.length >= 4) return date.substring(0, 4);
   return '';
+}
+
+String _browsingCacheServerScope({
+  required AppState appState,
+  ServerProfile? server,
+  String? baseUrl,
+}) {
+  final serverId = (server?.id ?? appState.activeServerId ?? '').trim();
+  if (serverId.isNotEmpty) return 'srv:$serverId';
+  final normalizedBaseUrl = (baseUrl ?? '').trim();
+  if (normalizedBaseUrl.isNotEmpty) return 'url:$normalizedBaseUrl';
+  return 'default';
 }
 
 Widget _sectionTitle(
@@ -260,6 +273,103 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     return prepared;
   }
 
+  String get _detailCacheServerScope => _browsingCacheServerScope(
+        appState: widget.appState,
+        server: widget.server,
+        baseUrl: _baseUrl,
+      );
+
+  void _applyShowDetailCache(ShowDetailCachePayload payload) {
+    final seasons = List<MediaItem>.from(payload.seasons);
+    String? selectedSeasonId = payload.selectedSeasonId;
+    if (selectedSeasonId != null &&
+        seasons.isNotEmpty &&
+        !seasons.any((season) => season.id == selectedSeasonId)) {
+      selectedSeasonId = seasons.first.id;
+    }
+    selectedSeasonId ??=
+        seasons.isNotEmpty ? seasons.first.id : payload.detail.id.trim();
+
+    MediaItem? featuredEpisode = payload.featuredEpisode;
+    if (featuredEpisode == null) {
+      final cachedEpisodes = payload.episodesBySeason[selectedSeasonId];
+      if (cachedEpisodes != null && cachedEpisodes.isNotEmpty) {
+        featuredEpisode = cachedEpisodes.first;
+      }
+    }
+
+    final access =
+        resolveServerAccess(appState: widget.appState, server: widget.server);
+    if (access != null) {
+      _album = [
+        access.adapter.imageUrl(
+          access.auth,
+          itemId: widget.itemId,
+          imageType: 'Primary',
+          maxWidth: 800,
+        ),
+        access.adapter.imageUrl(
+          access.auth,
+          itemId: widget.itemId,
+          imageType: 'Backdrop',
+          maxWidth: 1200,
+        ),
+      ];
+    }
+
+    setState(() {
+      _detail = payload.detail;
+      _seasons = seasons;
+      _seasonsVirtual = payload.seasonsVirtual;
+      _similar = List<MediaItem>.from(payload.similar);
+      _featuredEpisode = featuredEpisode;
+      _selectedSeasonId = selectedSeasonId;
+      _episodesCache
+        ..clear()
+        ..addAll(payload.episodesBySeason);
+      _playInfo = payload.playInfo;
+      _chapters = List<ChapterInfo>.from(payload.chapters);
+      _selectedMediaSourceId = payload.selectedMediaSourceId;
+      _selectedAudioStreamIndex = payload.selectedAudioStreamIndex;
+      _selectedSubtitleStreamIndex = payload.selectedSubtitleStreamIndex;
+      _error = null;
+      _loading = false;
+    });
+  }
+
+  ShowDetailCachePayload? _currentShowDetailCachePayload() {
+    final detail = _detail;
+    if (detail == null) return null;
+    return ShowDetailCachePayload(
+      detail: detail,
+      seasons: List<MediaItem>.from(_seasons),
+      seasonsVirtual: _seasonsVirtual,
+      similar: List<MediaItem>.from(_similar),
+      featuredEpisode: _featuredEpisode,
+      episodesBySeason: _episodesCache.map(
+        (key, value) => MapEntry(key, List<MediaItem>.from(value)),
+      ),
+      playInfo: _playInfo,
+      chapters: List<ChapterInfo>.from(_chapters),
+      selectedSeasonId: _selectedSeasonId,
+      selectedMediaSourceId: _selectedMediaSourceId,
+      selectedAudioStreamIndex: _selectedAudioStreamIndex,
+      selectedSubtitleStreamIndex: _selectedSubtitleStreamIndex,
+    );
+  }
+
+  void _persistShowDetailCache() {
+    final payload = _currentShowDetailCachePayload();
+    if (payload == null) return;
+    unawaited(
+      BrowsingCacheService.instance.writeShowDetail(
+        serverScope: _detailCacheServerScope,
+        itemId: widget.itemId,
+        payload: payload,
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -332,6 +442,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
             .fetchItemDetail(access.auth, itemId: widget.itemId);
         if (!mounted) return;
         setState(() => _detail = detail);
+        _persistShowDetailCache();
         if (before == null || detail.playbackPositionTicks != before) return;
       } catch (_) {
         // Best-effort refresh. Keep existing state on failure.
@@ -386,10 +497,6 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
   }
 
   Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
     _preparedMoviePreload = null;
     final baseUrl = _baseUrl;
     final token = _token;
@@ -410,6 +517,22 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       });
       return;
     }
+
+    final cached = await BrowsingCacheService.instance.readShowDetail(
+      serverScope: _detailCacheServerScope,
+      itemId: widget.itemId,
+    );
+    final cachedPayload = cached?.value;
+    if (cachedPayload != null) {
+      _applyShowDetailCache(cachedPayload);
+      if (cached!.isFresh) return;
+    } else {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+
     try {
       final detail = await access.adapter.fetchItemDetail(
         access.auth,
@@ -578,11 +701,18 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
         _selectedMediaSourceId = selectedMediaSourceId;
         _selectedAudioStreamIndex = selectedAudioStreamIndex;
         _selectedSubtitleStreamIndex = selectedSubtitleStreamIndex;
+        _error = null;
+        _loading = false;
       });
+      _persistShowDetailCache();
     } catch (e) {
-      setState(() => _error = e.toString());
+      if (cachedPayload == null) {
+        setState(() => _error = e.toString());
+      }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && cachedPayload == null) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -633,6 +763,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       return aNo.compareTo(bNo);
     });
     _episodesCache[season.id] = items;
+    _persistShowDetailCache();
     return items;
   }
 
@@ -672,6 +803,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       _selectedSeasonId = selected;
       _featuredEpisode = null;
     });
+    _persistShowDetailCache();
 
     final season = _selectedSeason;
     if (season == null) return;
@@ -886,6 +1018,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           .fetchItemDetail(access.auth, itemId: widget.itemId);
       if (!mounted) return;
       setState(() => _detail = detail);
+      _persistShowDetailCache();
 
       unawaited(
         widget.appState.loadContinueWatching(
@@ -5549,6 +5682,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
           .fetchItemDetail(access.auth, itemId: _episode.id);
       if (!mounted) return;
       setState(() => _detail = detail);
+      _persistEpisodeDetailCache();
 
       unawaited(
         widget.appState.loadContinueWatching(
@@ -5608,6 +5742,79 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       return null;
     }
     return prepared;
+  }
+
+  String get _episodeCacheServerScope => _browsingCacheServerScope(
+        appState: widget.appState,
+        server: widget.server,
+        baseUrl: _baseUrl,
+      );
+
+  void _applyEpisodeDetailCache(EpisodeDetailCachePayload payload) {
+    final seasons = List<MediaItem>.from(payload.seasons);
+    String? selectedSeasonId = payload.selectedSeasonId;
+    if (selectedSeasonId != null &&
+        seasons.isNotEmpty &&
+        !seasons.any((season) => season.id == selectedSeasonId)) {
+      selectedSeasonId = seasons.first.id;
+    }
+    selectedSeasonId ??=
+        seasons.isNotEmpty ? seasons.first.id : payload.detail.parentId;
+
+    setState(() {
+      _episode = payload.detail;
+      _detail = payload.detail;
+      _playInfo = payload.playInfo;
+      _chapters = List<ChapterInfo>.from(payload.chapters);
+      _seriesId = payload.seriesId;
+      _seriesName = payload.seriesName;
+      _seasons = seasons;
+      _seasonsVirtual = payload.seasonsVirtual;
+      _selectedSeasonId = selectedSeasonId;
+      _episodesCache
+        ..clear()
+        ..addAll(payload.episodesBySeason);
+      _selectedMediaSourceId = payload.selectedMediaSourceId;
+      _selectedAudioStreamIndex = payload.selectedAudioStreamIndex;
+      _selectedSubtitleStreamIndex = payload.selectedSubtitleStreamIndex;
+      _seriesError = null;
+      _seriesLoading = false;
+      _error = null;
+      _loading = false;
+    });
+  }
+
+  EpisodeDetailCachePayload? _currentEpisodeDetailCachePayload() {
+    final detail = _detail;
+    if (detail == null) return null;
+    return EpisodeDetailCachePayload(
+      detail: detail,
+      playInfo: _playInfo,
+      chapters: List<ChapterInfo>.from(_chapters),
+      seriesId: _seriesId,
+      seriesName: _seriesName,
+      seasons: List<MediaItem>.from(_seasons),
+      seasonsVirtual: _seasonsVirtual,
+      selectedSeasonId: _selectedSeasonId,
+      episodesBySeason: _episodesCache.map(
+        (key, value) => MapEntry(key, List<MediaItem>.from(value)),
+      ),
+      selectedMediaSourceId: _selectedMediaSourceId,
+      selectedAudioStreamIndex: _selectedAudioStreamIndex,
+      selectedSubtitleStreamIndex: _selectedSubtitleStreamIndex,
+    );
+  }
+
+  void _persistEpisodeDetailCache() {
+    final payload = _currentEpisodeDetailCachePayload();
+    if (payload == null) return;
+    unawaited(
+      BrowsingCacheService.instance.writeEpisodeDetail(
+        serverScope: _episodeCacheServerScope,
+        itemId: _episode.id,
+        payload: payload,
+      ),
+    );
   }
 
   Future<void> _preloadEpisodeBestEffort({
@@ -5767,6 +5974,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
             .fetchItemDetail(access.auth, itemId: episodeId);
         if (!mounted) return;
         setState(() => _detail = detail);
+        _persistEpisodeDetailCache();
         if (before == null || detail.playbackPositionTicks != before) return;
       } catch (_) {
         // Best-effort refresh. Keep existing state on failure.
@@ -5781,10 +5989,6 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     _preloadOwnerKey =
         PlaybackPreloadCoordinator.createOwnerToken('detail_episode');
     _preparedEpisodePreloads.clear();
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
     final baseUrl = _baseUrl;
     final token = _token;
     final userId = _userId;
@@ -5805,6 +6009,22 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       });
       return;
     }
+
+    final cached = await BrowsingCacheService.instance.readEpisodeDetail(
+      serverScope: _episodeCacheServerScope,
+      itemId: _episode.id,
+    );
+    final cachedPayload = cached?.value;
+    if (cachedPayload != null) {
+      _applyEpisodeDetailCache(cachedPayload);
+      if (cached!.isFresh) return;
+    } else {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+
     final seq = ++_loadSeq;
     final episodeId = _episode.id.trim();
     try {
@@ -5909,12 +6129,19 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         _selectedMediaSourceId = selectedMediaSourceId;
         _selectedAudioStreamIndex = selectedAudioStreamIndex;
         _selectedSubtitleStreamIndex = selectedSubtitleStreamIndex;
+        _error = null;
+        _loading = false;
       });
+      _persistEpisodeDetailCache();
     } catch (e) {
       if (!mounted || seq != _loadSeq) return;
-      setState(() => _error = e.toString());
+      if (cachedPayload == null) {
+        setState(() => _error = e.toString());
+      }
     } finally {
-      if (mounted && seq == _loadSeq) setState(() => _loading = false);
+      if (mounted && seq == _loadSeq && cachedPayload == null) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -7968,6 +8195,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
           ..addAll(episodesCacheForUi);
         _seriesError = null;
       });
+      _persistEpisodeDetailCache();
     } catch (e) {
       if (!mounted || loadSeq != _loadSeq) return;
       setState(() {
@@ -8032,6 +8260,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       return aNo.compareTo(bNo);
     });
     _episodesCache[season.id] = items;
+    _persistEpisodeDetailCache();
     return items;
   }
 
@@ -8070,6 +8299,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     setState(() {
       _selectedSeasonId = selected;
     });
+    _persistEpisodeDetailCache();
 
     final season = _selectedSeason;
     if (season == null) return;

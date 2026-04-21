@@ -17,6 +17,7 @@ import 'package:url_launcher/url_launcher_string.dart';
 import '../../danmaku_settings_page.dart';
 import '../common/mobile_shell_page.dart';
 import '../../plugins/plugins_page.dart';
+import '../../services/browsing_cache_service.dart';
 import '../../services/app_diagnostics_report.dart';
 import '../../services/app_update_flow.dart';
 import '../../services/app_update_service.dart';
@@ -567,6 +568,45 @@ class _MobileSettingsPageState extends State<MobileSettingsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
             content: Text('\u5df2\u6e05\u7406\u5c01\u9762\u7f13\u5b58')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('\u6e05\u7406\u5931\u8d25\uff1a$e')),
+      );
+    }
+  }
+
+  Future<void> _clearBrowsingCache(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('\u6e05\u7406\u6d4f\u89c8\u7f13\u5b58'),
+        content: const Text(
+          '\u5c06\u5220\u9664\u9996\u9875\u3001\u7ee7\u7eed\u89c2\u770b\u3001\u8be6\u60c5\u9875\u7b49\u5185\u5bb9\u7f13\u5b58\uff0c\u4e0b\u6b21\u6253\u5f00\u65f6\u4f1a\u91cd\u65b0\u52a0\u8f7d\u3002',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('\u53d6\u6d88'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('\u6e05\u7406'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await widget.appState.clearPersistedBrowsingCache();
+      await BrowsingCacheService.instance.clearAll();
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('\u5df2\u6e05\u7406\u6d4f\u89c8\u7f13\u5b58'),
+        ),
       );
     } catch (e) {
       if (!context.mounted) return;
@@ -1517,6 +1557,16 @@ class _MobileSettingsPageState extends State<MobileSettingsPage> {
             ],
           ),
           onTap: () => _clearCoverCache(context),
+        ),
+        const Divider(height: 1),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.delete_sweep_outlined),
+          title: const Text('\u6e05\u7406\u6d4f\u89c8\u7f13\u5b58'),
+          subtitle: const Text(
+            '\u5220\u9664\u9996\u9875\u3001\u7ee7\u7eed\u89c2\u770b\u3001\u8be6\u60c5\u9875\u7b49\u5185\u5bb9\u7f13\u5b58',
+          ),
+          onTap: () => _clearBrowsingCache(context),
         ),
         const Divider(height: 1),
         SwitchListTile(

@@ -203,6 +203,7 @@ class AppState extends ChangeNotifier {
       'serverContinueWatchingCache_v1:';
   static const _kServerRandomRecommendationsCachePrefix =
       'serverRandomRecommendationsCache_v1:';
+  static const Duration _kHomeCacheFreshness = Duration(minutes: 15);
 
   static const String _kDefaultServerIconLibraryUrl =
       'https://juhe.greentea520.xyz/share/78aspf.json';
@@ -251,6 +252,7 @@ class AppState extends ChangeNotifier {
   final Map<String, List<MediaItem>> _itemsCache = {};
   final Map<String, int> _itemsTotal = {};
   final Map<String, List<MediaItem>> _homeSections = {};
+  DateTime? _homeFetchedAt;
   List<MediaItem>? _randomRecommendations;
   DateTime? _randomRecommendationsFetchedAt;
   Future<List<MediaItem>>? _randomRecommendationsInFlight;
@@ -404,6 +406,14 @@ class AppState extends ChangeNotifier {
     try {
       final decoded = jsonDecode(raw);
       if (decoded is! Map) return;
+      final fetchedAtMs = decoded['fetchedAtMs'];
+      if (fetchedAtMs is num) {
+        _homeFetchedAt = DateTime.fromMillisecondsSinceEpoch(
+          fetchedAtMs.toInt(),
+        );
+      } else {
+        _homeFetchedAt = null;
+      }
 
       final sections = decoded['sections'];
       if (sections is Map) {
@@ -511,6 +521,8 @@ class AppState extends ChangeNotifier {
     final serverId = activeServerId;
     if (serverId == null) return;
     final prefs = await SharedPreferences.getInstance();
+    final fetchedAt = DateTime.now();
+    _homeFetchedAt = fetchedAt;
     final totals = <String, int>{};
     for (final key in _homeSections.keys) {
       if (!key.startsWith('lib_')) continue;
@@ -519,6 +531,7 @@ class AppState extends ChangeNotifier {
       if (total != null) totals[libId] = total;
     }
     final data = <String, dynamic>{
+      'fetchedAtMs': fetchedAt.millisecondsSinceEpoch,
       'sections': _homeSections.map(
         (key, value) => MapEntry(key, value.map((e) => e.toJson()).toList()),
       ),
@@ -571,6 +584,7 @@ class AppState extends ChangeNotifier {
   }
 
   void _resetPerServerCaches() {
+    _homeFetchedAt = null;
     _mediaStats = null;
     _mediaStatsInFlight = null;
     _homeInFlight = null;
@@ -792,6 +806,8 @@ class AppState extends ChangeNotifier {
   List<MediaItem> getItems(String parentId) => _itemsCache[parentId] ?? [];
   int getTotal(String parentId) => _itemsTotal[parentId] ?? 0;
   List<MediaItem> getHome(String key) => _homeSections[key] ?? [];
+  DateTime? get homeCacheFetchedAt => _homeFetchedAt;
+  bool get hasFreshHomeCache => isHomeCacheFresh();
   ThemeMode get themeMode => _themeMode;
   double get uiScaleFactor => _uiScaleFactor;
   String get desktopUiLanguage => _desktopUiLanguage;
@@ -961,6 +977,34 @@ class AppState extends ChangeNotifier {
 
   bool get isLoading => _loading;
   String? get error => _error;
+
+  bool isHomeCacheFresh({
+    Duration maxAge = _kHomeCacheFreshness,
+  }) {
+    final fetchedAt = _homeFetchedAt;
+    if (fetchedAt == null || _homeSections.isEmpty) return false;
+    return DateTime.now().difference(fetchedAt) <= maxAge;
+  }
+
+  Future<void> clearPersistedBrowsingCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    final serverIds = _servers
+        .map((server) => server.id.trim())
+        .where((serverId) => serverId.isNotEmpty)
+        .toSet();
+    for (final serverId in serverIds) {
+      await prefs.remove(_librariesCacheKey(serverId));
+      await prefs.remove(_homeCacheKey(serverId));
+      await prefs.remove(_continueWatchingCacheKey(serverId));
+      await prefs.remove(_randomRecommendationsCacheKey(serverId));
+    }
+    _homeFetchedAt = null;
+    _homeInFlight = null;
+    _mediaStats = null;
+    _mediaStatsInFlight = null;
+    _randomRecommendationsFetchedAt = null;
+    _randomRecommendationsInFlight = null;
+  }
 
   Future<void> loadFromStorage() async {
     final prefs = await SharedPreferences.getInstance();

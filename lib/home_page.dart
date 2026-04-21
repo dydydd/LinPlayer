@@ -95,8 +95,8 @@ class _HomePageState extends State<HomePage> {
           widget.appState.homeEntries.any((e) => e.items.isNotEmpty);
       if (!hasHome) {
         await widget.appState.loadHome(forceRefresh: true);
-      } else {
-        // Cache exists: update slowly while browsing home.
+      } else if (!widget.appState.hasFreshHomeCache) {
+        // Cache exists but may be stale: update in background.
         unawaited(widget.appState.loadHome(forceRefresh: true));
       }
     } finally {

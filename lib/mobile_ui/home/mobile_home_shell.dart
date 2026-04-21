@@ -311,11 +311,17 @@ class _MobileHomePageTransitionState extends State<MobileHomePageTransition>
   bool get _isAnimating =>
       _controller.isAnimating && _currentIndex != _previousIndex;
 
+  int _clampIndex(int index) {
+    final maxIndex = widget.pages.length - 1;
+    if (maxIndex <= 0) return 0;
+    return index.clamp(0, maxIndex).toInt();
+  }
+
   @override
   void initState() {
     super.initState();
-    _currentIndex = widget.index;
-    _previousIndex = widget.index;
+    _currentIndex = _clampIndex(widget.index);
+    _previousIndex = _currentIndex;
     _controller = AnimationController(
       vsync: this,
       duration: widget.duration,
@@ -331,9 +337,12 @@ class _MobileHomePageTransitionState extends State<MobileHomePageTransition>
     if (widget.duration != oldWidget.duration) {
       _controller.duration = widget.duration;
     }
-    if (widget.index == _currentIndex) return;
+    _currentIndex = _clampIndex(_currentIndex);
+    _previousIndex = _clampIndex(_previousIndex);
+    final nextIndex = _clampIndex(widget.index);
+    if (nextIndex == _currentIndex) return;
     _previousIndex = _currentIndex;
-    _currentIndex = widget.index;
+    _currentIndex = nextIndex;
     _controller.forward(from: 0);
   }
 
@@ -346,81 +355,111 @@ class _MobileHomePageTransitionState extends State<MobileHomePageTransition>
   @override
   Widget build(BuildContext context) {
     final backgroundColor = Theme.of(context).scaffoldBackgroundColor;
-    final currentPage = KeyedSubtree(
-      key: ValueKey<int>(_currentIndex),
-      child: widget.pages[_currentIndex],
-    );
-
-    if (!_isAnimating) {
-      return ColoredBox(color: backgroundColor, child: currentPage);
-    }
-
-    final previousPage = KeyedSubtree(
-      key: ValueKey<int>(_previousIndex),
-      child: widget.pages[_previousIndex],
-    );
-    final isForward = _currentIndex > _previousIndex;
-
     return ColoredBox(
       color: backgroundColor,
       child: ClipRect(
-        child: IgnorePointer(
-          child: AnimatedBuilder(
-            animation: _controller,
-            builder: (context, _) {
-              final incomingProgress = _iosIncomingCurve.transform(
-                _controller.value.clamp(0.0, 1.0),
-              );
-              final outgoingProgress = _iosOutgoingCurve.transform(
-                _controller.value.clamp(0.0, 1.0),
-              );
+        child: AnimatedBuilder(
+          animation: _controller,
+          builder: (context, _) {
+            final currentIndex = _clampIndex(_currentIndex);
+            final previousIndex = _clampIndex(_previousIndex);
+            final isAnimating = _isAnimating;
+            final isForward = currentIndex > previousIndex;
+            final incomingProgress = _iosIncomingCurve.transform(
+              _controller.value.clamp(0.0, 1.0),
+            );
+            final outgoingProgress = _iosOutgoingCurve.transform(
+              _controller.value.clamp(0.0, 1.0),
+            );
 
-              if (isForward) {
-                return Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    FractionalTranslation(
-                      translation: Offset(-0.30 * outgoingProgress, 0),
-                      child: _MobilePageLayer(
-                        overlayOpacity: 0.05 * outgoingProgress,
-                        child: previousPage,
-                      ),
-                    ),
-                    FractionalTranslation(
-                      translation: Offset(1 - incomingProgress, 0),
-                      child: _MobilePageLayer(
-                        edgeShadowOpacity: 0.18 * (1 - incomingProgress),
-                        shadowOnLeadingEdge: true,
-                        child: currentPage,
-                      ),
-                    ),
-                  ],
-                );
-              }
-
-              return Stack(
+            return IgnorePointer(
+              ignoring: isAnimating,
+              child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  FractionalTranslation(
-                    translation: Offset(-0.08 * (1 - incomingProgress), 0),
-                    child: _MobilePageLayer(
-                      overlayOpacity: 0.02 * (1 - incomingProgress),
-                      child: currentPage,
+                  for (int index = 0; index < widget.pages.length; index++)
+                    _buildPageLayer(
+                      index: index,
+                      currentIndex: currentIndex,
+                      previousIndex: previousIndex,
+                      isAnimating: isAnimating,
+                      isForward: isForward,
+                      incomingProgress: incomingProgress,
+                      outgoingProgress: outgoingProgress,
                     ),
-                  ),
-                  FractionalTranslation(
-                    translation: Offset(outgoingProgress, 0),
-                    child: _MobilePageLayer(
-                      edgeShadowOpacity: 0.18 * (1 - outgoingProgress),
-                      shadowOnLeadingEdge: true,
-                      child: previousPage,
-                    ),
-                  ),
                 ],
-              );
-            },
-          ),
+              ),
+            );
+          },
         ),
+      ),
+    );
+  }
+
+  Widget _buildPageLayer({
+    required int index,
+    required int currentIndex,
+    required int previousIndex,
+    required bool isAnimating,
+    required bool isForward,
+    required double incomingProgress,
+    required double outgoingProgress,
+  }) {
+    final page = KeyedSubtree(
+      key: ValueKey<int>(index),
+      child: widget.pages[index],
+    );
+    final isCurrent = index == currentIndex;
+    final isPrevious = index == previousIndex;
+    final keepMounted = isCurrent || isPrevious || !isAnimating;
+    final showPage = isCurrent || (isAnimating && isPrevious);
+
+    Widget child = page;
+    if (isAnimating && isForward) {
+      if (isPrevious) {
+        child = FractionalTranslation(
+          translation: Offset(-0.30 * outgoingProgress, 0),
+          child: _MobilePageLayer(
+            overlayOpacity: 0.05 * outgoingProgress,
+            child: child,
+          ),
+        );
+      } else if (isCurrent) {
+        child = FractionalTranslation(
+          translation: Offset(1 - incomingProgress, 0),
+          child: _MobilePageLayer(
+            edgeShadowOpacity: 0.18 * (1 - incomingProgress),
+            shadowOnLeadingEdge: true,
+            child: child,
+          ),
+        );
+      }
+    } else if (isAnimating) {
+      if (isCurrent) {
+        child = FractionalTranslation(
+          translation: Offset(-0.08 * (1 - incomingProgress), 0),
+          child: _MobilePageLayer(
+            overlayOpacity: 0.02 * (1 - incomingProgress),
+            child: child,
+          ),
+        );
+      } else if (isPrevious) {
+        child = FractionalTranslation(
+          translation: Offset(outgoingProgress, 0),
+          child: _MobilePageLayer(
+            edgeShadowOpacity: 0.18 * (1 - outgoingProgress),
+            shadowOnLeadingEdge: true,
+            child: child,
+          ),
+        );
+      }
+    }
+
+    return Offstage(
+      offstage: !showPage,
+      child: TickerMode(
+        enabled: keepMounted && showPage,
+        child: child,
       ),
     );
   }
