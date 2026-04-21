@@ -193,33 +193,41 @@ jobs:
             echo "Uploading assets to: $target"
 
             # Android
-            ANDROID_FOUND=0
-            if [[ -f "dist/LinPlayer-Android-arm64-v8a.apk" ]]; then
-              gh_retry release upload "$target" "dist/LinPlayer-Android-arm64-v8a.apk#LinPlayer-Android-arm64-v8a.apk" --clobber
-              ANDROID_FOUND=1
+            PHONE_FOUND=0
+            TV_FOUND=0
+
+            if [[ -f "dist/LinPlayer-Android-PHONE-arm64-v8a.apk" ]]; then
+              gh_retry release upload "$target" "dist/LinPlayer-Android-PHONE-arm64-v8a.apk#LinPlayer-Android-PHONE-arm64-v8a.apk" --clobber
+              PHONE_FOUND=1
+            elif [[ -f "dist/LinPlayer-Android-arm64-v8a.apk" ]]; then
+              gh_retry release upload "$target" "dist/LinPlayer-Android-arm64-v8a.apk#LinPlayer-Android-PHONE-arm64-v8a.apk" --clobber
+              PHONE_FOUND=1
             elif [[ -f "dist/app-arm64-v8a-release.apk" ]]; then
-              gh_retry release upload "$target" "dist/app-arm64-v8a-release.apk#LinPlayer-Android-arm64-v8a.apk" --clobber
-              ANDROID_FOUND=1
+              gh_retry release upload "$target" "dist/app-arm64-v8a-release.apk#LinPlayer-Android-PHONE-arm64-v8a.apk" --clobber
+              PHONE_FOUND=1
             fi
-            if [[ -f "dist/LinPlayer-Android-TV.apk" ]]; then
-              gh_retry release upload "$target" "dist/LinPlayer-Android-TV.apk#LinPlayer-Android-TV.apk" --clobber
-              ANDROID_FOUND=1
+
+            if [[ -f "dist/LinPlayer-Android-TV-armeabi-v7a.apk" ]]; then
+              gh_retry release upload "$target" "dist/LinPlayer-Android-TV-armeabi-v7a.apk#LinPlayer-Android-TV-armeabi-v7a.apk" --clobber
+              TV_FOUND=1
+            elif [[ -f "dist/LinPlayer-Android-TV.apk" ]]; then
+              gh_retry release upload "$target" "dist/LinPlayer-Android-TV.apk#LinPlayer-Android-TV-armeabi-v7a.apk" --clobber
+              TV_FOUND=1
             elif [[ -f "dist/LinPlayer-Android-armeabi-v7a.apk" ]]; then
-              gh_retry release upload "$target" "dist/LinPlayer-Android-armeabi-v7a.apk#LinPlayer-Android-TV.apk" --clobber
-              ANDROID_FOUND=1
+              gh_retry release upload "$target" "dist/LinPlayer-Android-armeabi-v7a.apk#LinPlayer-Android-TV-armeabi-v7a.apk" --clobber
+              TV_FOUND=1
             elif [[ -f "dist/app-armeabi-v7a-release.apk" ]]; then
-              gh_retry release upload "$target" "dist/app-armeabi-v7a-release.apk#LinPlayer-Android-TV.apk" --clobber
-              ANDROID_FOUND=1
+              gh_retry release upload "$target" "dist/app-armeabi-v7a-release.apk#LinPlayer-Android-TV-armeabi-v7a.apk" --clobber
+              TV_FOUND=1
             fi
-            if [[ -f "dist/LinPlayer-Android.apk" ]]; then
-              gh_retry release upload "$target" "dist/LinPlayer-Android.apk#LinPlayer-Android.apk" --clobber
-              ANDROID_FOUND=1
-            elif [[ -f "dist/app-release.apk" ]]; then
-              gh_retry release upload "$target" "dist/app-release.apk#LinPlayer-Android.apk" --clobber
-              ANDROID_FOUND=1
+
+            if [[ "$PHONE_FOUND" -eq 0 ]]; then
+              echo "Phone Android APK not found in dist/." >&2
+              exit 1
             fi
-            if [[ "$ANDROID_FOUND" -eq 0 ]]; then
-              echo "Android APK not found in dist/." >&2
+
+            if [[ "$TV_FOUND" -eq 0 ]]; then
+              echo "TV Android APK not found in dist/." >&2
               exit 1
             fi
 
@@ -234,8 +242,10 @@ jobs:
             fi
 
             # iOS
-            if [[ -f "dist/LinPlayer-iOS-unsigned.ipa" ]]; then
-              gh_retry release upload "$target" "dist/LinPlayer-iOS-unsigned.ipa#LinPlayer-iOS-unsigned.ipa" --clobber
+            if [[ -f "dist/LinPlayer-iPhone-unsigned.ipa" ]]; then
+              gh_retry release upload "$target" "dist/LinPlayer-iPhone-unsigned.ipa#LinPlayer-iPhone-unsigned.ipa" --clobber
+            elif [[ -f "dist/LinPlayer-iOS-unsigned.ipa" ]]; then
+              gh_retry release upload "$target" "dist/LinPlayer-iOS-unsigned.ipa#LinPlayer-iPhone-unsigned.ipa" --clobber
             else
               echo "iOS IPA not found in dist/." >&2
               exit 1
@@ -262,13 +272,17 @@ jobs:
             fi
           }
 
-          purge_legacy_android_assets() {
+          purge_legacy_release_assets() {
             local target="$1"
             local legacy_assets=(
               "LinPlayer-Android.apk"
+              "LinPlayer-Android-arm64-v8a.apk"
+              "LinPlayer-Android-armeabi-v7a.apk"
+              "LinPlayer-Android-TV.apk"
               "app-release.apk"
               "app-arm64-v8a-release.apk"
               "app-armeabi-v7a-release.apk"
+              "LinPlayer-iOS-unsigned.ipa"
             )
 
             mapfile -t current_assets < <(
@@ -285,7 +299,7 @@ jobs:
               name="${line#*$'\t'}"
               for legacy in "${legacy_assets[@]}"; do
                 if [[ "$name" == "$legacy" ]]; then
-                  echo "Deleting legacy Android asset from ${target}: ${name}"
+                  echo "Deleting legacy release asset from ${target}: ${name}"
                   gh_retry api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${id}"
                   break
                 fi
@@ -294,9 +308,9 @@ jobs:
           }
 
           upload_assets "$STABLE_TAG"
-          purge_legacy_android_assets "$STABLE_TAG"
+          purge_legacy_release_assets "$STABLE_TAG"
           upload_assets latest
-          purge_legacy_android_assets latest
+          purge_legacy_release_assets latest
 
       - name: Update VitePress download page
         shell: bash

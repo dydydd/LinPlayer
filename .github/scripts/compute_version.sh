@@ -5,6 +5,26 @@ build_name="${BUILD_NAME_INPUT:-}"
 build_number="${BUILD_NUMBER_INPUT:-}"
 version_full_input="${VERSION_FULL_INPUT:-}"
 
+derive_build_number_from_git() {
+  local git_ref commit_epoch
+
+  git_ref="${GITHUB_SHA:-HEAD}"
+  commit_epoch="$(git show -s --format=%ct "$git_ref" 2>/dev/null || git show -s --format=%ct HEAD 2>/dev/null || true)"
+  if ! [[ "${commit_epoch:-}" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+
+  # Keep Android versionCode within signed 32-bit int range while still making the
+  # default CI build number stable across jobs and independent of workflow run counters.
+  python3 - "$commit_epoch" <<'PY'
+import sys
+from datetime import datetime, timezone
+
+commit_epoch = int(sys.argv[1])
+print(datetime.fromtimestamp(commit_epoch, tz=timezone.utc).strftime("%y%j%H%M"))
+PY
+}
+
 if [[ -n "${version_full_input:-}" ]]; then
   if [[ "${version_full_input}" == *"+"* ]]; then
     build_name="${version_full_input%%+*}"
@@ -27,6 +47,9 @@ if [[ -z "${build_name:-}" ]]; then
   build_name="0.1.0"
 fi
 
+if [[ -z "${build_number:-}" ]]; then
+  build_number="$(derive_build_number_from_git || true)"
+fi
 if [[ -z "${build_number:-}" ]]; then
   build_number="${GITHUB_RUN_NUMBER:-}"
 fi

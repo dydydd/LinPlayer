@@ -4,6 +4,32 @@ $buildName = $env:BUILD_NAME_INPUT
 $buildNumber = $env:BUILD_NUMBER_INPUT
 $versionFullInput = $env:VERSION_FULL_INPUT
 
+function Get-BuildNumberFromGit {
+  $gitRef = if ([string]::IsNullOrWhiteSpace($env:GITHUB_SHA)) { 'HEAD' } else { $env:GITHUB_SHA }
+  $commitEpoch = ''
+
+  try {
+    $commitEpoch = (git show -s --format=%ct $gitRef 2>$null).Trim()
+  } catch {
+  }
+
+  if ([string]::IsNullOrWhiteSpace($commitEpoch)) {
+    try {
+      $commitEpoch = (git show -s --format=%ct HEAD 2>$null).Trim()
+    } catch {
+    }
+  }
+
+  if ($commitEpoch -notmatch '^[0-9]+$') {
+    return $null
+  }
+
+  $dt = [DateTimeOffset]::FromUnixTimeSeconds([int64]$commitEpoch).UtcDateTime
+  # Keep Android versionCode within signed 32-bit int range while still making the
+  # default CI build number stable across jobs and independent of workflow run counters.
+  return ('{0:00}{1:000}{2:00}{3:00}' -f ($dt.Year % 100), $dt.DayOfYear, $dt.Hour, $dt.Minute)
+}
+
 if (-not [string]::IsNullOrWhiteSpace($versionFullInput)) {
   if ($versionFullInput -match '\+') {
     $parts = $versionFullInput -split '\+', 2
@@ -33,6 +59,9 @@ if ([string]::IsNullOrWhiteSpace($buildName)) {
   $buildName = '0.1.0'
 }
 
+if ([string]::IsNullOrWhiteSpace($buildNumber)) {
+  $buildNumber = Get-BuildNumberFromGit
+}
 if ([string]::IsNullOrWhiteSpace($buildNumber)) {
   $buildNumber = $env:GITHUB_RUN_NUMBER
 }

@@ -30,6 +30,10 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Compute build version
+        shell: bash
+        run: bash .github/scripts/compute_version.sh
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
@@ -51,25 +55,77 @@ jobs:
         shell: bash
         run: chmod +x legacy/tv-legacy/gradlew
 
-      - name: Assemble debug APK
+      - name: Resolve artifact mode
         shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          ./legacy/tv-legacy/gradlew -p legacy/tv-legacy :app:assembleDebug
-
-      - name: Rename APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION_NAME="$(sed -n 's/.*versionName\\s*=\\s*\"\\([^\"]*\\)\".*/\\1/p' legacy/tv-legacy/app/build.gradle.kts | head -n 1)"
-          if [[ -z "${VERSION_NAME:-}" ]]; then
-            VERSION_NAME="unknown"
+          if [[ -n "${ANDROID_KEYSTORE_BASE64:-}" && -n "${ANDROID_KEYSTORE_PASSWORD:-}" && -n "${ANDROID_KEY_ALIAS:-}" && -n "${ANDROID_KEY_PASSWORD:-}" ]]; then
+            echo "LEGACY_TV_BUILD_VARIANT=release" >> "$GITHUB_ENV"
+            echo "LEGACY_TV_GRADLE_TASK=:app:assembleRelease" >> "$GITHUB_ENV"
+            echo "LEGACY_TV_APK_PATH=legacy/tv-legacy/app/build/outputs/apk/release/app-release.apk" >> "$GITHUB_ENV"
+            echo "LEGACY_TV_ARTIFACT_NAME=LinPlayer-LowVersion-TV-${VERSION_FULL}.apk" >> "$GITHUB_ENV"
+          else
+            echo "LEGACY_TV_BUILD_VARIANT=debug" >> "$GITHUB_ENV"
+            echo "LEGACY_TV_GRADLE_TASK=:app:assembleDebug" >> "$GITHUB_ENV"
+            echo "LEGACY_TV_APK_PATH=legacy/tv-legacy/app/build/outputs/apk/debug/app-debug.apk" >> "$GITHUB_ENV"
+            echo "LEGACY_TV_ARTIFACT_NAME=LinPlayer-LowVersion-TV-debug-nonupgrade-${VERSION_FULL}.apk" >> "$GITHUB_ENV"
+            {
+              echo "### Legacy TV signing"
+              echo ""
+              echo "Release signing secrets are missing, so this run falls back to a debug APK."
+              echo "That debug artifact is intentionally marked non-upgrade because it cannot reliably cover-install prior CI builds."
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      - name: Configure Android release signing (OTA-safe)
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ "${LEGACY_TV_BUILD_VARIANT:-}" != "release" ]]; then
+            echo "Legacy TV release signing not requested for this run; skipping."
+            exit 0
+          fi
+
+          python3 .github/scripts/decode_android_keystore.py legacy/tv-legacy/release.keystore
+          printf "storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=release.keystore\n" \
+            "$ANDROID_KEYSTORE_PASSWORD" \
+            "$ANDROID_KEY_PASSWORD" \
+            "$ANDROID_KEY_ALIAS" \
+            > legacy/tv-legacy/key.properties
+
+          bash .github/scripts/verify_android_signing.sh \
+            legacy/tv-legacy/release.keystore \
+            "$ANDROID_KEYSTORE_PASSWORD" \
+            "$ANDROID_KEY_PASSWORD" \
+            "$ANDROID_KEY_ALIAS"
+
+      - name: Assemble APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./legacy/tv-legacy/gradlew -p legacy/tv-legacy "$LEGACY_TV_GRADLE_TASK" \
+            -Plinplayer.versionCode="$BUILD_NUMBER" \
+            -Plinplayer.versionName="$BUILD_NAME"
+
+      - name: Stage APK artifact
+        shell: bash
+        run: |
+          set -euo pipefail
           mkdir -p dist
-          cp -v legacy/tv-legacy/app/build/outputs/apk/debug/app-debug.apk "dist/LinPlayer-LowVersion-TV-${VERSION_NAME}.apk"
+          cp -v "$LEGACY_TV_APK_PATH" "dist/$LEGACY_TV_ARTIFACT_NAME"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: LinPlayer-LowVersion-TV
-          path: dist/LinPlayer-LowVersion-TV-*.apk
+          path: dist/*.apk
