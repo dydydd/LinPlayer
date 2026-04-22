@@ -108,6 +108,7 @@ dpkg-deb --build --root-owner-group "$deb_root" "$output_dir/LinPlayer-Linux-${a
 
 rpm_topdir="$work_dir/rpm"
 rpm_buildroot="$rpm_topdir/BUILDROOT/${package_name}-${package_version}-${package_release}.${rpm_arch}"
+rpm_payload="$work_dir/rpm-payload"
 
 mkdir -p \
   "$rpm_topdir/BUILD" \
@@ -115,10 +116,10 @@ mkdir -p \
   "$rpm_topdir/RPMS" \
   "$rpm_topdir/SOURCES" \
   "$rpm_topdir/SPECS" \
-  "$rpm_topdir/SRPMS"
+  "$rpm_topdir/SRPMS" \
+  "$rpm_payload"
 
-mkdir -p "$rpm_buildroot"
-cp -a "$stage_root/." "$rpm_buildroot/"
+cp -a "$stage_root/." "$rpm_payload/"
 
 cat > "$rpm_topdir/SPECS/${package_name}.spec" <<EOF
 Name: $package_name
@@ -133,7 +134,7 @@ $description
 
 %install
 mkdir -p %{buildroot}
-cp -a "$rpm_buildroot/." %{buildroot}/
+cp -a "$rpm_payload/." %{buildroot}/
 
 %files
 /opt/linplayer

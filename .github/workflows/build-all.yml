@@ -319,6 +319,7 @@ jobs:
             runner: ubuntu-24.04-arm
             flutter_target_platform: linux-arm64
     env:
+      FLUTTER_VERSION: 3.41.7
       PUB_CACHE: /home/runner/.pub-cache
       DANDANPLAY_PROXY_URL: ${{ secrets.DANDANPLAY_PROXY_URL }}
       TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
@@ -328,10 +329,30 @@ jobs:
         with:
           token: ${{ secrets.CI_GH_PAT || github.token }}
 
-      - name: Set up Flutter
+      - name: Set up Flutter (x64)
+        if: matrix.arch == 'x64'
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Set up Flutter (arm64)
+        if: matrix.arch == 'arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FLUTTER_DIR="$RUNNER_TEMP/flutter"
+          git clone \
+            https://github.com/flutter/flutter.git \
+            --branch "$FLUTTER_VERSION" \
+            --depth 1 \
+            "$FLUTTER_DIR"
+
+          echo "FLUTTER_ROOT=$FLUTTER_DIR" >> "$GITHUB_ENV"
+          echo "$FLUTTER_DIR/bin" >> "$GITHUB_PATH"
+
+          "$FLUTTER_DIR/bin/flutter" --version
 
       - name: Cache Flutter pub packages
         uses: actions/cache@v4
@@ -342,7 +363,6 @@ jobs:
           key: ${{ runner.os }}-${{ matrix.arch }}-pub-${{ hashFiles('pubspec.lock') }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.arch }}-pub-
-            ${{ runner.os }}-pub-
 
       - name: Install Linux build dependencies
         shell: bash
