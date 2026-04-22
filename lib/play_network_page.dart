@@ -80,6 +80,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       'networkPlaybackProgress_v1:';
   static const Duration _kResumeSeekTolerance = Duration(seconds: 1);
   static const Duration _kLateResumeAutoSeekGrace = Duration(seconds: 3);
+  static const Duration _kStartupResumeMinBuffer =
+      Duration(milliseconds: 900);
+  static const Duration _kStartupResumeMinPlayback =
+      Duration(milliseconds: 450);
 
   final PlayerService _playerService = getPlayerService();
   MediaKitThumbnailGenerator? _thumbnailer;
@@ -703,12 +707,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       final resumeImmediately =
           _overrideResumeImmediately || widget.resumeImmediately;
       final skipAutoResume = _skipAutoResumeOnce;
-      final initialStartPosition = !skipAutoResume &&
-              resumeImmediately &&
-              start != null &&
-              start > Duration.zero
-          ? start
-          : null;
       await _applyOrientationForMode(
         mediaSource: selectedMediaSource,
       );
@@ -795,7 +793,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         null,
         networkUrl: playbackUrl,
         httpHeaders: playbackHeaders,
-        startPosition: initialStartPosition,
+        // Let MPV fully enter playback first, then seek from history.
+        // Passing `startPosition` into `Media(start: ...)` is too early for
+        // some network streams and can fall back to playing from 0.
         isTv: widget.isTv,
         hardwareDecode: _hwdecOn,
         mpvCacheSizeMb: widget.appState.mpvCacheSizeMb,
@@ -3878,6 +3878,45 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     return false;
   }
 
+  Future<bool> _waitForStartupResumeWindow({
+    Duration timeout = const Duration(seconds: 4),
+  }) async {
+    final hasVideo = await _waitForVideoSignal(timeout: timeout);
+    if (!hasVideo) return false;
+
+    final deadline = DateTime.now().add(timeout);
+    var sawBufferedData = false;
+    while (mounted && DateTime.now().isBefore(deadline)) {
+      if (_playError != null || !_playerService.isInitialized) return false;
+
+      final state = _playerService.player.state;
+      final buffered = _lastBuffer > Duration.zero ? _lastBuffer : state.buffer;
+      final buffering = _buffering || state.buffering;
+      final position = _lastPosition > Duration.zero
+          ? _lastPosition
+          : _playerService.position;
+      final bufferingPct = _bufferingPct ?? state.bufferingPercentage;
+
+      if (buffered >= _kStartupResumeMinBuffer ||
+          bufferingPct >= 8 ||
+          position >= _kStartupResumeMinPlayback) {
+        sawBufferedData = true;
+      }
+
+      if (sawBufferedData && !buffering) {
+        return true;
+      }
+
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+    }
+
+    if (!_playerService.isInitialized || _playError != null) return false;
+    final state = _playerService.player.state;
+    final buffered = _lastBuffer > Duration.zero ? _lastBuffer : state.buffer;
+    return buffered >= _kStartupResumeMinBuffer ||
+        _playerService.position >= _kStartupResumeMinPlayback;
+  }
+
   Future<void> _resumeToPositionAfterStart(Duration target) async {
     if (_resumeCloseEnough(_playerService.position, target)) {
       final applied = _playerService.position;
@@ -3935,9 +3974,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     if (resumePos <= Duration.zero) return false;
     if (!_playerService.isInitialized || _playError != null) return false;
 
-    final hasVideo =
-        await _waitForVideoSignal(timeout: const Duration(seconds: 2));
-    if (!hasVideo) return false;
+    final readyForResume = await _waitForStartupResumeWindow();
+    if (!readyForResume) return false;
 
     final deadline = DateTime.now().add(const Duration(seconds: 2));
     while (mounted &&
@@ -4054,6 +4092,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
     final safeTarget = _safeSeekTarget(target, _playerService.duration);
     try {
+      await _waitForStartupResumeWindow();
       final seekFuture =
           _playerService.seek(safeTarget, flushBuffer: _flushBufferOnSeek);
       await seekFuture.timeout(const Duration(seconds: 3));
@@ -6741,15 +6780,40 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                         child: Padding(
                                           padding: const EdgeInsets.symmetric(
                                               vertical: 12),
-                                          child: MobilePlayerPromptBanner(
-                                            icon: Icons.history_rounded,
-                                            title:
-                                                '跳转到 ${_fmtClock(_resumeHintPosition!)} 继续观看',
-                                            subtitle: '继续从上次的观看进度播放',
-                                            actionLabel: '继续播放',
-                                            actionIcon:
-                                                Icons.play_arrow_rounded,
-                                            onAction: _resumeToHistoryPosition,
+                                          child: Material(
+                                            color: Colors.black54,
+                                            borderRadius:
+                                                BorderRadius.circular(999),
+                                            clipBehavior: Clip.antiAlias,
+                                            child: InkWell(
+                                              onTap: _resumeToHistoryPosition,
+                                              child: Padding(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 12,
+                                                  vertical: 10,
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    const Icon(
+                                                      Icons.history,
+                                                      size: 18,
+                                                      color: Colors.white,
+                                                    ),
+                                                    const SizedBox(width: 6),
+                                                    Text(
+                                                      '跳转到 ${_fmtClock(_resumeHintPosition!)} 继续观看',
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 13,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -6764,17 +6828,82 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                         child: Padding(
                                           padding: const EdgeInsets.symmetric(
                                               vertical: 12),
-                                          child: MobilePlayerPromptBanner(
-                                            icon: Icons
-                                                .replay_circle_filled_rounded,
-                                            title:
-                                                '已从 ${_fmtClock(_startOverHintPosition!)} 继续播放',
-                                            subtitle: '是否从头开始观看？',
-                                            actionLabel: '从头开始',
-                                            actionIcon:
-                                                Icons.restart_alt_rounded,
-                                            onAction: _restartFromBeginning,
-                                            emphasized: true,
+                                          child: Material(
+                                            color: Colors.black54,
+                                            borderRadius:
+                                                BorderRadius.circular(999),
+                                            clipBehavior: Clip.antiAlias,
+                                            child: Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 12,
+                                                vertical: 10,
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const Icon(
+                                                    Icons.history,
+                                                    size: 18,
+                                                    color: Colors.white,
+                                                  ),
+                                                  const SizedBox(width: 6),
+                                                  Text(
+                                                    '已从 ${_fmtClock(_startOverHintPosition!)} 继续播放',
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 13,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 10),
+                                                  InkWell(
+                                                    onTap:
+                                                        _restartFromBeginning,
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            999),
+                                                    child: Container(
+                                                      padding: const EdgeInsets
+                                                          .symmetric(
+                                                        horizontal: 10,
+                                                        vertical: 6,
+                                                      ),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.white
+                                                            .withValues(
+                                                                alpha: 0.18),
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(999),
+                                                      ),
+                                                      child: const Row(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          Icon(
+                                                            Icons.replay,
+                                                            size: 18,
+                                                            color: Colors.white,
+                                                          ),
+                                                          SizedBox(width: 4),
+                                                          Text(
+                                                            '从头开始',
+                                                            style: TextStyle(
+                                                              color:
+                                                                  Colors.white,
+                                                              fontSize: 13,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w600,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
                                           ),
                                         ),
                                       ),

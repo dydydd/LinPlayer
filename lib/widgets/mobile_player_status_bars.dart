@@ -3,8 +3,6 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
-const Color _overlayAccentColor = Color(0xFFF5C166);
-
 class MobilePlayerActionButton extends StatelessWidget {
   const MobilePlayerActionButton({
     super.key,
@@ -34,31 +32,22 @@ class MobilePlayerActionButton extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(999),
-        child: Ink(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(999),
-            color: Colors.black.withValues(alpha: enabled ? 0.24 : 0.12),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: enabled ? 0.14 : 0.06),
-            ),
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? 6 : 8,
+            vertical: compact ? 4 : 6,
           ),
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: compact ? 8 : 10,
-              vertical: compact ? 5 : 7,
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  icon,
-                  size: iconSize,
-                  color: enabled ? Colors.white : Colors.white54,
-                ),
-                const SizedBox(width: 4),
-                Text(label, style: labelStyle),
-              ],
-            ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: iconSize,
+                color: enabled ? Colors.white : Colors.white54,
+              ),
+              const SizedBox(width: 4),
+              Text(label, style: labelStyle),
+            ],
           ),
         ),
       ),
@@ -135,59 +124,55 @@ class MobilePlayerTopStatusBar extends StatelessWidget {
       ),
       child: IconTheme.merge(
         data: const IconThemeData(color: Colors.white),
-        child: _MobilePlayerGlassSurface(
-          emphasized: true,
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (hasBackButton) ...[
-                _MobilePlayerTopIconButton(
-                  icon: Icons.arrow_back_rounded,
-                  tooltip: backTooltip,
-                  onTap: onBack,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (hasBackButton) ...[
+              _MobilePlayerTopIconButton(
+                icon: Icons.arrow_back_rounded,
+                tooltip: backTooltip,
+                onTap: onBack,
+              ),
+              const SizedBox(width: 10),
+            ],
+            Expanded(
+              child: Padding(
+                padding: EdgeInsets.only(top: hasBackButton ? 4 : 6),
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: _overlayLabelStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
                 ),
-                const SizedBox(width: 10),
-              ],
-              Expanded(
-                child: Padding(
-                  padding: EdgeInsets.only(top: hasBackButton ? 4 : 6),
-                  child: Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: _overlayLabelStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
+              ),
+            ),
+            if (actions.isNotEmpty) ...[
+              const SizedBox(width: 12),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: actionMaxWidth),
+                child: Align(
+                  alignment: Alignment.topRight,
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (final entry in actions) ...[
+                          entry,
+                          if (entry != actions.last) const SizedBox(width: 2),
+                        ],
+                      ],
                     ),
                   ),
                 ),
               ),
-              if (actions.isNotEmpty) ...[
-                const SizedBox(width: 12),
-                ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: actionMaxWidth),
-                  child: Align(
-                    alignment: Alignment.topRight,
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          for (final entry in actions) ...[
-                            entry,
-                            if (entry != actions.last) const SizedBox(width: 4),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
             ],
-          ),
+          ],
         ),
       ),
     );
@@ -225,19 +210,10 @@ class _MobilePlayerTopIconButton extends StatelessWidget {
               height: 38,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.black.withValues(alpha: enabled ? 0.30 : 0.12),
+                color: Colors.black.withValues(alpha: enabled ? 0.24 : 0.12),
                 border: Border.all(
                   color: Colors.white.withValues(alpha: enabled ? 0.18 : 0.08),
                 ),
-                boxShadow: enabled
-                    ? [
-                        BoxShadow(
-                          color: _overlayAccentColor.withValues(alpha: 0.10),
-                          blurRadius: 18,
-                          offset: const Offset(0, 6),
-                        ),
-                      ]
-                    : null,
               ),
               child: Center(
                 child: Icon(
@@ -274,8 +250,7 @@ class MobilePlayerOverlaySheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
-    final panelWidth =
-        math.min(420.0, math.max(312.0, size.width * 0.82)).toDouble();
+    final panelWidth = size.width / 3;
 
     return Positioned.fill(
       child: Stack(
@@ -312,9 +287,9 @@ class MobilePlayerOverlaySheet extends StatelessWidget {
               ignoring: !visible,
               child: SafeArea(
                 left: false,
-                minimum: const EdgeInsets.fromLTRB(0, 8, 10, 8),
+                minimum: const EdgeInsets.fromLTRB(0, 8, 8, 8),
                 child: Padding(
-                  padding: const EdgeInsets.only(left: 12),
+                  padding: const EdgeInsets.only(left: 10),
                   child: _MobilePlayerPanelSurface(child: child),
                 ),
               ),
@@ -333,8 +308,20 @@ class _MobilePlayerPanelSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _MobilePlayerGlassSurface(
-      child: child,
+    const radius = 24.0;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(radius),
+            color: Colors.white.withValues(alpha: 0.08),
+          ),
+          child: child,
+        ),
+      ),
     );
   }
 }
@@ -518,9 +505,9 @@ class MobilePlayerInfoTag extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.26),
+        color: Colors.white.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -583,99 +570,92 @@ class MobilePlayerBottomStatusBar extends StatelessWidget {
       ),
       child: IconTheme.merge(
         data: const IconThemeData(color: Colors.white),
-        child: _MobilePlayerGlassSurface(
-          emphasized: true,
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    positionLabel,
-                    style: _overlayLabelStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white70,
-                      tabular: true,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Text(
+                  positionLabel,
+                  style: _overlayLabelStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white70,
+                    tabular: true,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      trackHeight: 3,
+                      activeTrackColor: Colors.white,
+                      secondaryActiveTrackColor:
+                          Colors.white.withValues(alpha: 0.55),
+                      inactiveTrackColor: Colors.white.withValues(alpha: 0.18),
+                      thumbColor: Colors.white,
+                      overlayColor: Colors.white.withValues(alpha: 0.14),
+                      thumbShape:
+                          const RoundSliderThumbShape(enabledThumbRadius: 4.5),
+                      overlayShape:
+                          const RoundSliderOverlayShape(overlayRadius: 12),
+                    ),
+                    child: Slider(
+                      min: 0,
+                      max: sliderMaxMs.toDouble(),
+                      value: sliderValueMs.toDouble(),
+                      secondaryTrackValue: bufferedMs.toDouble(),
+                      onChangeStart:
+                          _sliderEnabled ? (_) => onScrubStart?.call() : null,
+                      onChanged: _sliderEnabled
+                          ? (value) => onSeekPreview!(
+                                Duration(milliseconds: value.round()),
+                              )
+                          : null,
+                      onChangeEnd: _sliderEnabled
+                          ? (value) => onSeekCommit!(
+                                Duration(milliseconds: value.round()),
+                              )
+                          : null,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        trackHeight: 4,
-                        activeTrackColor: _overlayAccentColor,
-                        secondaryActiveTrackColor:
-                            _overlayAccentColor.withValues(alpha: 0.36),
-                        inactiveTrackColor:
-                            Colors.white.withValues(alpha: 0.16),
-                        thumbColor: _overlayAccentColor,
-                        overlayColor:
-                            _overlayAccentColor.withValues(alpha: 0.16),
-                        thumbShape: const RoundSliderThumbShape(
-                          enabledThumbRadius: 5,
-                        ),
-                        overlayShape:
-                            const RoundSliderOverlayShape(overlayRadius: 14),
-                      ),
-                      child: Slider(
-                        min: 0,
-                        max: sliderMaxMs.toDouble(),
-                        value: sliderValueMs.toDouble(),
-                        secondaryTrackValue: bufferedMs.toDouble(),
-                        onChangeStart:
-                            _sliderEnabled ? (_) => onScrubStart?.call() : null,
-                        onChanged: _sliderEnabled
-                            ? (value) => onSeekPreview!(
-                                  Duration(milliseconds: value.round()),
-                                )
-                            : null,
-                        onChangeEnd: _sliderEnabled
-                            ? (value) => onSeekCommit!(
-                                  Duration(milliseconds: value.round()),
-                                )
-                            : null,
-                      ),
-                    ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  durationLabel,
+                  style: _overlayLabelStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white70,
+                    tabular: true,
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    durationLabel,
-                    style: _overlayLabelStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white70,
-                      tabular: true,
-                    ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: leftContent,
                   ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    flex: 3,
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: leftContent,
-                    ),
+                ),
+                Expanded(
+                  flex: 4,
+                  child: Center(child: centerContent),
+                ),
+                Expanded(
+                  flex: 3,
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: rightContent,
                   ),
-                  Expanded(
-                    flex: 4,
-                    child: Center(child: centerContent),
-                  ),
-                  Expanded(
-                    flex: 3,
-                    child: Align(
-                      alignment: Alignment.centerRight,
-                      child: rightContent,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -710,19 +690,10 @@ class MobilePlayerPillButton extends StatelessWidget {
         child: Ink(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(999),
-            color: Colors.black.withValues(alpha: enabled ? 0.26 : 0.12),
+            color: Colors.black.withValues(alpha: enabled ? 0.22 : 0.12),
             border: Border.all(
               color: Colors.white.withValues(alpha: enabled ? 0.16 : 0.08),
             ),
-            boxShadow: enabled
-                ? [
-                    BoxShadow(
-                      color: _overlayAccentColor.withValues(alpha: 0.08),
-                      blurRadius: 16,
-                      offset: const Offset(0, 6),
-                    ),
-                  ]
-                : null,
           ),
           child: Padding(
             padding: EdgeInsets.symmetric(
@@ -1078,175 +1049,6 @@ class MobilePlayerSpeedOverlay extends StatelessWidget {
   }
 }
 
-class MobilePlayerPromptBanner extends StatelessWidget {
-  const MobilePlayerPromptBanner({
-    super.key,
-    required this.icon,
-    required this.title,
-    this.subtitle,
-    this.actionLabel,
-    this.actionIcon,
-    this.onAction,
-    this.emphasized = false,
-  });
-
-  final IconData icon;
-  final String title;
-  final String? subtitle;
-  final String? actionLabel;
-  final IconData? actionIcon;
-  final VoidCallback? onAction;
-  final bool emphasized;
-
-  @override
-  Widget build(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    final maxWidth = math.min(size.width - 32, 460.0).toDouble();
-    final hasAction = (actionLabel ?? '').trim().isNotEmpty && onAction != null;
-
-    return ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: maxWidth),
-      child: _MobilePlayerGlassSurface(
-        emphasized: emphasized,
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.black.withValues(alpha: 0.28),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.12),
-                ),
-              ),
-              child: Icon(
-                icon,
-                size: 18,
-                color: emphasized ? _overlayAccentColor : Colors.white,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Flexible(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: _overlayLabelStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
-                  ),
-                  if ((subtitle ?? '').trim().isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle!,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: _overlayLabelStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.white70,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            if (hasAction) ...[
-              const SizedBox(width: 10),
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: onAction,
-                  borderRadius: BorderRadius.circular(999),
-                  child: Ink(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(999),
-                      color: _overlayAccentColor.withValues(alpha: 0.18),
-                      border: Border.all(
-                        color: _overlayAccentColor.withValues(alpha: 0.34),
-                      ),
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 8,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (actionIcon != null) ...[
-                          Icon(
-                            actionIcon,
-                            size: 16,
-                            color: Colors.white,
-                          ),
-                          const SizedBox(width: 4),
-                        ],
-                        Text(
-                          actionLabel!,
-                          style: _overlayLabelStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _MobilePlayerGlassSurface extends StatelessWidget {
-  const _MobilePlayerGlassSurface({
-    required this.child,
-    this.padding = EdgeInsets.zero,
-    this.emphasized = false,
-  });
-
-  final Widget child;
-  final EdgeInsetsGeometry padding;
-  final bool emphasized;
-
-  @override
-  Widget build(BuildContext context) {
-    const borderRadius = BorderRadius.all(Radius.circular(24));
-    return ClipRRect(
-      borderRadius: borderRadius,
-      child: BackdropFilter(
-        filter: ImageFilter.blur(
-          sigmaX: emphasized ? 20 : 16,
-          sigmaY: emphasized ? 20 : 16,
-        ),
-        child: DecoratedBox(
-          decoration: _overlaySurfaceDecoration(
-            borderRadius: borderRadius,
-            emphasized: emphasized,
-          ),
-          child: Padding(
-            padding: padding,
-            child: child,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _MobileSpeedSegmentButton extends StatelessWidget {
   const _MobileSpeedSegmentButton({
     required this.width,
@@ -1303,38 +1105,6 @@ class _MobileSpeedSegmentButton extends StatelessWidget {
       ),
     );
   }
-}
-
-BoxDecoration _overlaySurfaceDecoration({
-  required BorderRadius borderRadius,
-  bool emphasized = false,
-}) {
-  return BoxDecoration(
-    borderRadius: borderRadius,
-    gradient: LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [
-        const Color(0xFF1A2230).withValues(alpha: emphasized ? 0.72 : 0.62),
-        const Color(0xFF06080D).withValues(alpha: emphasized ? 0.54 : 0.44),
-      ],
-    ),
-    border: Border.all(
-      color: Colors.white.withValues(alpha: emphasized ? 0.16 : 0.12),
-    ),
-    boxShadow: [
-      BoxShadow(
-        color: Colors.black.withValues(alpha: emphasized ? 0.30 : 0.22),
-        blurRadius: emphasized ? 28 : 18,
-        offset: const Offset(0, 10),
-      ),
-      BoxShadow(
-        color: _overlayAccentColor.withValues(alpha: emphasized ? 0.10 : 0.06),
-        blurRadius: emphasized ? 20 : 14,
-        offset: const Offset(0, 4),
-      ),
-    ],
-  );
 }
 
 TextStyle _overlayLabelStyle({
