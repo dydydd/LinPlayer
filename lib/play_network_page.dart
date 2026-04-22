@@ -80,8 +80,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       'networkPlaybackProgress_v1:';
   static const Duration _kResumeSeekTolerance = Duration(seconds: 1);
   static const Duration _kLateResumeAutoSeekGrace = Duration(seconds: 3);
-  static const Duration _kStartupResumeMinBuffer =
-      Duration(milliseconds: 900);
+  static const Duration _kStartupResumeMinBuffer = Duration(milliseconds: 900);
   static const Duration _kStartupResumeMinPlayback =
       Duration(milliseconds: 450);
 
@@ -3279,7 +3278,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
     final externalSubtitleStreams = subtitleStreams
         .where((s) => _isEmbyExternalSubtitleStream(s))
-        .where((s) => _isSupportedMpvSubtitleStream(s))
         .toList(growable: false);
     if (externalSubtitleStreams.isEmpty) return false;
 
@@ -3451,42 +3449,28 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     return false;
   }
 
-  static bool _isSupportedMpvSubtitleStream(Map<String, dynamic> stream) {
-    final codec = (stream['Codec']?.toString() ?? '').trim().toLowerCase();
-    if (codec.isEmpty) return true; // Assume text; mpv will validate.
-    const knownFormats = <String>[
-      'srt',
-      'subrip',
-      'ass',
-      'ssa',
-      'vtt',
-      'webvtt',
-      'pgs',
-      'sup',
-      'hdmv_pgs_subtitle',
-      'vobsub',
-      'dvd_subtitle',
-      'dvb_subtitle',
-      'xsub',
-    ];
-    return knownFormats.any((k) => codec.contains(k));
-  }
-
   static String _preferredSubtitleFormat(String codec) {
-    final c = codec.trim().toLowerCase();
-    if (c.isEmpty) return 'srt';
-    if (c.contains('ass')) return 'ass';
-    if (c.contains('ssa')) return 'ssa';
-    if (c.contains('vtt')) return 'vtt';
-    if (c.contains('subrip') || c == 'srt') return 'srt';
-    if (c.contains('pgs') || c.contains('sup') || c.contains('hdmv')) {
-      return 'sup';
+    switch (normalizeSubtitleCodec(codec)) {
+      case 'ass':
+        return 'ass';
+      case 'ssa':
+        return 'ssa';
+      case 'vtt':
+        return 'vtt';
+      case 'sup':
+        return 'sup';
+      case 'vobsub':
+      case 'dvb':
+      case 'xsub':
+        return 'sub';
+      case 'srt':
+      case 'ttml':
+      default:
+        // Prefer a broadly readable text format when the original codec label is
+        // missing or when Emby exposes a text codec that MPV may not decode
+        // directly from the raw stream.
+        return 'srt';
     }
-    if (c.contains('vobsub') || c.contains('dvd_subtitle')) return 'sub';
-    if (c.contains('dvb')) return 'sub';
-    // Fallback: keep server-provided codec if it looks safe; otherwise prefer srt.
-    final safe = RegExp(r'^[a-z0-9]{1,8}$');
-    return safe.hasMatch(c) ? c : 'srt';
   }
 
   static String _normalizeSubtitleCodec(String codec) {
@@ -3496,11 +3480,13 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     if (c.contains('webvtt') || c.contains('vtt')) return 'vtt';
     if (c.contains('ass')) return 'ass';
     if (c.contains('ssa')) return 'ssa';
+    if (c.contains('ttml') || c.contains('dfxp')) return 'ttml';
     if (c.contains('pgs') || c.contains('sup') || c.contains('hdmv')) {
       return 'sup';
     }
     if (c.contains('vobsub') || c.contains('dvd_subtitle')) return 'sub';
     if (c.contains('dvb')) return 'dvb';
+    if (c.contains('xsub')) return 'xsub';
     return c;
   }
 

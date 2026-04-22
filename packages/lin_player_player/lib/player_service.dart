@@ -126,10 +126,13 @@ class PlayerService {
       ],
       extraMpvOptions: [
         'tls-verify=no',
+        'embeddedfonts=yes',
+        'sub-ass=yes',
+        'sub-auto=fuzzy',
+        'sub-codepage=auto',
         if (isAndroid) 'sub-fonts-dir=/system/fonts',
         // Improve ASS/SSA effect subtitle compatibility on desktop (VSFilter-style scripts).
         if (isDesktop) ...[
-          'embeddedfonts=yes',
           'sub-ass-vsfilter-aspect-compat=yes',
           'sub-ass-vsfilter-blur-compat=yes',
         ],

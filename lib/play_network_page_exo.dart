@@ -345,11 +345,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    if (_isAndroid && !widget.isTv) {
-      // Mobile EXO overlays animate more reliably on texture view than on
-      // platform view.
-      _viewType = VideoViewType.textureView;
-    }
     _serverAccess =
         resolveServerAccess(appState: widget.appState, server: widget.server);
     final access = _serverAccess;

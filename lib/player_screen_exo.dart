@@ -174,11 +174,6 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    if (_isAndroid && !DeviceType.isTv) {
-      // Mobile EXO overlays animate more reliably on texture view than on
-      // platform view.
-      _viewType = VideoViewType.textureView;
-    }
     _danmakuEnabled = widget.appState.danmakuEnabled;
     _danmakuOpacity = widget.appState.danmakuOpacity;
     _danmakuScale = widget.appState.danmakuScale;

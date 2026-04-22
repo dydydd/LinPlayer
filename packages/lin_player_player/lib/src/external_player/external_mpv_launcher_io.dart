@@ -17,6 +17,8 @@ Future<bool> launchExternalMpv({
     // Prefer maximum ASS/SSA compatibility for external playback too.
     '--embeddedfonts=yes',
     '--sub-ass=yes',
+    '--sub-auto=fuzzy',
+    '--sub-codepage=auto',
     '--sub-ass-vsfilter-aspect-compat=yes',
     '--sub-ass-vsfilter-blur-compat=yes',
   ];
