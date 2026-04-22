@@ -160,7 +160,7 @@ class _VlcPlayerScreenState extends State<VlcPlayerScreen>
   bool get _isAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
   bool get _isIos => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
-  bool get _supportsVlcCore => _isAndroid || _isIos;
+  bool get _supportsVlcCore => _isIos;
 
   @override
   void initState() {
@@ -3467,7 +3467,7 @@ class _VlcPlayerScreenState extends State<VlcPlayerScreen>
     if (!_supportsVlcCore) {
       return Scaffold(
         appBar: AppBar(title: const Text('本地播放（VLC）'), centerTitle: true),
-        body: const Center(child: Text('VLC 内核仅支持 iOS / Android')),
+        body: const Center(child: Text('VLC 内核仅支持 iOS')),
       );
     }
 

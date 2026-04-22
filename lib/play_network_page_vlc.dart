@@ -263,7 +263,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
   bool get _isAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
   bool get _isIos => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
-  bool get _supportsVlcCore => _isAndroid || _isIos;
+  bool get _supportsVlcCore => _isIos;
 
   bool get _isPlaying => _controller?.value.isPlaying ?? false;
 
@@ -5387,7 +5387,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
 
     try {
       if (!_supportsVlcCore) {
-        throw Exception('VLC 内核仅支持 iOS / Android');
+        throw Exception('VLC 内核仅支持 iOS');
       }
       final initialPrepared = _takeInitialPreparedPreloadForPlayback();
       PlayableSource? preparedPlaybackSource;
