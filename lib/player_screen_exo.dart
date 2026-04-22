@@ -970,7 +970,12 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     }
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
-    setState(() => _controlsVisible = false);
+    _mobileSpeedAdjustTimer?.cancel();
+    _mobileSpeedAdjustTimer = null;
+    setState(() {
+      _controlsVisible = false;
+      _mobilePanel = null;
+    });
     if (_fullScreen) {
       // ignore: unawaited_futures
       _enterImmersiveMode();
@@ -1010,9 +1015,12 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
     if (_remoteEnabled) return;
+    if (_mobilePanel != null) return;
     if (!_controlsVisible || _isScrubbing) return;
     _controlsHideTimer = Timer(_controlsAutoHideDelay, () {
-      if (!mounted || _isScrubbing || _remoteEnabled) return;
+      if (!mounted || _isScrubbing || _remoteEnabled || _mobilePanel != null) {
+        return;
+      }
       setState(() => _controlsVisible = false);
       if (_fullScreen) {
         // ignore: unawaited_futures
@@ -2015,8 +2023,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     final cached =
         List<vp_android.ExoPlayerSubtitleTrackData>.unmodifiable(tracks);
     _mobileSubtitleTracks = cached;
-    _mobileSubtitleTracksFuture = SynchronousFuture<
-        List<vp_android.ExoPlayerSubtitleTrackData>>(cached);
+    _mobileSubtitleTracksFuture =
+        SynchronousFuture<List<vp_android.ExoPlayerSubtitleTrackData>>(cached);
   }
 
   void _invalidateMobileTrackPanelState({bool resetScroll = false}) {
@@ -2550,7 +2558,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
       initialData: _mobileAudioTracks,
       builder: (context, snapshot) {
         final tracks = snapshot.data ?? const <vp_platform.VideoAudioTrack>[];
-        if (snapshot.connectionState != ConnectionState.done && tracks.isEmpty) {
+        if (snapshot.connectionState != ConnectionState.done &&
+            tracks.isEmpty) {
           return const Center(child: CircularProgressIndicator());
         }
         if (tracks.isEmpty) {
@@ -2584,7 +2593,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                           );
                           if (!mounted) return;
                           setState(
-                            () => _optimisticallySelectMobileAudioTrack(track.id),
+                            () =>
+                                _optimisticallySelectMobileAudioTrack(track.id),
                           );
                           unawaited(_refreshMobileAudioTracks());
                         }());
@@ -2622,7 +2632,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
       builder: (context, snapshot) {
         final tracks =
             snapshot.data ?? const <vp_android.ExoPlayerSubtitleTrackData>[];
-        if (snapshot.connectionState != ConnectionState.done && tracks.isEmpty) {
+        if (snapshot.connectionState != ConnectionState.done &&
+            tracks.isEmpty) {
           return const Center(child: CircularProgressIndicator());
         }
         return ListView(
@@ -3076,14 +3087,22 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     return Stack(
       children: [
         _buildMobileSpeedOverlay(controlsEnabled: controlsEnabled),
-        MobilePlayerSidePanel(
-          title: _mobilePanelTitle(effectivePanel),
-          visible: _controlsVisible && visibleSidePanel,
-          onDismiss: _closeMobilePanels,
-          variant: effectivePanel == _MobilePlayerPanel.moreOptions
-              ? MobilePlayerSidePanelVariant.moreOptions
-              : MobilePlayerSidePanelVariant.standard,
-          child: child,
+        AnimatedOpacity(
+          opacity: _controlsVisible ? 1 : 0,
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOut,
+          child: IgnorePointer(
+            ignoring: !_controlsVisible,
+            child: MobilePlayerSidePanel(
+              title: _mobilePanelTitle(effectivePanel),
+              visible: _controlsVisible && visibleSidePanel,
+              onDismiss: _closeMobilePanels,
+              variant: effectivePanel == _MobilePlayerPanel.moreOptions
+                  ? MobilePlayerSidePanelVariant.moreOptions
+                  : MobilePlayerSidePanelVariant.standard,
+              child: child,
+            ),
+          ),
         ),
       ],
     );
