@@ -6472,6 +6472,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   }) {
     return MobilePlayerTopStatusBar(
       title: _mobileTopTitleText(),
+      onBack: Navigator.of(context).canPop()
+          ? () => unawaited(_requestExitThenPop())
+          : null,
       actions: _buildMobileTopActions(controlsEnabled: controlsEnabled),
     );
   }

@@ -17,6 +17,7 @@ void main() {
     await appState.importBackupMap(_sampleBackup());
 
     expect(appState.themeMode, ThemeMode.dark);
+    expect(appState.themeTemplate, 'warm');
     expect(appState.uiScaleFactor, closeTo(1.25, 0.0001));
     expect(appState.useDynamicColor, isFalse);
     expect(appState.preferHardwareDecode, isFalse);
@@ -62,6 +63,7 @@ void main() {
     await reloaded.loadFromStorage();
 
     expect(reloaded.themeMode, ThemeMode.dark);
+    expect(reloaded.themeTemplate, 'warm');
     expect(reloaded.uiScaleFactor, closeTo(1.25, 0.0001));
     expect(reloaded.showHomeLibraryQuickAccess, isFalse);
     expect(reloaded.showHomeRandomRecommendations, isFalse);
@@ -93,6 +95,7 @@ void main() {
     await restored.importBackupJson(exported, passphrase: 'pw-123456');
 
     expect(restored.themeMode, ThemeMode.dark);
+    expect(restored.themeTemplate, 'warm');
     expect(restored.uiScaleFactor, closeTo(1.25, 0.0001));
     expect(restored.useDynamicColor, isFalse);
     expect(restored.autoUpdateEnabled, isTrue);

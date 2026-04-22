@@ -2171,6 +2171,9 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   }) {
     return MobilePlayerTopStatusBar(
       title: _mobileTopTitleText(),
+      onBack: Navigator.of(context).canPop()
+          ? () => unawaited(_requestExitThenPop())
+          : null,
       actions: _buildMobileTopActions(controlsEnabled: controlsEnabled),
     );
   }

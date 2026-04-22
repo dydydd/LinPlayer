@@ -3143,6 +3143,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   }) {
     return MobilePlayerTopStatusBar(
       title: _mobileTopTitleText(),
+      onBack: Navigator.of(context).canPop()
+          ? () => unawaited(_requestExitThenPop())
+          : null,
       actions: _buildMobileTopActions(
         context,
         controlsEnabled: controlsEnabled,

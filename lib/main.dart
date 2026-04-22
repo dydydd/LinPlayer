@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:ui' show PlatformDispatcher;
 
-import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/gestures.dart';
@@ -411,242 +410,230 @@ class _LinPlayerAppState extends State<LinPlayerApp>
                       HomePage(appState: appState),
                     _ => ServerPage(appState: appState),
                   });
-        return DynamicColorBuilder(
-          builder: (lightDynamic, darkDynamic) {
-            final useDynamic = appState.useDynamicColor;
-            return MaterialApp(
-              navigatorKey: _rootNavigatorKey,
-              navigatorObservers: [appRouteObserver],
-              key: ValueKey<String>('nav:${appState.activeServerId ?? 'none'}'),
-              title: appConfig.displayName,
-              debugShowCheckedModeBanner: false,
-              themeMode: appState.themeMode,
-              theme: AppTheme.light(
-                dynamicScheme: useDynamic ? lightDynamic : null,
-                compact: appState.compactMode,
-              ),
-              darkTheme: AppTheme.dark(
-                dynamicScheme: useDynamic ? darkDynamic : null,
-                compact: appState.compactMode,
-              ),
-              builder: (context, child) {
-                if (child == null) return const SizedBox.shrink();
+        return MaterialApp(
+          navigatorKey: _rootNavigatorKey,
+          navigatorObservers: [appRouteObserver],
+          key: ValueKey<String>('nav:${appState.activeServerId ?? 'none'}'),
+          title: appConfig.displayName,
+          debugShowCheckedModeBanner: false,
+          themeMode: appState.themeMode,
+          theme: AppTheme.light(
+            themeTemplate: appState.themeTemplate,
+            compact: appState.compactMode,
+          ),
+          darkTheme: AppTheme.dark(
+            themeTemplate: appState.themeTemplate,
+            compact: appState.compactMode,
+          ),
+          builder: (context, child) {
+            if (child == null) return const SizedBox.shrink();
 
-                final isTv = DeviceType.isTv;
-                final isDesktopPlatform = !kIsWeb &&
-                    (defaultTargetPlatform == TargetPlatform.windows ||
-                        defaultTargetPlatform == TargetPlatform.macOS ||
-                        defaultTargetPlatform == TargetPlatform.linux);
+            final isTv = DeviceType.isTv;
+            final isDesktopPlatform = !kIsWeb &&
+                (defaultTargetPlatform == TargetPlatform.windows ||
+                    defaultTargetPlatform == TargetPlatform.macOS ||
+                    defaultTargetPlatform == TargetPlatform.linux);
 
-                final scale = (UiScaleScope.autoScaleFor(context) *
-                        appState.uiScaleFactor *
-                        (isTv ? 0.75 : 1.0))
-                    .clamp(0.25, 2.0)
-                    .toDouble();
+            final scale = (UiScaleScope.autoScaleFor(context) *
+                    appState.uiScaleFactor *
+                    (isTv ? 0.75 : 1.0))
+                .clamp(0.25, 2.0)
+                .toDouble();
 
-                EdgeInsetsGeometry? scaleInsets(EdgeInsetsGeometry? insets) {
-                  if (insets == null) return null;
-                  final resolved = insets.resolve(Directionality.of(context));
-                  return EdgeInsets.fromLTRB(
-                    resolved.left * scale,
-                    resolved.top * scale,
-                    resolved.right * scale,
-                    resolved.bottom * scale,
-                  );
-                }
+            EdgeInsetsGeometry? scaleInsets(EdgeInsetsGeometry? insets) {
+              if (insets == null) return null;
+              final resolved = insets.resolve(Directionality.of(context));
+              return EdgeInsets.fromLTRB(
+                resolved.left * scale,
+                resolved.top * scale,
+                resolved.right * scale,
+                resolved.bottom * scale,
+              );
+            }
 
-                final theme = Theme.of(context);
-                final scaledTheme = scale == 1.0
-                    ? theme
-                    : theme.copyWith(
-                        iconTheme: theme.iconTheme.copyWith(
-                          size: (theme.iconTheme.size ?? 24) * scale,
-                        ),
-                        appBarTheme: theme.appBarTheme.copyWith(
-                          toolbarHeight: (theme.appBarTheme.toolbarHeight ??
-                                  kToolbarHeight) *
+            final theme = Theme.of(context);
+            final scaledTheme = scale == 1.0
+                ? theme
+                : theme.copyWith(
+                    iconTheme: theme.iconTheme.copyWith(
+                      size: (theme.iconTheme.size ?? 24) * scale,
+                    ),
+                    appBarTheme: theme.appBarTheme.copyWith(
+                      toolbarHeight:
+                          (theme.appBarTheme.toolbarHeight ?? kToolbarHeight) *
                               scale,
-                        ),
-                        navigationBarTheme: theme.navigationBarTheme.copyWith(
-                          height:
-                              (theme.navigationBarTheme.height ?? 80) * scale,
-                        ),
-                        listTileTheme: theme.listTileTheme.copyWith(
-                          contentPadding:
-                              scaleInsets(theme.listTileTheme.contentPadding),
-                          horizontalTitleGap:
-                              theme.listTileTheme.horizontalTitleGap == null
-                                  ? null
-                                  : theme.listTileTheme.horizontalTitleGap! *
-                                      scale,
-                          minVerticalPadding:
-                              theme.listTileTheme.minVerticalPadding == null
-                                  ? null
-                                  : theme.listTileTheme.minVerticalPadding! *
-                                      scale,
-                        ),
-                        chipTheme: theme.chipTheme.copyWith(
-                          padding: scaleInsets(theme.chipTheme.padding),
-                          labelPadding:
-                              scaleInsets(theme.chipTheme.labelPadding),
-                        ),
-                        inputDecorationTheme:
-                            theme.inputDecorationTheme.copyWith(
-                          contentPadding: scaleInsets(
-                              theme.inputDecorationTheme.contentPadding),
-                        ),
-                        dividerTheme: theme.dividerTheme.copyWith(
-                          thickness: theme.dividerTheme.thickness == null
+                    ),
+                    navigationBarTheme: theme.navigationBarTheme.copyWith(
+                      height: (theme.navigationBarTheme.height ?? 80) * scale,
+                    ),
+                    listTileTheme: theme.listTileTheme.copyWith(
+                      contentPadding:
+                          scaleInsets(theme.listTileTheme.contentPadding),
+                      horizontalTitleGap:
+                          theme.listTileTheme.horizontalTitleGap == null
                               ? null
-                              : theme.dividerTheme.thickness! * scale,
-                          space: theme.dividerTheme.space == null
+                              : theme.listTileTheme.horizontalTitleGap! * scale,
+                      minVerticalPadding:
+                          theme.listTileTheme.minVerticalPadding == null
                               ? null
-                              : theme.dividerTheme.space! * scale,
-                          indent: theme.dividerTheme.indent == null
-                              ? null
-                              : theme.dividerTheme.indent! * scale,
-                          endIndent: theme.dividerTheme.endIndent == null
-                              ? null
-                              : theme.dividerTheme.endIndent! * scale,
-                        ),
-                      );
+                              : theme.listTileTheme.minVerticalPadding! * scale,
+                    ),
+                    chipTheme: theme.chipTheme.copyWith(
+                      padding: scaleInsets(theme.chipTheme.padding),
+                      labelPadding: scaleInsets(theme.chipTheme.labelPadding),
+                    ),
+                    inputDecorationTheme: theme.inputDecorationTheme.copyWith(
+                      contentPadding: scaleInsets(
+                          theme.inputDecorationTheme.contentPadding),
+                    ),
+                    dividerTheme: theme.dividerTheme.copyWith(
+                      thickness: theme.dividerTheme.thickness == null
+                          ? null
+                          : theme.dividerTheme.thickness! * scale,
+                      space: theme.dividerTheme.space == null
+                          ? null
+                          : theme.dividerTheme.space! * scale,
+                      indent: theme.dividerTheme.indent == null
+                          ? null
+                          : theme.dividerTheme.indent! * scale,
+                      endIndent: theme.dividerTheme.endIndent == null
+                          ? null
+                          : theme.dividerTheme.endIndent! * scale,
+                    ),
+                  );
 
-                final mediaQuery = MediaQuery.of(context);
-                const probe = 14.0;
-                final userScale = mediaQuery.textScaler.scale(probe) / probe;
-                final baseTextScaler = scale == 1.0
-                    ? mediaQuery.textScaler
-                    : TextScaler.linear(userScale * scale);
-                final textScaler = isDesktopPlatform
-                    ? _SnappedTextScaler(
-                        baseTextScaler,
-                        devicePixelRatio: mediaQuery.devicePixelRatio,
+            final mediaQuery = MediaQuery.of(context);
+            const probe = 14.0;
+            final userScale = mediaQuery.textScaler.scale(probe) / probe;
+            final baseTextScaler = scale == 1.0
+                ? mediaQuery.textScaler
+                : TextScaler.linear(userScale * scale);
+            final textScaler = isDesktopPlatform
+                ? _SnappedTextScaler(
+                    baseTextScaler,
+                    devicePixelRatio: mediaQuery.devicePixelRatio,
+                  )
+                : baseTextScaler;
+
+            final style = scaledTheme.extension<AppStyle>();
+            final hasBackdrop = style != null &&
+                style.backgroundIntensity > 0 &&
+                (style.background != AppBackgroundKind.none ||
+                    style.pattern != AppPatternKind.none);
+
+            final backgroundIntensity = (!hasBackdrop || isTv)
+                ? 0.0
+                : (appState.enableBlurEffects ? 1.0 : 0.65);
+
+            final tvBackgroundEnabled =
+                isTv && appState.tvBackgroundMode != TvBackgroundMode.none;
+            final effectiveTheme = tvBackgroundEnabled
+                ? scaledTheme.copyWith(
+                    scaffoldBackgroundColor: Colors.transparent,
+                  )
+                : scaledTheme;
+
+            final appChild = isTv
+                ? (tvBackgroundEnabled
+                    ? Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          TvBackground(appState: appState),
+                          child,
+                        ],
                       )
-                    : baseTextScaler;
+                    : child)
+                : (backgroundIntensity <= 0
+                    ? child
+                    : Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          GlassBackground(intensity: backgroundIntensity),
+                          child,
+                        ],
+                      ));
 
-                final style = scaledTheme.extension<AppStyle>();
-                final hasBackdrop = style != null &&
-                    style.backgroundIntensity > 0 &&
-                    (style.background != AppBackgroundKind.none ||
-                        style.pattern != AppPatternKind.none);
-
-                final backgroundIntensity = (!hasBackdrop || isTv)
-                    ? 0.0
-                    : (appState.enableBlurEffects ? 1.0 : 0.65);
-
-                final tvBackgroundEnabled =
-                    isTv && appState.tvBackgroundMode != TvBackgroundMode.none;
-                final effectiveTheme = tvBackgroundEnabled
-                    ? scaledTheme.copyWith(
-                        scaffoldBackgroundColor: Colors.transparent,
-                      )
-                    : scaledTheme;
-
-                final appChild = isTv
-                    ? (tvBackgroundEnabled
-                        ? Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              TvBackground(appState: appState),
-                              child,
-                            ],
-                          )
-                        : child)
-                    : (backgroundIntensity <= 0
-                        ? child
-                        : Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              GlassBackground(intensity: backgroundIntensity),
-                              child,
-                            ],
-                          ));
-
-                final shortcutWrappedChild = isDesktopPlatform
-                    ? Shortcuts(
-                        shortcuts: const <ShortcutActivator, Intent>{
-                          SingleActivator(LogicalKeyboardKey.escape):
-                              AppBackIntent(),
-                        },
-                        child: Actions(
-                          actions: <Type, Action<Intent>>{
-                            AppBackIntent: CallbackAction<AppBackIntent>(
-                              onInvoke: (_) {
-                                final nav = _rootNavigatorKey.currentState;
-                                if (nav == null) return null;
-                                unawaited(nav.maybePop());
-                                return null;
-                              },
-                            ),
+            final shortcutWrappedChild = isDesktopPlatform
+                ? Shortcuts(
+                    shortcuts: const <ShortcutActivator, Intent>{
+                      SingleActivator(LogicalKeyboardKey.escape):
+                          AppBackIntent(),
+                    },
+                    child: Actions(
+                      actions: <Type, Action<Intent>>{
+                        AppBackIntent: CallbackAction<AppBackIntent>(
+                          onInvoke: (_) {
+                            final nav = _rootNavigatorKey.currentState;
+                            if (nav == null) return null;
+                            unawaited(nav.maybePop());
+                            return null;
                           },
-                          child: Builder(
-                            builder: (actionContext) => Listener(
-                              behavior: HitTestBehavior.translucent,
-                              onPointerDown: (event) {
-                                final buttons = event.buttons;
-                                final backDown =
-                                    (buttons & kBackMouseButton) != 0;
-                                final forwardDown =
-                                    (buttons & kForwardMouseButton) != 0;
-                                if (!backDown && !forwardDown) return;
+                        ),
+                      },
+                      child: Builder(
+                        builder: (actionContext) => Listener(
+                          behavior: HitTestBehavior.translucent,
+                          onPointerDown: (event) {
+                            final buttons = event.buttons;
+                            final backDown = (buttons & kBackMouseButton) != 0;
+                            final forwardDown =
+                                (buttons & kForwardMouseButton) != 0;
+                            if (!backDown && !forwardDown) return;
 
-                                final shortcuts =
-                                    appState.desktopShortcutBindings;
-                                final invokeContext = FocusManager
-                                        .instance.primaryFocus?.context ??
+                            final shortcuts = appState.desktopShortcutBindings;
+                            final invokeContext =
+                                FocusManager.instance.primaryFocus?.context ??
                                     actionContext;
 
-                                void handle(
-                                  DesktopMouseSideButtonAction action,
-                                ) {
-                                  if (action !=
-                                      DesktopMouseSideButtonAction.appBack) {
-                                    return;
-                                  }
-                                  Actions.invoke(
-                                    invokeContext,
-                                    const AppBackIntent(),
-                                  );
-                                }
+                            void handle(
+                              DesktopMouseSideButtonAction action,
+                            ) {
+                              if (action !=
+                                  DesktopMouseSideButtonAction.appBack) {
+                                return;
+                              }
+                              Actions.invoke(
+                                invokeContext,
+                                const AppBackIntent(),
+                              );
+                            }
 
-                                if (backDown) {
-                                  handle(shortcuts.mouseBackButtonAction);
-                                }
-                                if (forwardDown) {
-                                  handle(shortcuts.mouseForwardButtonAction);
-                                }
-                              },
-                              child: appChild,
-                            ),
-                          ),
-                        ),
-                      )
-                    : appChild;
-
-                return UiScaleScope(
-                  scale: scale,
-                  child: MediaQuery(
-                    data: mediaQuery.copyWith(textScaler: textScaler),
-                    child: Theme(
-                      data: effectiveTheme,
-                      child: AppUpdateAutoChecker(
-                        appState: appState,
-                        child: PluginGovernanceAutoChecker(
-                          child: DefaultTextStyle.merge(
-                            style: const TextStyle(
-                              decoration: TextDecoration.none,
-                            ),
-                            child: shortcutWrappedChild,
-                          ),
+                            if (backDown) {
+                              handle(shortcuts.mouseBackButtonAction);
+                            }
+                            if (forwardDown) {
+                              handle(shortcuts.mouseForwardButtonAction);
+                            }
+                          },
+                          child: appChild,
                         ),
                       ),
                     ),
+                  )
+                : appChild;
+
+            return UiScaleScope(
+              scale: scale,
+              child: MediaQuery(
+                data: mediaQuery.copyWith(textScaler: textScaler),
+                child: Theme(
+                  data: effectiveTheme,
+                  child: AppUpdateAutoChecker(
+                    appState: appState,
+                    child: PluginGovernanceAutoChecker(
+                      child: DefaultTextStyle.merge(
+                        style: const TextStyle(
+                          decoration: TextDecoration.none,
+                        ),
+                        child: shortcutWrappedChild,
+                      ),
+                    ),
                   ),
-                );
-              },
-              home: home,
+                ),
+              ),
             );
           },
+          home: home,
         );
       },
     );

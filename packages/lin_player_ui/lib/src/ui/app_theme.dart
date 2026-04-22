@@ -1,13 +1,74 @@
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform;
+    show TargetPlatform, defaultTargetPlatform, immutable;
 import 'package:flutter/material.dart';
 
 import 'app_style.dart';
 
-/// Centralized theme (light/dark + optional Material You dynamic color).
+@immutable
+class AppThemePalette {
+  const AppThemePalette({
+    required this.id,
+    required this.label,
+    required this.description,
+    required this.primarySeed,
+    required this.secondarySeed,
+  });
+
+  final String id;
+  final String label;
+  final String description;
+  final Color primarySeed;
+  final Color secondarySeed;
+}
+
+/// Centralized theme (light/dark + curated palette presets).
 class AppTheme {
-  static const Color _defaultSeed = Color(0xFFFF6FB1);
-  static const Color _defaultSecondarySeed = Color(0xFF7DD9FF);
+  static const AppThemePalette _defaultPalette = AppThemePalette(
+    id: 'warm',
+    label: '暖樱',
+    description: '柔和粉金，保留当前默认风格。',
+    primarySeed: Color(0xFFFF6FB1),
+    secondarySeed: Color(0xFF7DD9FF),
+  );
+
+  static const List<AppThemePalette> palettes = <AppThemePalette>[
+    _defaultPalette,
+    AppThemePalette(
+      id: 'ocean',
+      label: '海盐',
+      description: '清透蓝绿，层次更干净。',
+      primarySeed: Color(0xFF3D7DFF),
+      secondarySeed: Color(0xFF31C7B4),
+    ),
+    AppThemePalette(
+      id: 'forest',
+      label: '松雾',
+      description: '安静青绿，长时间看更稳。',
+      primarySeed: Color(0xFF2E8B57),
+      secondarySeed: Color(0xFFC89A3D),
+    ),
+    AppThemePalette(
+      id: 'graphite',
+      label: '石墨',
+      description: '冷灰蓝调，暗色模式更克制。',
+      primarySeed: Color(0xFF5B6C92),
+      secondarySeed: Color(0xFF8F7AF7),
+    ),
+  ];
+
+  static AppThemePalette paletteForId(String? id) {
+    final normalized = (id ?? '').trim().toLowerCase();
+    for (final palette in palettes) {
+      if (palette.id == normalized) return palette;
+    }
+    return _defaultPalette;
+  }
+
+  static String normalizeTemplateId(String? id) => paletteForId(id).id;
+
+  static String labelFor(String? id) => paletteForId(id).label;
+
+  static String descriptionFor(String? id) => paletteForId(id).description;
 
   static String? _fontFamily(TargetPlatform platform) {
     return switch (platform) {
@@ -71,12 +132,12 @@ class AppTheme {
 
   static ColorScheme _resolveScheme({
     required Brightness brightness,
-    ColorScheme? dynamicScheme,
     Color? seed,
     Color? secondarySeed,
   }) {
-    final resolvedSeed = seed ?? _defaultSeed;
-    final resolvedSecondarySeed = secondarySeed ?? _defaultSecondarySeed;
+    final palette = _defaultPalette;
+    final resolvedSeed = seed ?? palette.primarySeed;
+    final resolvedSecondarySeed = secondarySeed ?? palette.secondarySeed;
 
     final primaryScheme = ColorScheme.fromSeed(
       seedColor: resolvedSeed,
@@ -87,46 +148,52 @@ class AppTheme {
       brightness: brightness,
     );
 
-    final seeded = primaryScheme.copyWith(
+    return primaryScheme.copyWith(
       secondary: secondaryScheme.primary,
       onSecondary: secondaryScheme.onPrimary,
       secondaryContainer: secondaryScheme.primaryContainer,
       onSecondaryContainer: secondaryScheme.onPrimaryContainer,
+      tertiary: secondaryScheme.tertiary,
+      onTertiary: secondaryScheme.onTertiary,
+      tertiaryContainer: secondaryScheme.tertiaryContainer,
+      onTertiaryContainer: secondaryScheme.onTertiaryContainer,
     );
+  }
 
-    // When Material You / Monet is available, use the full dynamic scheme so
-    // the visible accent colors actually follow the system palette.
-    if (dynamicScheme != null) return dynamicScheme;
-
-    return seeded;
+  static ColorScheme previewScheme({
+    required String paletteId,
+    required Brightness brightness,
+  }) {
+    final palette = paletteForId(paletteId);
+    return _resolveScheme(
+      brightness: brightness,
+      seed: palette.primarySeed,
+      secondarySeed: palette.secondarySeed,
+    );
   }
 
   static ThemeData light({
-    ColorScheme? dynamicScheme,
-    Color? seed,
-    Color? secondarySeed,
+    String themeTemplate = 'warm',
     bool compact = false,
   }) {
+    final palette = paletteForId(themeTemplate);
     final scheme = _resolveScheme(
       brightness: Brightness.light,
-      dynamicScheme: dynamicScheme,
-      seed: seed,
-      secondarySeed: secondarySeed,
+      seed: palette.primarySeed,
+      secondarySeed: palette.secondarySeed,
     );
     return _build(scheme, compact: compact);
   }
 
   static ThemeData dark({
-    ColorScheme? dynamicScheme,
-    Color? seed,
-    Color? secondarySeed,
+    String themeTemplate = 'warm',
     bool compact = false,
   }) {
+    final palette = paletteForId(themeTemplate);
     final scheme = _resolveScheme(
       brightness: Brightness.dark,
-      dynamicScheme: dynamicScheme,
-      seed: seed,
-      secondarySeed: secondarySeed,
+      seed: palette.primarySeed,
+      secondarySeed: palette.secondarySeed,
     );
     return _build(scheme, compact: compact);
   }

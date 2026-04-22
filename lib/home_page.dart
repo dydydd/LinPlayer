@@ -506,8 +506,8 @@ class _HomePageState extends State<HomePage> {
         listenable: widget.appState,
         themeMode: () => widget.appState.themeMode,
         setThemeMode: widget.appState.setThemeMode,
-        useDynamicColor: () => widget.appState.useDynamicColor,
-        setUseDynamicColor: widget.appState.setUseDynamicColor,
+        themeTemplate: () => widget.appState.themeTemplate,
+        setThemeTemplate: widget.appState.setThemeTemplate,
       );
 
   Future<void> _openServerPage() async {

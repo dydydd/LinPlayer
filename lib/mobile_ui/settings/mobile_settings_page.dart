@@ -155,6 +155,27 @@ class _MobileSettingsPageState extends State<MobileSettingsPage> {
     };
   }
 
+  IconData _themeModeIcon(ThemeMode mode) {
+    return switch (mode) {
+      ThemeMode.system => Icons.brightness_auto_rounded,
+      ThemeMode.light => Icons.light_mode_rounded,
+      ThemeMode.dark => Icons.dark_mode_rounded,
+    };
+  }
+
+  String _themeTemplateLabel(String template) {
+    return AppTheme.labelFor(template);
+  }
+
+  String _appearanceSummaryText(AppState appState) {
+    final palette = _themeTemplateLabel(appState.themeTemplate);
+    final blur = appState.enableBlurEffects
+        ? '\u6a21\u7cca\u5df2\u5f00'
+        : '\u6a21\u7cca\u5df2\u5173';
+    return '${_themeModeLabel(appState.themeMode)} 路 $palette 路 $blur';
+  }
+
+  // ignore: unused_element
   String _appearanceSummary(AppState appState) {
     final monet = appState.useDynamicColor
         ? '\u83ab\u5948\u53d6\u8272\u5df2\u5f00'
@@ -735,142 +756,115 @@ class _MobileSettingsPageState extends State<MobileSettingsPage> {
     );
   }
 
-  Widget _buildAppearanceSection(BuildContext context, AppState appState) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final monetEnabled = appState.useDynamicColor;
-    final previewColors = <Color>[
-      colorScheme.primary,
-      colorScheme.secondary,
-      colorScheme.tertiary,
-      colorScheme.surfaceTint,
-    ];
+  Widget _buildCuratedAppearanceSection(
+    BuildContext context,
+    AppState appState,
+  ) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final brightness = theme.brightness;
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            '\u4e3b\u9898\u6a21\u5f0f',
-            style: Theme.of(context)
-                .textTheme
-                .titleSmall
-                ?.copyWith(fontWeight: FontWeight.w700),
+        Text(
+          '\u4e3b\u9898\u6a21\u5f0f',
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w700,
           ),
         ),
         const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: ThemeMode.values
-              .map(
-                (mode) => ChoiceChip(
-                  label: Text(_themeModeLabel(mode)),
-                  selected: appState.themeMode == mode,
-                  onSelected: (_) => appState.setThemeMode(mode),
-                ),
-              )
-              .toList(growable: false),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final itemWidth = (constraints.maxWidth - 16) / 3;
+            return Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: ThemeMode.values
+                  .map(
+                    (mode) => SizedBox(
+                      width: itemWidth,
+                      child: _ThemeModeCard(
+                        label: _themeModeLabel(mode),
+                        icon: _themeModeIcon(mode),
+                        selected: appState.themeMode == mode,
+                        onTap: () => appState.setThemeMode(mode),
+                      ),
+                    ),
+                  )
+                  .toList(growable: false),
+            );
+          },
         ),
-        const Divider(height: 24),
+        const SizedBox(height: 16),
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            color: colorScheme.surface.withValues(alpha: 0.42),
+            borderRadius: BorderRadius.circular(20),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                colorScheme.primary.withValues(alpha: 0.08),
+                colorScheme.secondary.withValues(alpha: 0.06),
+              ],
+            ),
             border: Border.all(
-              color: colorScheme.outlineVariant.withValues(alpha: 0.75),
+              color: colorScheme.outlineVariant.withValues(alpha: 0.72),
             ),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      color: colorScheme.primary.withValues(alpha: 0.12),
-                    ),
-                    child: Icon(
-                      Icons.color_lens_outlined,
-                      color: colorScheme.primary,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '\u83ab\u5948\u53d6\u8272\u9762\u677f',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleSmall
-                              ?.copyWith(fontWeight: FontWeight.w700),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '\u5f00\u542f\u540e\u4f1a\u5c1d\u8bd5\u8ddf\u968f\u7cfb\u7edf\u58c1\u7eb8\u53d6\u8272\uff0cAndroid 12+ \u751f\u6548\uff0c\u5176\u4ed6\u5e73\u53f0\u4f1a\u81ea\u52a8\u56de\u9000\u3002',
-                          style:
-                              Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    height: 1.35,
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Switch.adaptive(
-                    value: monetEnabled,
-                    onChanged: (value) => appState.setUseDynamicColor(value),
-                  ),
-                ],
+              Text(
+                '\u914d\u8272\u65b9\u6848',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '\u4f7f\u7528\u56fa\u5b9a\u914d\u8272\uff0ciOS \u548c Android \u90fd\u4f1a\u76f4\u63a5\u5957\u7528\u540c\u4e00\u5957\u4e3b\u9898\u3002',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  height: 1.35,
+                  color: colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 12),
-              Text(
-                '\u5f53\u524d\u63d0\u53d6\u914d\u8272\u9884\u89c8',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: previewColors
-                    .asMap()
-                    .entries
-                    .map(
-                      (entry) => _MonetPreviewSwatch(
-                        label: switch (entry.key) {
-                          0 => '\u4e3b\u8272',
-                          1 => '\u6b21\u8272',
-                          2 => '\u5f3a\u8c03',
-                          _ => '\u67d3\u8272',
-                        },
-                        color: entry.value,
-                      ),
-                    )
-                    .toList(growable: false),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                monetEnabled
-                    ? '\u5f53\u524d\u4f18\u5148\u4f7f\u7528\u7cfb\u7edf\u52a8\u6001\u914d\u8272\u3002'
-                    : '\u5f53\u524d\u4f7f\u7528\u5e94\u7528\u5185\u7f6e\u914d\u8272\u3002',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final isTwoColumn = constraints.maxWidth >= 360;
+                  final itemWidth = isTwoColumn
+                      ? (constraints.maxWidth - 12) / 2
+                      : constraints.maxWidth;
+                  return Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: AppTheme.palettes
+                        .map(
+                          (palette) => SizedBox(
+                            width: itemWidth,
+                            child: _ThemePaletteCard(
+                              palette: palette,
+                              preview: AppTheme.previewScheme(
+                                paletteId: palette.id,
+                                brightness: brightness,
+                              ),
+                              selected: appState.themeTemplate == palette.id,
+                              onTap: () =>
+                                  appState.setThemeTemplate(palette.id),
+                            ),
+                          ),
+                        )
+                        .toList(growable: false),
+                  );
+                },
               ),
             ],
           ),
         ),
-        const Divider(height: 1),
+        const Divider(height: 24),
         SwitchListTile(
           value: appState.enableBlurEffects,
           onChanged: (value) => appState.setEnableBlurEffects(value),
@@ -878,7 +872,8 @@ class _MobileSettingsPageState extends State<MobileSettingsPage> {
           secondary: const Icon(Icons.blur_on_outlined),
           title: const Text('\u5f00\u542f\u6a21\u7cca\u6548\u679c'),
           subtitle: const Text(
-              '\u5173\u95ed\u540e\u8bbe\u7f6e\u9875\u548c\u90e8\u5206\u5361\u7247\u4f1a\u66f4\u7b80\u6d01'),
+            '\u5173\u95ed\u540e\u8bbe\u7f6e\u9875\u548c\u90e8\u5206\u5361\u7247\u4f1a\u66f4\u7b80\u6d01',
+          ),
         ),
         const Divider(height: 1),
         SwitchListTile(
@@ -1732,8 +1727,8 @@ class _MobileSettingsPageState extends State<MobileSettingsPage> {
                 section: _MobileSettingsSection.appearance,
                 icon: Icons.palette_outlined,
                 title: '\u5916\u89c2\u8bbe\u7f6e',
-                subtitle: _appearanceSummary(appState),
-                child: _buildAppearanceSection(context, appState),
+                subtitle: _appearanceSummaryText(appState),
+                child: _buildCuratedAppearanceSection(context, appState),
               ),
               const SizedBox(height: 12),
               _buildSectionCard(
@@ -1866,47 +1861,177 @@ class _SliderTile extends StatelessWidget {
   }
 }
 
-class _MonetPreviewSwatch extends StatelessWidget {
-  const _MonetPreviewSwatch({
+class _ThemeModeCard extends StatelessWidget {
+  const _ThemeModeCard({
     required this.label,
-    required this.color,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
   });
 
   final String label;
-  final Color color;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 34,
-          height: 34,
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final foreground =
+        selected ? colorScheme.primary : colorScheme.onSurfaceVariant;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          constraints: const BoxConstraints(minHeight: 84),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
           decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: color,
+            borderRadius: BorderRadius.circular(18),
+            color: selected
+                ? colorScheme.primary.withValues(alpha: 0.12)
+                : colorScheme.surface.withValues(alpha: 0.52),
             border: Border.all(
-              color: colorScheme.outlineVariant.withValues(alpha: 0.7),
+              color: selected
+                  ? colorScheme.primary.withValues(alpha: 0.62)
+                  : colorScheme.outlineVariant.withValues(alpha: 0.66),
             ),
-            boxShadow: [
-              BoxShadow(
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-                color: color.withValues(alpha: 0.22),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: foreground),
+              const SizedBox(height: 8),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: foreground,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 6),
-        Text(
-          label,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
+      ),
+    );
+  }
+}
+
+class _ThemePaletteCard extends StatelessWidget {
+  const _ThemePaletteCard({
+    required this.palette,
+    required this.preview,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final AppThemePalette palette;
+  final ColorScheme preview;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final swatches = <Color>[
+      preview.primary,
+      preview.secondary,
+      preview.tertiary,
+    ];
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                preview.primary.withValues(alpha: selected ? 0.22 : 0.16),
+                preview.secondary.withValues(alpha: selected ? 0.16 : 0.1),
+              ],
+            ),
+            border: Border.all(
+              color: selected
+                  ? preview.primary.withValues(alpha: 0.72)
+                  : colorScheme.outlineVariant.withValues(alpha: 0.64),
+            ),
+            boxShadow: [
+              BoxShadow(
+                blurRadius: selected ? 18 : 10,
+                offset: const Offset(0, 8),
+                color: preview.primary.withValues(
+                  alpha: selected ? 0.16 : 0.08,
+                ),
               ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      palette.label,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  if (selected)
+                    Icon(
+                      Icons.check_circle_rounded,
+                      size: 18,
+                      color: preview.primary,
+                    ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                children: swatches
+                    .map(
+                      (color) => Container(
+                        width: 16,
+                        height: 16,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: color,
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.35),
+                          ),
+                        ),
+                      ),
+                    )
+                    .toList(growable: false),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                palette.description,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  height: 1.35,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
         ),
-      ],
+      ),
     );
   }
 }

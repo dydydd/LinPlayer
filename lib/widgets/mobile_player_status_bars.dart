@@ -99,15 +99,20 @@ class MobilePlayerTopStatusBar extends StatelessWidget {
     super.key,
     required this.title,
     this.actions = const <Widget>[],
+    this.onBack,
+    this.backTooltip = '返回',
   });
 
   final String title;
   final List<Widget> actions;
+  final VoidCallback? onBack;
+  final String backTooltip;
 
   @override
   Widget build(BuildContext context) {
+    final hasBackButton = onBack != null;
     final actionMaxWidth = math.min(
-      MediaQuery.sizeOf(context).width * 0.58,
+      MediaQuery.sizeOf(context).width * (hasBackButton ? 0.5 : 0.58),
       360.0,
     );
 
@@ -122,9 +127,17 @@ class MobilePlayerTopStatusBar extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (hasBackButton) ...[
+              _MobilePlayerTopIconButton(
+                icon: Icons.arrow_back_rounded,
+                tooltip: backTooltip,
+                onTap: onBack,
+              ),
+              const SizedBox(width: 10),
+            ],
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.only(top: 6),
+                padding: EdgeInsets.only(top: hasBackButton ? 4 : 6),
                 child: Text(
                   title,
                   maxLines: 1,
@@ -160,6 +173,57 @@ class MobilePlayerTopStatusBar extends StatelessWidget {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MobilePlayerTopIconButton extends StatelessWidget {
+  const _MobilePlayerTopIconButton({
+    required this.icon,
+    required this.tooltip,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: tooltip,
+      child: Tooltip(
+        message: tooltip,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            customBorder: const CircleBorder(),
+            child: Ink(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.black.withValues(alpha: enabled ? 0.24 : 0.12),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: enabled ? 0.18 : 0.08),
+                ),
+              ),
+              child: Center(
+                child: Icon(
+                  icon,
+                  size: 20,
+                  color: enabled ? Colors.white : Colors.white38,
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

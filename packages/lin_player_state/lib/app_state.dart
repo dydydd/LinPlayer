@@ -130,6 +130,7 @@ class AppState extends ChangeNotifier {
   static const _kServersKey = 'servers_v1';
   static const _kActiveServerIdKey = 'activeServerId_v1';
   static const _kThemeModeKey = 'themeMode_v1';
+  static const _kThemeTemplateKey = 'themeTemplate_v1';
   static const _kUiScaleFactorKey = 'uiScaleFactor_v1';
   static const _kDesktopUiLanguageKey = 'desktopUiLanguage_v1';
   static const _kDynamicColorKey = 'dynamicColor_v1';
@@ -261,9 +262,10 @@ class AppState extends ChangeNotifier {
   int _continueWatchingRequestId = 0;
   late final String _deviceId = _randomId();
   ThemeMode _themeMode = ThemeMode.system;
+  String _themeTemplate = 'warm';
   double _uiScaleFactor = 1.0;
   String _desktopUiLanguage = 'zhCn';
-  bool _useDynamicColor = true;
+  bool _useDynamicColor = false;
   bool _compactMode = _defaultCompactModeForPlatform();
   bool _preferHardwareDecode = true;
   PlayerCore _playerCore = defaultPlayerCoreForPlatform();
@@ -809,6 +811,7 @@ class AppState extends ChangeNotifier {
   DateTime? get homeCacheFetchedAt => _homeFetchedAt;
   bool get hasFreshHomeCache => isHomeCacheFresh();
   ThemeMode get themeMode => _themeMode;
+  String get themeTemplate => _themeTemplate;
   double get uiScaleFactor => _uiScaleFactor;
   String get desktopUiLanguage => _desktopUiLanguage;
   bool get useDynamicColor => _useDynamicColor;
@@ -1010,12 +1013,15 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
 
     _themeMode = _decodeThemeMode(prefs.getString(_kThemeModeKey));
+    _themeTemplate = _normalizeThemeTemplate(
+      prefs.getString(_kThemeTemplateKey),
+    );
     _uiScaleFactor =
         ((prefs.getDouble(_kUiScaleFactorKey) ?? 1.0).clamp(0.25, 2.0))
             .toDouble();
     _desktopUiLanguage =
         _normalizeDesktopUiLanguage(prefs.getString(_kDesktopUiLanguageKey));
-    _useDynamicColor = prefs.getBool(_kDynamicColorKey) ?? true;
+    _useDynamicColor = prefs.getBool(_kDynamicColorKey) ?? false;
     _compactMode =
         prefs.getBool(_kCompactModeKey) ?? _defaultCompactModeForPlatform();
     _preferHardwareDecode = prefs.getBool(_kPreferHardwareDecodeKey) ?? true;
@@ -1333,6 +1339,7 @@ class AppState extends ChangeNotifier {
       'createdAt': DateTime.now().toUtc().toIso8601String(),
       'data': {
         'themeMode': _encodeThemeMode(_themeMode),
+        'themeTemplate': _themeTemplate,
         'uiScaleFactor': _uiScaleFactor,
         'desktopUiLanguage': _desktopUiLanguage,
         'useDynamicColor': _useDynamicColor,
@@ -1662,12 +1669,14 @@ class AppState extends ChangeNotifier {
         _coerceStringKeyedMap(interactionMap['doubleTap']) ?? const {};
 
     final nextThemeMode = _decodeThemeMode(data['themeMode']?.toString());
+    final nextThemeTemplate =
+        _normalizeThemeTemplate(data['themeTemplate']?.toString());
     final nextUiScale = _readDouble(data['uiScaleFactor'], fallback: 1.0)
         .clamp(0.25, 2.0)
         .toDouble();
     final nextDesktopUiLanguage =
         _normalizeDesktopUiLanguage(data['desktopUiLanguage']?.toString());
-    final nextUseDynamic = _readBool(data['useDynamicColor'], fallback: true);
+    final nextUseDynamic = _readBool(data['useDynamicColor'], fallback: false);
     final nextCompactMode = _readBool(
       data['compactMode'],
       fallback: _defaultCompactModeForPlatform(),
@@ -1912,6 +1921,7 @@ class AppState extends ChangeNotifier {
     }
 
     _themeMode = nextThemeMode;
+    _themeTemplate = nextThemeTemplate;
     _uiScaleFactor = nextUiScale;
     _desktopUiLanguage = nextDesktopUiLanguage;
     _useDynamicColor = nextUseDynamic;
@@ -2029,6 +2039,7 @@ class AppState extends ChangeNotifier {
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kThemeModeKey, _encodeThemeMode(_themeMode));
+    await prefs.setString(_kThemeTemplateKey, _themeTemplate);
     await prefs.setDouble(_kUiScaleFactorKey, _uiScaleFactor);
     await prefs.setString(_kDesktopUiLanguageKey, _desktopUiLanguage);
     await prefs.setBool(_kDynamicColorKey, _useDynamicColor);
@@ -4210,6 +4221,15 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setThemeTemplate(String template) async {
+    final next = _normalizeThemeTemplate(template);
+    if (_themeTemplate == next) return;
+    _themeTemplate = next;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kThemeTemplateKey, next);
+    notifyListeners();
+  }
+
   Future<void> applyDesktopThemeFromSystemIfNeeded({
     required Brightness systemBrightness,
   }) async {
@@ -5257,6 +5277,18 @@ class AppState extends ChangeNotifier {
       case ThemeMode.system:
         return 'system';
     }
+  }
+
+  static String _normalizeThemeTemplate(String? raw) {
+    const supported = <String>{
+      'warm',
+      'ocean',
+      'forest',
+      'graphite',
+    };
+    final normalized = (raw ?? '').trim().toLowerCase();
+    if (supported.contains(normalized)) return normalized;
+    return 'warm';
   }
 
   static String _normalizeDesktopUiLanguage(String? value) {
