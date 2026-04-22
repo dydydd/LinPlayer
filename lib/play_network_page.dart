@@ -845,29 +845,19 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       _overrideStartPosition = null;
       _overrideResumeImmediately = false;
       _skipAutoResumeOnce = false;
+      Duration? resumeTarget;
       if (!skipAutoResume && start != null && start > Duration.zero) {
         final target = _safeSeekTarget(start, _playerService.duration);
-        _deferProgressReporting = true;
-        if (resumeImmediately) {
-          await _playerService.seek(target, flushBuffer: _flushBufferOnSeek);
-          final applied = _playerService.position;
-          _lastPosition = applied;
-          _syncDanmakuCursor(applied);
-
-          final ok = (applied - target).inMilliseconds.abs() <= 1000;
-          if (ok) {
-            _deferProgressReporting = false;
-            if (applied > Duration.zero) {
-              _startOverHintPosition = applied;
-              _showStartOverHint = true;
-            }
+        if (target > Duration.zero) {
+          _deferProgressReporting = true;
+          if (resumeImmediately) {
+            resumeTarget = target;
           } else {
             _resumeHintPosition = target;
             _showResumeHint = true;
           }
         } else {
-          _resumeHintPosition = target;
-          _showResumeHint = true;
+          _deferProgressReporting = false;
         }
       }
       _tracks = _playerService.player.state.tracks;
@@ -958,6 +948,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         setState(() => _playError = message);
       });
       await _ensurePlaybackAutoStarts();
+      if (resumeTarget != null) {
+        await _resumeToPositionAfterStart(resumeTarget);
+      }
       await _applyMobileLoopModeToPlayer();
       unawaited(
         _maybeApplyLateServerResume(
@@ -3199,28 +3192,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         baselineStart <= Duration.zero &&
         _playerService.position <= _kLateResumeAutoSeekGrace;
     if (canAutoSeekLate) {
-      await _resumePlaybackAfterSwitch(target);
-      if (!mounted || initSession != _initSession) return;
-      if (_playError != null || !_playerService.isInitialized) return;
-      final applied = _playerService.position;
-      _lastPosition = applied;
-      _syncDanmakuCursor(applied);
-      if (_resumeCloseEnough(applied, target)) {
-        final shouldStartReporting = _deferProgressReporting;
-        _deferProgressReporting = false;
-        if (applied > Duration.zero) {
-          _startOverHintPosition = applied;
-          _showStartOverHint = true;
-          _startStartOverHintTimer();
-        }
-        if (shouldStartReporting) {
-          // ignore: unawaited_futures
-          _reportPlaybackStartBestEffort();
-          _maybeReportPlaybackProgress(_lastPosition, force: true);
-        }
-        if (mounted) setState(() {});
-        return;
-      }
+      await _resumeToPositionAfterStart(target);
+      return;
     }
 
     _resumeHintTimer?.cancel();
@@ -3898,13 +3871,46 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     return false;
   }
 
-  Future<void> _resumePlaybackAfterSwitch(Duration resumePos) async {
-    if (resumePos <= Duration.zero) return;
-    if (!_playerService.isInitialized || _playError != null) return;
+  Future<void> _resumeToPositionAfterStart(Duration target) async {
+    final ok = await _resumePlaybackAfterSwitch(target);
+    if (!mounted || _playError != null || !_playerService.isInitialized) return;
+
+    final applied = _playerService.position;
+    _lastPosition = applied;
+    _syncDanmakuCursor(applied);
+
+    if (ok && _resumeCloseEnough(applied, target)) {
+      final shouldStartReporting = _deferProgressReporting;
+      _deferProgressReporting = false;
+      if (applied > Duration.zero) {
+        _startOverHintPosition = applied;
+        _showStartOverHint = true;
+        _startStartOverHintTimer();
+      }
+      if (shouldStartReporting) {
+        // ignore: unawaited_futures
+        _reportPlaybackStartBestEffort();
+        _maybeReportPlaybackProgress(_lastPosition, force: true);
+      }
+      if (mounted) setState(() {});
+      return;
+    }
+
+    _resumeHintTimer?.cancel();
+    _resumeHintTimer = null;
+    _resumeHintPosition = target;
+    _showResumeHint = true;
+    _startResumeHintTimer();
+    if (mounted) setState(() {});
+  }
+
+  Future<bool> _resumePlaybackAfterSwitch(Duration resumePos) async {
+    if (resumePos <= Duration.zero) return false;
+    if (!_playerService.isInitialized || _playError != null) return false;
 
     final hasVideo =
         await _waitForVideoSignal(timeout: const Duration(seconds: 2));
-    if (!hasVideo) return;
+    if (!hasVideo) return false;
 
     final deadline = DateTime.now().add(const Duration(seconds: 2));
     while (mounted &&
@@ -3912,27 +3918,58 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         DateTime.now().isBefore(deadline)) {
       await Future<void>.delayed(const Duration(milliseconds: 120));
     }
-    if (!mounted || !_playerService.isInitialized || _playError != null) return;
+    if (!mounted || !_playerService.isInitialized || _playError != null) {
+      return false;
+    }
 
     final total = _playerService.duration;
-    if (total <= Duration.zero) return;
+    if (total <= Duration.zero) return false;
     final target = _safeSeekTarget(resumePos, total);
-    if (target <= Duration.zero) return;
+    if (target <= Duration.zero) return false;
 
-    await _playerService.seek(
-      target,
-      flushBuffer: _flushBufferOnSeek,
-    );
-    if (!mounted) return;
+    // MPV on mobile can ignore seeks that land before the stream is truly ready.
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        await _playerService.seek(
+          target,
+          flushBuffer: _flushBufferOnSeek,
+        );
+      } catch (_) {}
 
-    _resumeHintTimer?.cancel();
-    _resumeHintTimer = null;
-    setState(() {
-      _lastPosition = target;
-      _resumeHintPosition = null;
-      _showResumeHint = false;
-    });
-    _syncDanmakuCursor(target);
+      final verifyDeadline = DateTime.now().add(
+        Duration(milliseconds: attempt == 0 ? 220 : 420),
+      );
+      while (mounted && DateTime.now().isBefore(verifyDeadline)) {
+        if (_playError != null || !_playerService.isInitialized) {
+          return false;
+        }
+        final applied = _playerService.position;
+        if (_resumeCloseEnough(applied, target)) {
+          if (!mounted) return false;
+          _resumeHintTimer?.cancel();
+          _resumeHintTimer = null;
+          setState(() {
+            _lastPosition = applied;
+            _resumeHintPosition = null;
+            _showResumeHint = false;
+          });
+          _syncDanmakuCursor(applied);
+          return true;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+      }
+
+      if (!_playerService.isPlaying) {
+        try {
+          await _playerService.play();
+        } catch (_) {}
+      }
+    }
+
+    final applied = _playerService.position;
+    _lastPosition = applied;
+    _syncDanmakuCursor(applied);
+    return _resumeCloseEnough(applied, target);
   }
 
   void _startResumeHintTimer() {
