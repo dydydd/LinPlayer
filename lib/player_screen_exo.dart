@@ -129,6 +129,15 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   MobilePlaybackLoopMode _mobileLoopMode = MobilePlaybackLoopMode.none;
   bool _mobilePlaybackEndHandled = false;
   Timer? _mobileSpeedAdjustTimer;
+  Future<List<vp_platform.VideoAudioTrack>>? _mobileAudioTracksFuture;
+  List<vp_platform.VideoAudioTrack> _mobileAudioTracks =
+      const <vp_platform.VideoAudioTrack>[];
+  Future<List<vp_android.ExoPlayerSubtitleTrackData>>?
+      _mobileSubtitleTracksFuture;
+  List<vp_android.ExoPlayerSubtitleTrackData> _mobileSubtitleTracks =
+      const <vp_android.ExoPlayerSubtitleTrackData>[];
+  final ScrollController _mobileAudioScrollController = ScrollController();
+  final ScrollController _mobileSubtitleScrollController = ScrollController();
 
   static const Duration _gestureOverlayAutoHideDelay =
       Duration(milliseconds: 800);
@@ -239,6 +248,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     // ignore: unawaited_futures
     _controller?.dispose();
     _controller = null;
+    _invalidateMobileTrackPanelState(resetScroll: true);
   }
 
   Future<void> _switchToPlayerCore(PlayerCore core) async {
@@ -315,6 +325,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     // ignore: unawaited_futures
     _controller?.dispose();
     _controller = null;
+    _mobileAudioScrollController.dispose();
+    _mobileSubtitleScrollController.dispose();
     _tvSurfaceFocusNode.dispose();
     _tvPlayPauseFocusNode.dispose();
     super.dispose();
@@ -337,6 +349,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
 
     final controller = _controller;
     _controller = null;
+    _invalidateMobileTrackPanelState(resetScroll: true);
     if (mounted) {
       setState(() {
         _buffering = false;
@@ -1954,7 +1967,152 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
 
   bool get _mobileOverlayVisible => _mobilePanel != null;
 
+  Future<List<vp_platform.VideoAudioTrack>> _ensureMobileAudioTracksLoaded({
+    bool forceRefresh = false,
+  }) {
+    if (!forceRefresh && _mobileAudioTracksFuture != null) {
+      return _mobileAudioTracksFuture!;
+    }
+    final future = _loadMobileAudioTracks().then((tracks) {
+      _cacheMobileAudioTracks(tracks);
+      return _mobileAudioTracks;
+    }, onError: (Object error, StackTrace stackTrace) {
+      _mobileAudioTracksFuture = null;
+      throw error;
+    });
+    _mobileAudioTracksFuture = future;
+    return future;
+  }
+
+  Future<List<vp_android.ExoPlayerSubtitleTrackData>>
+      _ensureMobileSubtitleTracksLoaded({
+    bool forceRefresh = false,
+  }) {
+    if (!forceRefresh && _mobileSubtitleTracksFuture != null) {
+      return _mobileSubtitleTracksFuture!;
+    }
+    final future = _loadMobileSubtitleTracks().then((tracks) {
+      _cacheMobileSubtitleTracks(tracks);
+      return _mobileSubtitleTracks;
+    }, onError: (Object error, StackTrace stackTrace) {
+      _mobileSubtitleTracksFuture = null;
+      throw error;
+    });
+    _mobileSubtitleTracksFuture = future;
+    return future;
+  }
+
+  void _cacheMobileAudioTracks(List<vp_platform.VideoAudioTrack> tracks) {
+    final cached = List<vp_platform.VideoAudioTrack>.unmodifiable(tracks);
+    _mobileAudioTracks = cached;
+    _mobileAudioTracksFuture =
+        SynchronousFuture<List<vp_platform.VideoAudioTrack>>(cached);
+  }
+
+  void _cacheMobileSubtitleTracks(
+    List<vp_android.ExoPlayerSubtitleTrackData> tracks,
+  ) {
+    final cached =
+        List<vp_android.ExoPlayerSubtitleTrackData>.unmodifiable(tracks);
+    _mobileSubtitleTracks = cached;
+    _mobileSubtitleTracksFuture = SynchronousFuture<
+        List<vp_android.ExoPlayerSubtitleTrackData>>(cached);
+  }
+
+  void _invalidateMobileTrackPanelState({bool resetScroll = false}) {
+    _mobileAudioTracksFuture = null;
+    _mobileAudioTracks = const <vp_platform.VideoAudioTrack>[];
+    _mobileSubtitleTracksFuture = null;
+    _mobileSubtitleTracks = const <vp_android.ExoPlayerSubtitleTrackData>[];
+    if (resetScroll) {
+      if (_mobileAudioScrollController.hasClients) {
+        _mobileAudioScrollController.jumpTo(0);
+      }
+      if (_mobileSubtitleScrollController.hasClients) {
+        _mobileSubtitleScrollController.jumpTo(0);
+      }
+    }
+  }
+
+  void _primeMobileTrackPanel(_MobilePlayerPanel panel) {
+    switch (panel) {
+      case _MobilePlayerPanel.audio:
+        _ensureMobileAudioTracksLoaded();
+        break;
+      case _MobilePlayerPanel.subtitle:
+        _ensureMobileSubtitleTracksLoaded();
+        break;
+      case _MobilePlayerPanel.playlist:
+      case _MobilePlayerPanel.core:
+      case _MobilePlayerPanel.moreOptions:
+      case _MobilePlayerPanel.danmaku:
+      case _MobilePlayerPanel.speed:
+        break;
+    }
+  }
+
+  void _optimisticallySelectMobileAudioTrack(String trackId) {
+    if (_mobileAudioTracks.isEmpty) return;
+    _cacheMobileAudioTracks(
+      _mobileAudioTracks
+          .map(
+            (track) => vp_platform.VideoAudioTrack(
+              id: track.id,
+              label: track.label,
+              language: track.language,
+              isSelected: track.id == trackId,
+              bitrate: track.bitrate,
+              sampleRate: track.sampleRate,
+              channelCount: track.channelCount,
+              codec: track.codec,
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
+
+  void _optimisticallySelectMobileSubtitleTrack({
+    int? groupIndex,
+    int? trackIndex,
+  }) {
+    if (_mobileSubtitleTracks.isEmpty) return;
+    _cacheMobileSubtitleTracks(
+      _mobileSubtitleTracks
+          .map(
+            (track) => vp_android.ExoPlayerSubtitleTrackData(
+              groupIndex: track.groupIndex,
+              trackIndex: track.trackIndex,
+              label: track.label,
+              language: track.language,
+              isSelected: groupIndex != null &&
+                  track.groupIndex == groupIndex &&
+                  track.trackIndex == trackIndex,
+              codec: track.codec,
+              mimeType: track.mimeType,
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
+
+  Future<void> _refreshMobileAudioTracks() async {
+    try {
+      final tracks = await _loadMobileAudioTracks();
+      if (!mounted) return;
+      setState(() => _cacheMobileAudioTracks(tracks));
+    } catch (_) {}
+  }
+
+  Future<void> _refreshMobileSubtitleTracks() async {
+    try {
+      final tracks = await _loadMobileSubtitleTracks();
+      if (!mounted) return;
+      setState(() => _cacheMobileSubtitleTracks(tracks));
+    } catch (_) {}
+  }
+
   void _openMobilePanel(_MobilePlayerPanel panel) {
+    _primeMobileTrackPanel(panel);
     _showControls(scheduleHide: false);
     setState(() => _mobilePanel = panel);
   }
@@ -2388,18 +2546,21 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     }
 
     return FutureBuilder<List<vp_platform.VideoAudioTrack>>(
-      future: _loadMobileAudioTracks(),
+      future: _ensureMobileAudioTracksLoaded(),
+      initialData: _mobileAudioTracks,
       builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
+        final tracks = snapshot.data ?? const <vp_platform.VideoAudioTrack>[];
+        if (snapshot.connectionState != ConnectionState.done && tracks.isEmpty) {
           return const Center(child: CircularProgressIndicator());
         }
-        final tracks = snapshot.data ?? const <vp_platform.VideoAudioTrack>[];
         if (tracks.isEmpty) {
           return const Center(
             child: Text('暂无音轨', style: TextStyle(color: Colors.white70)),
           );
         }
         return ListView(
+          key: const PageStorageKey<String>('exo_local_mobile_audio_tracks'),
+          controller: _mobileAudioScrollController,
           padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
           children: [
             for (final track in tracks) ...[
@@ -2422,7 +2583,10 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                             track.id,
                           );
                           if (!mounted) return;
-                          setState(() {});
+                          setState(
+                            () => _optimisticallySelectMobileAudioTrack(track.id),
+                          );
+                          unawaited(_refreshMobileAudioTracks());
                         }());
                       },
               ),
@@ -2453,14 +2617,17 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     }
 
     return FutureBuilder<List<vp_android.ExoPlayerSubtitleTrackData>>(
-      future: _loadMobileSubtitleTracks(),
+      future: _ensureMobileSubtitleTracksLoaded(),
+      initialData: _mobileSubtitleTracks,
       builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
-        }
         final tracks =
             snapshot.data ?? const <vp_android.ExoPlayerSubtitleTrackData>[];
+        if (snapshot.connectionState != ConnectionState.done && tracks.isEmpty) {
+          return const Center(child: CircularProgressIndicator());
+        }
         return ListView(
+          key: const PageStorageKey<String>('exo_local_mobile_subtitle_tracks'),
+          controller: _mobileSubtitleScrollController,
           padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
           children: [
             MobilePlayerOptionTile(
@@ -2479,7 +2646,10 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                         );
                         await api.deselectSubtitleTrack();
                         if (!mounted) return;
-                        setState(() {});
+                        setState(
+                          () => _optimisticallySelectMobileSubtitleTrack(),
+                        );
+                        unawaited(_refreshMobileSubtitleTracks());
                       }());
                     },
             ),
@@ -2506,7 +2676,13 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                             track.trackIndex,
                           );
                           if (!mounted) return;
-                          setState(() {});
+                          setState(
+                            () => _optimisticallySelectMobileSubtitleTrack(
+                              groupIndex: track.groupIndex,
+                              trackIndex: track.trackIndex,
+                            ),
+                          );
+                          unawaited(_refreshMobileSubtitleTracks());
                         }());
                       },
               ),
@@ -3227,6 +3403,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     _controlsHideTimer = null;
     _uiTimer?.cancel();
     _uiTimer = null;
+    _invalidateMobileTrackPanelState(resetScroll: true);
 
     final prev = _controller;
     _controller = null;
