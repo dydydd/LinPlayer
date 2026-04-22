@@ -345,6 +345,7 @@ class PlayerService {
     String? path, {
     String? networkUrl,
     Map<String, String>? httpHeaders,
+    Duration? startPosition,
     bool isTv = false,
     bool hardwareDecode = true,
     int mpvCacheSizeMb = 500,
@@ -364,6 +365,10 @@ class PlayerService {
 
     var effectivePath = path;
     var effectiveNetworkUrl = networkUrl;
+    final effectiveStartPosition =
+        startPosition != null && startPosition > Duration.zero
+            ? startPosition
+            : null;
 
     if ((effectiveNetworkUrl == null || effectiveNetworkUrl.trim().isEmpty) &&
         effectivePath != null &&
@@ -412,9 +417,20 @@ class PlayerService {
 
     try {
       if (effectiveNetworkUrl != null && effectiveNetworkUrl.isNotEmpty) {
-        await player.open(Media(effectiveNetworkUrl, httpHeaders: httpHeaders));
+        await player.open(
+          Media(
+            effectiveNetworkUrl,
+            httpHeaders: httpHeaders,
+            start: effectiveStartPosition,
+          ),
+        );
       } else if (effectivePath != null && effectivePath.isNotEmpty) {
-        await player.open(Media(effectivePath));
+        await player.open(
+          Media(
+            effectivePath,
+            start: effectiveStartPosition,
+          ),
+        );
       } else {
         throw Exception('No media source provided');
       }
@@ -438,6 +454,7 @@ class PlayerService {
                 source: source,
                 httpHeaders: httpHeaders,
                 httpProxy: httpProxy,
+                startPosition: effectiveStartPosition,
               );
               if (launched) {
                 _externalPlayback = true;
@@ -471,6 +488,7 @@ class PlayerService {
               path,
               networkUrl: networkUrl,
               httpHeaders: httpHeaders,
+              startPosition: effectiveStartPosition,
               isTv: isTv,
               hardwareDecode: false,
               mpvCacheSizeMb: mpvCacheSizeMb,
@@ -503,6 +521,7 @@ class PlayerService {
               path,
               networkUrl: networkUrl,
               httpHeaders: httpHeaders,
+              startPosition: effectiveStartPosition,
               isTv: isTv,
               hardwareDecode: hardwareDecode,
               mpvCacheSizeMb: mpvCacheSizeMb,

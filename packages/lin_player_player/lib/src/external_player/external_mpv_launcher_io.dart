@@ -5,6 +5,7 @@ Future<bool> launchExternalMpv({
   required String source,
   Map<String, String>? httpHeaders,
   String? httpProxy,
+  Duration? startPosition,
 }) async {
   final specified = executablePath?.trim();
   final mpv = (specified != null && specified.isNotEmpty) ? specified : 'mpv';
@@ -33,6 +34,11 @@ Future<bool> launchExternalMpv({
     if (headerFields.trim().isNotEmpty) {
       args.add('--http-header-fields=$headerFields');
     }
+  }
+
+  if (startPosition != null && startPosition > Duration.zero) {
+    final seconds = startPosition.inMilliseconds / 1000.0;
+    args.add('--start=${seconds.toStringAsFixed(3)}');
   }
 
   args.add(source);

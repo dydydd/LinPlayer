@@ -700,6 +700,15 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
           initialPrepared?.startPosition;
       final localStart = await localStartFuture;
       final start = _pickLaterStart(cloudStart, localStart);
+      final resumeImmediately =
+          _overrideResumeImmediately || widget.resumeImmediately;
+      final skipAutoResume = _skipAutoResumeOnce;
+      final initialStartPosition = !skipAutoResume &&
+              resumeImmediately &&
+              start != null &&
+              start > Duration.zero
+          ? start
+          : null;
       await _applyOrientationForMode(
         mediaSource: selectedMediaSource,
       );
@@ -786,6 +795,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         null,
         networkUrl: playbackUrl,
         httpHeaders: playbackHeaders,
+        startPosition: initialStartPosition,
         isTv: widget.isTv,
         hardwareDecode: _hwdecOn,
         mpvCacheSizeMb: widget.appState.mpvCacheSizeMb,
@@ -839,9 +849,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       }
 
       await _applyMpvSubtitleOptions();
-      final resumeImmediately =
-          _overrideResumeImmediately || widget.resumeImmediately;
-      final skipAutoResume = _skipAutoResumeOnce;
       _overrideStartPosition = null;
       _overrideResumeImmediately = false;
       _skipAutoResumeOnce = false;
@@ -3872,6 +3879,26 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   }
 
   Future<void> _resumeToPositionAfterStart(Duration target) async {
+    if (_resumeCloseEnough(_playerService.position, target)) {
+      final applied = _playerService.position;
+      _lastPosition = applied;
+      _syncDanmakuCursor(applied);
+      final shouldStartReporting = _deferProgressReporting;
+      _deferProgressReporting = false;
+      if (applied > Duration.zero) {
+        _startOverHintPosition = applied;
+        _showStartOverHint = true;
+        _startStartOverHintTimer();
+      }
+      if (shouldStartReporting) {
+        // ignore: unawaited_futures
+        _reportPlaybackStartBestEffort();
+        _maybeReportPlaybackProgress(_lastPosition, force: true);
+      }
+      if (mounted) setState(() {});
+      return;
+    }
+
     final ok = await _resumePlaybackAfterSwitch(target);
     if (!mounted || _playError != null || !_playerService.isInitialized) return;
 
@@ -6714,40 +6741,15 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                         child: Padding(
                                           padding: const EdgeInsets.symmetric(
                                               vertical: 12),
-                                          child: Material(
-                                            color: Colors.black54,
-                                            borderRadius:
-                                                BorderRadius.circular(999),
-                                            clipBehavior: Clip.antiAlias,
-                                            child: InkWell(
-                                              onTap: _resumeToHistoryPosition,
-                                              child: Padding(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                  horizontal: 12,
-                                                  vertical: 10,
-                                                ),
-                                                child: Row(
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  children: [
-                                                    const Icon(
-                                                      Icons.history,
-                                                      size: 18,
-                                                      color: Colors.white,
-                                                    ),
-                                                    const SizedBox(width: 6),
-                                                    Text(
-                                                      '跳转到 ${_fmtClock(_resumeHintPosition!)} 继续观看',
-                                                      style: const TextStyle(
-                                                        color: Colors.white,
-                                                        fontSize: 13,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ),
+                                          child: MobilePlayerPromptBanner(
+                                            icon: Icons.history_rounded,
+                                            title:
+                                                '跳转到 ${_fmtClock(_resumeHintPosition!)} 继续观看',
+                                            subtitle: '继续从上次的观看进度播放',
+                                            actionLabel: '继续播放',
+                                            actionIcon:
+                                                Icons.play_arrow_rounded,
+                                            onAction: _resumeToHistoryPosition,
                                           ),
                                         ),
                                       ),
@@ -6762,82 +6764,17 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                         child: Padding(
                                           padding: const EdgeInsets.symmetric(
                                               vertical: 12),
-                                          child: Material(
-                                            color: Colors.black54,
-                                            borderRadius:
-                                                BorderRadius.circular(999),
-                                            clipBehavior: Clip.antiAlias,
-                                            child: Padding(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                horizontal: 12,
-                                                vertical: 10,
-                                              ),
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  const Icon(
-                                                    Icons.history,
-                                                    size: 18,
-                                                    color: Colors.white,
-                                                  ),
-                                                  const SizedBox(width: 6),
-                                                  Text(
-                                                    '已从 ${_fmtClock(_startOverHintPosition!)} 继续播放',
-                                                    style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 13,
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 10),
-                                                  InkWell(
-                                                    onTap:
-                                                        _restartFromBeginning,
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                            999),
-                                                    child: Container(
-                                                      padding: const EdgeInsets
-                                                          .symmetric(
-                                                        horizontal: 10,
-                                                        vertical: 6,
-                                                      ),
-                                                      decoration: BoxDecoration(
-                                                        color: Colors.white
-                                                            .withValues(
-                                                                alpha: 0.18),
-                                                        borderRadius:
-                                                            BorderRadius
-                                                                .circular(999),
-                                                      ),
-                                                      child: const Row(
-                                                        mainAxisSize:
-                                                            MainAxisSize.min,
-                                                        children: [
-                                                          Icon(
-                                                            Icons.replay,
-                                                            size: 18,
-                                                            color: Colors.white,
-                                                          ),
-                                                          SizedBox(width: 4),
-                                                          Text(
-                                                            '从头开始',
-                                                            style: TextStyle(
-                                                              color:
-                                                                  Colors.white,
-                                                              fontSize: 13,
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .w600,
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
+                                          child: MobilePlayerPromptBanner(
+                                            icon: Icons
+                                                .replay_circle_filled_rounded,
+                                            title:
+                                                '已从 ${_fmtClock(_startOverHintPosition!)} 继续播放',
+                                            subtitle: '是否从头开始观看？',
+                                            actionLabel: '从头开始',
+                                            actionIcon:
+                                                Icons.restart_alt_rounded,
+                                            onAction: _restartFromBeginning,
+                                            emphasized: true,
                                           ),
                                         ),
                                       ),

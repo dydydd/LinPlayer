@@ -3,6 +3,7 @@ Future<bool> launchExternalMpv({
   required String source,
   Map<String, String>? httpHeaders,
   String? httpProxy,
+  Duration? startPosition,
 }) async {
   return false;
 }

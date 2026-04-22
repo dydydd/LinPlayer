@@ -1788,6 +1788,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             attemptIsNetwork ? null : attemptSource,
             networkUrl: attemptIsNetwork ? attemptSource : null,
             httpHeaders: c.httpHeaders.isEmpty ? null : c.httpHeaders,
+            startPosition: startPosition,
             isTv: isTv,
             hardwareDecode: _hwdecOn,
             mpvCacheSizeMb: widget.appState?.mpvCacheSizeMb ?? 500,
