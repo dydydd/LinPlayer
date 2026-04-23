@@ -1,7 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:lin_player_core/state/media_server_type.dart';
 import 'package:lin_player_server_api/services/emby_api.dart';
 import 'package:lin_player_prefs/preferences.dart';
 import 'package:lin_player_state/app_state.dart';
@@ -156,6 +159,83 @@ void main() {
       'http://foo.bar/iconlib.json?token=1',
     ]);
   });
+
+  test('Server-only backup import keeps existing settings intact', () async {
+    SharedPreferences.setMockInitialValues({});
+
+    final appState = AppState();
+    await appState.setThemeMode(ThemeMode.light);
+
+    final result = await appState.importServersFromBackupJson(
+      jsonEncode(_sampleBackup()),
+    );
+
+    expect(result.importedCount, 2);
+    expect(appState.themeMode, ThemeMode.light);
+    expect(appState.activeServerId, isNull);
+    expect(appState.servers.length, 2);
+    expect(appState.servers.any((server) => server.name == 'Home'), isTrue);
+  });
+
+  test('Server-only encrypted import preserves server types', () async {
+    SharedPreferences.setMockInitialValues({});
+
+    final source = AppState();
+    await source.importBackupMap(_sampleTypeAwareBackup());
+
+    final exported = await source.exportEncryptedBackupJson(
+      passphrase: 'pw-123456',
+      mode: BackupServerSecretMode.password,
+      serverLogins: const {
+        'srv_emby': BackupServerLogin(username: 'demo', password: 'p1'),
+        'srv_jelly': BackupServerLogin(username: 'jf', password: 'p2'),
+      },
+      pretty: false,
+    );
+
+    final restored = AppState();
+    await restored.setThemeMode(ThemeMode.light);
+
+    final result = await restored.importServersFromBackupJson(
+      exported,
+      passphrase: 'pw-123456',
+      authenticator: ({
+        required String baseUrl,
+        required String username,
+        required String password,
+        required String deviceId,
+      }) async {
+        return AuthResult(
+          token: 'token_$username',
+          baseUrlUsed: baseUrl,
+          userId: 'user_$username',
+          apiPrefixUsed: username == 'jf' ? '' : 'emby',
+        );
+      },
+    );
+
+    expect(result.importedCount, 2);
+    expect(restored.themeMode, ThemeMode.light);
+    expect(restored.activeServerId, isNull);
+    expect(
+      restored.servers
+          .firstWhere((server) => server.id == 'srv_emby')
+          .serverType,
+      MediaServerType.emby,
+    );
+    expect(
+      restored.servers
+          .firstWhere((server) => server.id == 'srv_jelly')
+          .serverType,
+      MediaServerType.jellyfin,
+    );
+    expect(
+      restored.servers
+          .firstWhere((server) => server.id == 'srv_jelly')
+          .username,
+      'jf',
+    );
+  });
 }
 
 Map<String, dynamic> _sampleBackup() {
@@ -230,6 +310,44 @@ Map<String, dynamic> _sampleBackup() {
           'baseUrl': 'https://emby2.example.com',
           'token': 'token_2',
           'userId': 'user_2',
+          'hiddenLibraries': const [],
+          'domainRemarks': const {},
+          'customDomains': const [],
+        },
+      ],
+    },
+  };
+}
+
+Map<String, dynamic> _sampleTypeAwareBackup() {
+  return {
+    'type': 'lin_player_backup',
+    'version': 1,
+    'createdAt': '2026-01-17T00:00:00Z',
+    'data': {
+      'servers': [
+        {
+          'id': 'srv_emby',
+          'serverType': 'emby',
+          'username': 'demo',
+          'name': 'Home',
+          'baseUrl': 'https://emby.example.com',
+          'token': 'token_1',
+          'userId': 'user_1',
+          'apiPrefix': 'emby',
+          'hiddenLibraries': const [],
+          'domainRemarks': const {},
+          'customDomains': const [],
+        },
+        {
+          'id': 'srv_jelly',
+          'serverType': 'jellyfin',
+          'username': 'jf',
+          'name': 'Jelly',
+          'baseUrl': 'https://jellyfin.example.com',
+          'token': 'token_2',
+          'userId': 'user_2',
+          'apiPrefix': '',
           'hiddenLibraries': const [],
           'domainRemarks': const {},
           'customDomains': const [],

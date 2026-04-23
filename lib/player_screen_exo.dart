@@ -4247,7 +4247,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                                   ),
                                   const SizedBox(width: 8),
                                   Text(
-                                    _gestureOverlayText!,
+                                    _gestureOverlayText ?? '',
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontSize: 13,
@@ -4314,10 +4314,12 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                                   !_controlsVisible || _mobileOverlayVisible,
                               child: Listener(
                                 onPointerDown: (_) => _showControls(),
-                                child: _buildMobileBottomStatusBar(
-                                  controlsEnabled: controlsEnabled,
-                                  controller: controller!,
-                                ),
+                                child: controller == null
+                                    ? const SizedBox.shrink()
+                                    : _buildMobileBottomStatusBar(
+                                        controlsEnabled: controlsEnabled,
+                                        controller: controller,
+                                      ),
                               ),
                             ),
                           ),
@@ -4577,7 +4579,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                                                 ),
                                                 const SizedBox(width: 8),
                                                 Text(
-                                                  _gestureOverlayText!,
+                                                  _gestureOverlayText ?? '',
                                                   style: const TextStyle(
                                                     color: Colors.white,
                                                     fontSize: 13,

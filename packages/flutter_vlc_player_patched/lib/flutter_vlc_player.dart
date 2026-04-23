@@ -12,6 +12,7 @@ export 'package:flutter_vlc_player_platform_interface/flutter_vlc_player_platfor
         VlcSubtitleThickness,
         VlcSubtitleTextDirection,
         DataSourceType,
+        VlcPlayerPlatform,
         VlcPlayerOptions,
         VlcAdvancedOptions,
         VlcAudioOptions,

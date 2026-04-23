@@ -5,7 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_vlc_player/src/enums/playing_state.dart';
 import 'package:flutter_vlc_player/src/vlc_app_life_cycle_observer.dart';
-import 'package:flutter_vlc_player/src/vlc_player_platform.dart';
+import 'package:flutter_vlc_player/src/vlc_player_platform.dart'
+    as vlc_platform;
 import 'package:flutter_vlc_player/src/vlc_player_value.dart';
 import 'package:flutter_vlc_player_platform_interface/flutter_vlc_player_platform_interface.dart';
 
@@ -61,6 +62,8 @@ class VlcPlayerController extends ValueNotifier<VlcPlayerValue> {
 
   DataSourceType _dataSourceType;
   bool? _isReadyToInitialize;
+  final Completer<void> _platformViewCreatedCompleter = Completer<void>();
+  bool _hasPlatformView = false;
 
   /// The viewId for this controller
   // ignore: avoid_late_keyword
@@ -75,6 +78,7 @@ class VlcPlayerController extends ValueNotifier<VlcPlayerValue> {
   bool _isDisposed = false;
 
   VlcAppLifeCycleObserver? _lifeCycleObserver;
+  VlcPlayerPlatform? _boundPlatform;
 
   /// Describes the type of data source this [VlcPlayerController]
   /// is constructed with.
@@ -83,10 +87,13 @@ class VlcPlayerController extends ValueNotifier<VlcPlayerValue> {
   /// Determine if platform is ready to call initialize method
   bool? get isReadyToInitialize => _isReadyToInitialize;
 
+  VlcPlayerPlatform get vlcPlayerPlatform =>
+      _boundPlatform ??= vlc_platform.vlcPlayerPlatform;
+
   /// This is just exposed for testing. It shouldn't be used by anyone depending
   /// on the plugin.
   @visibleForTesting
-  int? get viewId => _viewId;
+  int? get viewId => _hasPlatformView ? _viewId : null;
 
   ///
   /// The name of the asset is given by the [dataSource] argument and must not be
@@ -182,6 +189,18 @@ class VlcPlayerController extends ValueNotifier<VlcPlayerValue> {
     }
     if (value.isInitialized) {
       throw Exception('Already Initialized');
+    }
+
+    if (!_hasPlatformView) {
+      await _platformViewCreatedCompleter.future;
+      if (_isDisposed) {
+        throw Exception(
+          'initialize was called on a disposed VlcPlayerController',
+        );
+      }
+      if (value.isInitialized) {
+        return;
+      }
     }
 
     if (!allowBackgroundPlayback) {
@@ -352,7 +371,9 @@ class VlcPlayerController extends ValueNotifier<VlcPlayerValue> {
     _lifeCycleObserver?.dispose();
     _isDisposed = true;
     //
-    await vlcPlayerPlatform.dispose(_viewId);
+    if (_hasPlatformView) {
+      await vlcPlayerPlatform.dispose(_viewId);
+    }
     super.dispose();
   }
 
@@ -965,10 +986,17 @@ class VlcPlayerController extends ValueNotifier<VlcPlayerValue> {
   /// This method will be called after the platform view has been created
   Future<void> onPlatformViewCreated(int viewId) async {
     _viewId = viewId;
+    _hasPlatformView = true;
+    _isReadyToInitialize = true;
+    if (!_platformViewCreatedCompleter.isCompleted) {
+      _platformViewCreatedCompleter.complete();
+    }
+    if (_isDisposed) {
+      return;
+    }
     if (autoInitialize) {
       await initialize();
     }
-    _isReadyToInitialize = true;
   }
 }
 

@@ -13,14 +13,12 @@ import 'package:lin_player_ui/lin_player_ui.dart';
 const _emptyStateTitle = '\u8fd8\u6ca1\u6709\u670d\u52a1\u5668';
 const _addLabel = '\u6dfb\u52a0';
 const _connectAndEnterLabel = '\u8fde\u63a5\u5e76\u8fdb\u5165';
-const _serverAddressLabel = '\u670d\u52a1\u5668\u5730\u5740';
-const _usernameLabel = '\u8d26\u53f7';
+const _importBackupLabel = '\u4ece\u5907\u4efd\u5bfc\u5165\u670d\u52a1\u5668';
+const _addressFieldIndex = 1;
+const _usernameFieldIndex = 3;
 
-Finder _fieldWithLabel(String label) {
-  return find.ancestor(
-    of: find.text(label),
-    matching: find.byType(TextFormField),
-  );
+Finder _fieldAt(int index) {
+  return find.byType(TextFormField).at(index);
 }
 
 void main() {
@@ -40,6 +38,13 @@ void main() {
   });
 
   testWidgets('Allows passwordless server login', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1440, 3200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
     final appState = _FakeAppState();
     await tester.pumpWidget(
       AppConfigScope(
@@ -56,9 +61,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(MobileAddServerPage), findsOneWidget);
+    expect(find.text(_importBackupLabel), findsOneWidget);
 
-    final addressField = _fieldWithLabel(_serverAddressLabel);
-    final usernameField = _fieldWithLabel(_usernameLabel);
+    await tester.tap(find.text('Emby').first);
+    await tester.pumpAndSettle();
+
+    final addressField = _fieldAt(_addressFieldIndex);
+    final usernameField = _fieldAt(_usernameFieldIndex);
     expect(addressField, findsOneWidget);
     expect(usernameField, findsOneWidget);
 

@@ -1,4 +1,8 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:lin_player_core/state/media_server_type.dart';
 import 'package:lin_player_server_api/services/plex_api.dart';
 import 'package:lin_player_state/lin_player_state.dart';
@@ -19,6 +23,11 @@ class MobileAddServerPage extends StatefulWidget {
 enum _PlexAddMode {
   manual,
   account,
+}
+
+enum _BackupImportSource {
+  text,
+  file,
 }
 
 extension _PlexAddModeX on _PlexAddMode {
@@ -147,6 +156,267 @@ class _MobileAddServerPageState extends State<MobileAddServerPage> {
     );
     if (!mounted || importedServerId == null) return;
     Navigator.of(context).pop(importedServerId);
+  }
+
+  Future<void> _openBackupImport() async {
+    if (_submitting || widget.appState.isLoading) return;
+
+    try {
+      final raw = await _pickBackupImportRaw();
+      if (!mounted || raw == null || raw.trim().isEmpty) return;
+
+      final version = _peekBackupVersion(raw);
+      if (version == null) {
+        throw const FormatException('不是有效的备份文件');
+      }
+
+      String? passphrase;
+      if (version == 2) {
+        passphrase = await _askBackupPassphrase(
+          title: '输入备份密码',
+        );
+        if (!mounted || passphrase == null) return;
+      } else if (version == 1) {
+        final confirmed = await _confirmPlainBackupImport();
+        if (!mounted || confirmed != true) return;
+      } else {
+        throw FormatException('不支持的备份版本：$version');
+      }
+
+      setState(() => _submitting = true);
+      final result = await widget.appState.importServersFromBackupJson(
+        raw,
+        passphrase: passphrase,
+      );
+
+      if (!mounted) return;
+      if (!result.hasImportedServers) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_backupImportEmptyMessage(result))),
+        );
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_backupImportSummary(result))),
+      );
+      Navigator.of(context).pop(result.importedServerIds.first);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导入失败：$e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
+    }
+  }
+
+  String _backupImportSummary(BackupServerImportResult result) {
+    final parts = <String>['已导入 ${result.importedCount} 个服务器'];
+    if (result.failedServerLabels.isNotEmpty) {
+      parts.add('失败 ${result.failedServerLabels.length} 个');
+    }
+    if (result.skippedServerLabels.isNotEmpty) {
+      parts.add('跳过 ${result.skippedServerLabels.length} 个');
+    }
+    return parts.join('，');
+  }
+
+  String _backupImportEmptyMessage(BackupServerImportResult result) {
+    if (result.failedServerLabels.isNotEmpty &&
+        result.skippedServerLabels.isNotEmpty) {
+      return '没有导入成功（失败 ${result.failedServerLabels.length} 个，跳过 ${result.skippedServerLabels.length} 个）';
+    }
+    if (result.failedServerLabels.isNotEmpty) {
+      return '没有导入成功，请检查备份密码、账号密码或网络连接';
+    }
+    return '备份中没有可导入的服务器';
+  }
+
+  Future<_BackupImportSource?> _askBackupImportSource() {
+    return showDialog<_BackupImportSource>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('选择导入方式'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(_BackupImportSource.text),
+            child: const Text('从文本导入'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dctx).pop(_BackupImportSource.file),
+            child: const Text('从文件导入'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<String?> _pickBackupImportRaw() async {
+    final source = await _askBackupImportSource();
+    if (!mounted || source == null) return null;
+
+    switch (source) {
+      case _BackupImportSource.text:
+        return _pickBackupFromText();
+      case _BackupImportSource.file:
+        return _pickBackupFromFile();
+    }
+  }
+
+  Future<String?> _pickBackupFromFile() async {
+    final result = await FilePicker.pickFiles(
+      dialogTitle: '选择备份文件',
+      allowMultiple: false,
+      withData: true,
+      type: FileType.custom,
+      allowedExtensions: const <String>['json'],
+    );
+    final file = result?.files.single;
+    if (file == null) return null;
+
+    final bytes = file.bytes;
+    if (bytes != null && bytes.isNotEmpty) {
+      return utf8.decode(bytes);
+    }
+
+    final path = file.path;
+    if (path == null || path.trim().isEmpty) {
+      throw const FileSystemException('无法读取备份文件');
+    }
+    return File(path).readAsString();
+  }
+
+  Future<String?> _pickBackupFromText() async {
+    final ctrl = TextEditingController();
+    try {
+      final raw = await showDialog<String>(
+        context: context,
+        builder: (dctx) => AlertDialog(
+          title: const Text('从文本导入'),
+          content: TextField(
+            controller: ctrl,
+            minLines: 6,
+            maxLines: 12,
+            decoration: const InputDecoration(
+              hintText: '粘贴导出的 JSON 文本',
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dctx).pop(),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dctx).pop(ctrl.text),
+              child: const Text('导入'),
+            ),
+          ],
+        ),
+      );
+      if (raw == null || raw.trim().isEmpty) return null;
+      return raw;
+    } finally {
+      ctrl.dispose();
+    }
+  }
+
+  int? _peekBackupVersion(String raw) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      final version = decoded['version'];
+      if (version is int) return version;
+      if (version is num) return version.round();
+      if (version is String) return int.tryParse(version.trim());
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool?> _confirmPlainBackupImport() {
+    return showDialog<bool>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('旧版备份'),
+        content: const Text(
+          '检测到旧版备份（未加密，通常包含 token）。\n本次只会导入备份里的服务器，不会覆盖当前设置。',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dctx).pop(true),
+            child: const Text('继续导入'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<String?> _askBackupPassphrase({
+    required String title,
+  }) async {
+    final passCtrl = TextEditingController();
+    bool show = false;
+    String? error;
+
+    try {
+      return showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dctx) => StatefulBuilder(
+          builder: (dctx, setState) => AlertDialog(
+            title: Text(title),
+            content: TextField(
+              controller: passCtrl,
+              obscureText: !show,
+              decoration: InputDecoration(
+                labelText: '备份密码',
+                errorText: error,
+                suffixIcon: IconButton(
+                  tooltip: show ? '隐藏' : '显示',
+                  onPressed: () => setState(() => show = !show),
+                  icon: Icon(
+                    show
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                  ),
+                ),
+              ),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(dctx).pop(),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final value = passCtrl.text.trim();
+                  if (value.isEmpty) {
+                    setState(() => error = '请输入备份密码');
+                    return;
+                  }
+                  Navigator.of(dctx).pop(passCtrl.text);
+                },
+                child: const Text('继续'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      passCtrl.dispose();
+    }
   }
 
   _ParsedServerAddress? _parseAddress() {
@@ -482,6 +752,15 @@ class _MobileAddServerPageState extends State<MobileAddServerPage> {
                       onTap: busy ? null : () => _setServerType(type),
                     );
                   }).toList(growable: false),
+                ),
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.tonalIcon(
+                    onPressed: busy ? null : _openBackupImport,
+                    icon: const Icon(Icons.settings_backup_restore_outlined),
+                    label: const Text('从备份导入服务器'),
+                  ),
                 ),
                 if (showBulkImport) ...<Widget>[
                   const SizedBox(height: 14),

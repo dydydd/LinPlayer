@@ -51,6 +51,22 @@ class BackupServerLogin {
   const BackupServerLogin({required this.username, required this.password});
 }
 
+@immutable
+class BackupServerImportResult {
+  final List<String> importedServerIds;
+  final List<String> failedServerLabels;
+  final List<String> skippedServerLabels;
+
+  const BackupServerImportResult({
+    required this.importedServerIds,
+    this.failedServerLabels = const <String>[],
+    this.skippedServerLabels = const <String>[],
+  });
+
+  int get importedCount => importedServerIds.length;
+  bool get hasImportedServers => importedServerIds.isNotEmpty;
+}
+
 typedef BackupServerAuthenticator = Future<AuthResult> Function({
   required String baseUrl,
   required String username,
@@ -1471,12 +1487,15 @@ class AppState extends ChangeNotifier {
         }
         servers.add({
           'id': server.id,
+          'serverType': server.serverType.id,
           'name': server.name,
           'remark': server.remark,
           'iconUrl': server.iconUrl,
           'baseUrl': server.baseUrl,
           'username': login.username.trim(),
           'password': login.password,
+          'apiPrefix': server.apiPrefix,
+          'plexMachineIdentifier': server.plexMachineIdentifier,
           'hiddenLibraries': server.hiddenLibraries.toList(),
           'domainRemarks': server.domainRemarks,
           'customDomains': server.customDomains.map((e) => e.toJson()).toList(),
@@ -1527,6 +1546,112 @@ class AppState extends ChangeNotifier {
     }
 
     await importBackupMap(backup);
+  }
+
+  Future<BackupServerImportResult> importServersFromBackupJson(
+    String raw, {
+    String? passphrase,
+    BackupServerAuthenticator? authenticator,
+  }) async {
+    _loading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final decoded = jsonDecode(raw);
+      final backup = _coerceStringKeyedMap(decoded);
+      if (backup == null) throw const FormatException('Invalid backup JSON');
+
+      final version = _readInt(backup['version'], fallback: 0);
+      if (version == _kBackupSchemaVersionV2) {
+        final p = (passphrase ?? '').trim();
+        if (p.isEmpty) throw const FormatException('Missing passphrase');
+        return await _importServersFromEncryptedBackupMap(
+          backup,
+          passphrase: p,
+          authenticator: authenticator,
+        );
+      }
+
+      return await _importServersFromBackupMap(backup);
+    } catch (e) {
+      _error = _userFacingErrorText(e);
+      rethrow;
+    } finally {
+      _loading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<BackupServerImportResult> _importServersFromEncryptedBackupMap(
+    Map<String, dynamic> wrapper, {
+    required String passphrase,
+    BackupServerAuthenticator? authenticator,
+  }) async {
+    final type = (wrapper['type'] ?? '').toString().trim();
+    if (type != _kBackupType) {
+      throw FormatException('Invalid backup type: $type');
+    }
+
+    final version = _readInt(wrapper['version'], fallback: 0);
+    if (version != _kBackupSchemaVersionV2) {
+      throw FormatException('Unsupported backup version: $version');
+    }
+
+    final crypto = _coerceStringKeyedMap(wrapper['crypto']);
+    if (crypto == null) throw const FormatException('Missing crypto payload');
+
+    final decryptedJson = await BackupCrypto.decryptJson(
+      encrypted: crypto,
+      passphrase: passphrase,
+    );
+    final decrypted = _coerceStringKeyedMap(jsonDecode(decryptedJson));
+    if (decrypted == null) {
+      throw const FormatException('Invalid backup payload');
+    }
+
+    final mode = backupServerSecretModeFromId(decrypted['mode']?.toString());
+    final data = _coerceStringKeyedMap(decrypted['data']);
+    if (data == null) throw const FormatException('Invalid backup payload');
+
+    if (mode == BackupServerSecretMode.token) {
+      return _importServersFromDataMap(data);
+    }
+
+    final rawServers = data['servers'];
+    if (rawServers is! List) {
+      throw const FormatException('Invalid backup payload: missing servers');
+    }
+
+    final prepared = <ServerProfile>[];
+    final failed = <String>[];
+    final skipped = <String>[];
+
+    for (final item in rawServers) {
+      final map = _coerceStringKeyedMap(item);
+      if (map == null) continue;
+      final label = _backupServerLabel(map);
+
+      try {
+        final restored = await _restoreServerFromCredentialBackupEntry(
+          map,
+          authenticator: authenticator,
+        );
+        if (restored == null) {
+          skipped.add(label);
+          continue;
+        }
+        prepared.add(restored);
+      } catch (_) {
+        failed.add(label);
+      }
+    }
+
+    return _mergeImportedServers(
+      prepared,
+      failedServerLabels: failed,
+      skippedServerLabels: skipped,
+    );
   }
 
   Future<void> importEncryptedBackupMap(
@@ -1643,6 +1768,232 @@ class AppState extends ChangeNotifier {
       'version': _kBackupSchemaVersionV1,
       'data': v1Data,
     });
+  }
+
+  Future<BackupServerImportResult> _importServersFromBackupMap(
+    Map<String, dynamic> backup,
+  ) async {
+    final type = (backup['type'] ?? '').toString().trim();
+    if (type != _kBackupType) {
+      throw FormatException('Invalid backup type: $type');
+    }
+
+    final version = _readInt(backup['version'], fallback: 0);
+    if (version != _kBackupSchemaVersionV1) {
+      throw FormatException('Unsupported backup version: $version');
+    }
+
+    final data = _coerceStringKeyedMap(backup['data']);
+    if (data == null) {
+      throw const FormatException('Invalid backup payload: missing data');
+    }
+
+    return _importServersFromDataMap(data);
+  }
+
+  Future<BackupServerImportResult> _importServersFromDataMap(
+    Map<String, dynamic> data,
+  ) async {
+    final rawServers = data['servers'];
+    if (rawServers is! List) {
+      throw const FormatException('Invalid backup payload: missing servers');
+    }
+
+    final prepared = <ServerProfile>[];
+    final skipped = <String>[];
+
+    for (final item in rawServers) {
+      final map = _coerceStringKeyedMap(item);
+      if (map == null) continue;
+      final label = _backupServerLabel(map);
+      final server = _serverProfileFromTokenBackupEntry(map);
+      if (server == null) {
+        skipped.add(label);
+        continue;
+      }
+      prepared.add(server);
+    }
+
+    return _mergeImportedServers(
+      prepared,
+      skippedServerLabels: skipped,
+    );
+  }
+
+  ServerProfile? _serverProfileFromTokenBackupEntry(Map<String, dynamic> map) {
+    final raw = ServerProfile.fromJson(map);
+    final normalizedBaseUrl = _normalizeBackupServerBaseUrl(
+      raw.serverType,
+      raw.baseUrl,
+    );
+    if (normalizedBaseUrl == null) return null;
+
+    final token = raw.token.trim();
+    switch (raw.serverType) {
+      case MediaServerType.webdav:
+        if (raw.username.trim().isEmpty) return null;
+        break;
+      case MediaServerType.plex:
+        if (token.isEmpty) return null;
+        break;
+      case MediaServerType.emby:
+      case MediaServerType.jellyfin:
+      case MediaServerType.uhd:
+        if (token.isEmpty) return null;
+        break;
+    }
+
+    return _buildImportedServerProfile(
+      source: raw,
+      baseUrl: normalizedBaseUrl,
+      token: token,
+      userId: raw.userId.trim(),
+      apiPrefix: raw.apiPrefix,
+    );
+  }
+
+  Future<ServerProfile?> _restoreServerFromCredentialBackupEntry(
+    Map<String, dynamic> map, {
+    BackupServerAuthenticator? authenticator,
+  }) async {
+    final serverType = mediaServerTypeFromId(map['serverType']?.toString());
+    final baseUrl = (map['baseUrl'] ?? '').toString().trim();
+    final username = (map['username'] ?? '').toString().trim();
+    final password = (map['password'] ?? '').toString();
+    final normalizedBaseUrl =
+        _normalizeBackupServerBaseUrl(serverType, baseUrl);
+    if (normalizedBaseUrl == null) return null;
+
+    final baseProfile = ServerProfile(
+      id: (map['id'] ?? '').toString().trim(),
+      serverType: serverType,
+      username: username,
+      name: (map['name'] ?? '').toString().trim(),
+      remark: (map['remark'] ?? '').toString().trim().isEmpty
+          ? null
+          : (map['remark'] ?? '').toString().trim(),
+      iconUrl: (map['iconUrl'] ?? '').toString().trim().isEmpty
+          ? null
+          : (map['iconUrl'] ?? '').toString().trim(),
+      baseUrl: normalizedBaseUrl,
+      token: '',
+      userId: '',
+      apiPrefix: (map['apiPrefix'] ?? '').toString().trim(),
+      plexMachineIdentifier:
+          (map['plexMachineIdentifier'] ?? '').toString().trim().isEmpty
+              ? null
+              : (map['plexMachineIdentifier'] ?? '').toString().trim(),
+      hiddenLibraries: _readStringList(map['hiddenLibraries']).toSet(),
+      domainRemarks: (map['domainRemarks'] as Map?)?.map(
+            (key, value) => MapEntry(key.toString(), value.toString()),
+          ) ??
+          <String, String>{},
+      customDomains: (map['customDomains'] as List?)
+              ?.whereType<Map>()
+              .map(
+                (entry) => CustomDomain.fromJson(
+                  entry.map((key, value) => MapEntry(key.toString(), value)),
+                ),
+              )
+              .toList() ??
+          <CustomDomain>[],
+    );
+
+    switch (serverType) {
+      case MediaServerType.webdav:
+        if (username.isEmpty) return null;
+        final api = WebDavApi(
+          baseUri: WebDavApi.normalizeBaseUri(normalizedBaseUrl),
+          username: username,
+          password: password,
+        );
+        await api.validateRoot();
+        return _buildImportedServerProfile(
+          source: baseProfile,
+          baseUrl: normalizedBaseUrl,
+          token: password,
+          userId: '',
+          apiPrefix: '',
+        );
+      case MediaServerType.plex:
+        return null;
+      case MediaServerType.emby:
+      case MediaServerType.jellyfin:
+      case MediaServerType.uhd:
+        if (username.isEmpty) return null;
+        if (authenticator == null) {
+          final auth = await _authenticateServerForBackupImport(
+            serverType: serverType,
+            baseUrl: normalizedBaseUrl,
+            username: username,
+            password: password,
+          );
+          return _buildImportedServerProfile(
+            source: baseProfile,
+            baseUrl: auth.baseUrl,
+            token: auth.token,
+            userId: auth.userId,
+            apiPrefix: auth.apiPrefix,
+          );
+        }
+        final auth = await authenticator(
+          baseUrl: normalizedBaseUrl,
+          username: username,
+          password: password,
+          deviceId: _deviceId,
+        );
+        return _buildImportedServerProfile(
+          source: baseProfile,
+          baseUrl: auth.baseUrlUsed,
+          token: auth.token,
+          userId: auth.userId,
+          apiPrefix: auth.apiPrefixUsed,
+        );
+    }
+  }
+
+  Future<BackupServerImportResult> _mergeImportedServers(
+    List<ServerProfile> incoming, {
+    List<String> failedServerLabels = const <String>[],
+    List<String> skippedServerLabels = const <String>[],
+  }) async {
+    final importedIds = <String>[];
+
+    for (final server in incoming) {
+      final existingIndex = _findImportedServerMatch(server);
+      final incomingId = server.id.trim();
+      final resolvedId = existingIndex >= 0
+          ? _servers[existingIndex].id
+          : (incomingId.isNotEmpty &&
+                  !_servers.any((item) => item.id == incomingId))
+              ? incomingId
+              : _randomId();
+
+      final merged = _buildImportedServerProfile(
+        source: server,
+        id: resolvedId,
+        baseUrl: server.baseUrl,
+        token: server.token,
+        userId: server.userId,
+        apiPrefix: server.apiPrefix,
+      );
+
+      if (existingIndex >= 0) {
+        _servers[existingIndex] = merged;
+      } else {
+        _servers.add(merged);
+      }
+      importedIds.add(merged.id);
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await _persistServers(prefs);
+
+    return BackupServerImportResult(
+      importedServerIds: importedIds,
+      failedServerLabels: failedServerLabels,
+      skippedServerLabels: skippedServerLabels,
+    );
   }
 
   Future<void> importBackupMap(Map<String, dynamic> backup) async {
@@ -5344,6 +5695,153 @@ class AppState extends ChangeNotifier {
       password: password,
       deviceId: deviceId,
     );
+  }
+
+  Future<ServerAuthSession> _authenticateServerForBackupImport({
+    required MediaServerType serverType,
+    required String baseUrl,
+    required String username,
+    required String password,
+  }) async {
+    final raw = baseUrl.trim();
+    if (raw.isEmpty) throw const FormatException('Missing baseUrl');
+
+    Uri? uri;
+    try {
+      uri = Uri.parse(raw);
+    } catch (_) {}
+
+    if (uri == null || uri.host.isEmpty) {
+      try {
+        uri = Uri.parse('https://$raw');
+      } catch (_) {}
+    }
+
+    if (uri == null || uri.host.isEmpty) {
+      throw const FormatException('Invalid baseUrl');
+    }
+
+    final scheme =
+        (uri.scheme == 'http' || uri.scheme == 'https') ? uri.scheme : 'https';
+    final port = uri.hasPort ? uri.port.toString() : null;
+    final hostOrUrl =
+        uri.host + ((uri.path.isNotEmpty && uri.path != '/') ? uri.path : '');
+    final adapter = ServerAdapterFactory.forLogin(
+      serverType: serverType,
+      deviceId: _deviceId,
+    );
+    return adapter.authenticate(
+      hostOrUrl: hostOrUrl,
+      scheme: scheme,
+      port: port,
+      username: username,
+      password: password,
+    );
+  }
+
+  int _findImportedServerMatch(ServerProfile candidate) {
+    final normalizedBaseUrl = candidate.baseUrl.trim();
+    final normalizedUsername = candidate.username.trim();
+    final normalizedMachineId = (candidate.plexMachineIdentifier ?? '').trim();
+
+    final bySignature = _servers.indexWhere((server) {
+      if (server.serverType != candidate.serverType) return false;
+
+      switch (candidate.serverType) {
+        case MediaServerType.webdav:
+          return server.baseUrl.trim() == normalizedBaseUrl &&
+              server.username.trim() == normalizedUsername;
+        case MediaServerType.plex:
+          final existingMachineId = (server.plexMachineIdentifier ?? '').trim();
+          if (normalizedMachineId.isNotEmpty &&
+              existingMachineId == normalizedMachineId) {
+            return true;
+          }
+          return server.baseUrl.trim() == normalizedBaseUrl;
+        case MediaServerType.emby:
+        case MediaServerType.jellyfin:
+        case MediaServerType.uhd:
+          return server.baseUrl.trim() == normalizedBaseUrl;
+      }
+    });
+    if (bySignature >= 0) return bySignature;
+
+    final incomingId = candidate.id.trim();
+    if (incomingId.isEmpty) return -1;
+    return _servers.indexWhere((server) => server.id == incomingId);
+  }
+
+  static String _backupServerLabel(Map<String, dynamic> map) {
+    final name = (map['name'] ?? '').toString().trim();
+    if (name.isNotEmpty) return name;
+    final baseUrl = (map['baseUrl'] ?? '').toString().trim();
+    if (baseUrl.isNotEmpty) return baseUrl;
+    final id = (map['id'] ?? '').toString().trim();
+    if (id.isNotEmpty) return id;
+    return '未命名服务器';
+  }
+
+  static String? _normalizeBackupServerBaseUrl(
+    MediaServerType serverType,
+    String raw,
+  ) {
+    final fixed = raw.trim();
+    if (fixed.isEmpty) return null;
+
+    try {
+      if (serverType == MediaServerType.webdav) {
+        return WebDavApi.normalizeBaseUri(fixed).toString();
+      }
+      return _normalizeServerBaseUrl(
+        _normalizeUrl(fixed, defaultScheme: 'https'),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String? _normalizeOptionalText(String? value) {
+    final fixed = (value ?? '').trim();
+    return fixed.isEmpty ? null : fixed;
+  }
+
+  static ServerProfile _buildImportedServerProfile({
+    required ServerProfile source,
+    String? id,
+    required String baseUrl,
+    required String token,
+    required String userId,
+    required String apiPrefix,
+  }) {
+    final server = ServerProfile(
+      id: (id ?? source.id).trim(),
+      serverType: source.serverType,
+      username: source.username.trim(),
+      name: source.name.trim().isEmpty
+          ? _suggestServerName(baseUrl)
+          : source.name.trim(),
+      remark: _normalizeOptionalText(source.remark),
+      iconUrl: _normalizeOptionalText(source.iconUrl),
+      baseUrl: baseUrl.trim(),
+      token: token.trim(),
+      userId: userId.trim(),
+      apiPrefix: apiPrefix.trim(),
+      plexMachineIdentifier: _normalizeOptionalText(
+        source.plexMachineIdentifier,
+      ),
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      hiddenLibraries: Set<String>.from(source.hiddenLibraries),
+      domainRemarks: Map<String, String>.from(source.domainRemarks),
+      customDomains: <CustomDomain>[],
+    );
+    _mergeCustomDomains(
+      server,
+      source.customDomains
+          .map((domain) => CustomDomain(name: domain.name, url: domain.url))
+          .toList(growable: false),
+    );
+    return server;
   }
 
   Future<void> _persistServers(SharedPreferences prefs) async {

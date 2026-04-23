@@ -2054,7 +2054,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
         final status = result?.status.name ?? 'completed';
         if (!shouldTrackStartup) return;
         AppDiagnosticsLogger.instance.info(
-          'player_network_exo',
+          'player_network_vlc',
           'Startup preload warmup completed',
           data: <String, Object?>{
             'itemId': widget.itemId,
@@ -2069,7 +2069,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
         );
       } catch (error, stackTrace) {
         AppDiagnosticsLogger.instance.warn(
-          'player_network_exo',
+          'player_network_vlc',
           shouldTrackStartup
               ? 'Startup preload warmup failed'
               : 'Playback preload warmup failed',
@@ -2108,7 +2108,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
       if (!shouldTrackStartup) return;
       if (observation == null) {
         AppDiagnosticsLogger.instance.warn(
-          'player_network_exo',
+          'player_network_vlc',
           'Startup playback reuse observation timed out',
           data: <String, Object?>{
             'itemId': widget.itemId,
@@ -2120,7 +2120,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
         return;
       }
       AppDiagnosticsLogger.instance.info(
-        'player_network_exo',
+        'player_network_vlc',
         'Startup playback reuse observed',
         data: <String, Object?>{
           'itemId': widget.itemId,
@@ -5485,7 +5485,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
         );
         selectedMediaSource = initialPrepared.selectedMediaSource;
         AppDiagnosticsLogger.instance.info(
-          'player_network_exo',
+          'player_network_vlc',
           'Reused prepared playback handoff',
           data: <String, Object?>{
             'itemId': widget.itemId,
@@ -5561,7 +5561,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
       _resolvedStream = playbackSource.url;
       _resolvedStreamHeaders = playbackSource.httpHeaders;
       AppDiagnosticsLogger.instance.info(
-        'player_network_exo',
+        'player_network_vlc',
         'Prepared network playback source',
         data: <String, Object?>{
           'itemId': widget.itemId,
@@ -5596,8 +5596,8 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
       await _applyMobileLoopModeToExo();
       controllerInitializeStopwatch.stop();
       AppDiagnosticsLogger.instance.info(
-        'player_network_exo',
-        'Exo controller initialized',
+        'player_network_vlc',
+        'VLC controller initialized',
         data: <String, Object?>{
           'itemId': widget.itemId,
           'initMs': controllerInitializeStopwatch.elapsedMilliseconds,
@@ -5771,8 +5771,8 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
       }
     } catch (e) {
       AppDiagnosticsLogger.instance.error(
-        'player_network_exo',
-        'Unhandled Exo playback initialization error',
+        'player_network_vlc',
+        'Unhandled VLC playback initialization error',
         data: <String, Object?>{
           'itemId': widget.itemId,
         },
