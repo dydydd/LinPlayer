@@ -19,6 +19,7 @@ import 'package:video_player_platform_interface/video_player_platform_interface.
 import 'services/app_diagnostics_log.dart';
 import 'services/app_route_observer.dart';
 import 'services/playback/mobile_playback_preferences.dart';
+import 'services/playback/mobile_system_volume.dart';
 import 'services/playback/player_core_pages.dart';
 import 'services/playback/player_core_ui.dart';
 import 'services/playback/video_display_mode.dart';
@@ -170,6 +171,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
   bool get _isIos => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
   bool get _supportsNativeVideoPlayer => _isAndroid || _isIos;
+  bool get _usesSystemVolumeGestures => _isIos;
+  bool get _shouldPersistMobilePlayerVolume => _isAndroid;
   PlayerCore get _nativeCore {
     final current = normalizePlayerCoreForPlatform(widget.appState.playerCore);
     return current == PlayerCore.avplayer
@@ -183,6 +186,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _startMobileVolumeSync();
     _danmakuEnabled = widget.appState.danmakuEnabled;
     _danmakuOpacity = widget.appState.danmakuOpacity;
     _danmakuScale = widget.appState.danmakuScale;
@@ -314,6 +318,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     _uiTimer = null;
     _gestureOverlayTimer?.cancel();
     _gestureOverlayTimer = null;
+    _stopMobileVolumeSync();
     _tvOkLongPressTimer?.cancel();
     _tvOkLongPressTimer = null;
     // ignore: unawaited_futures
@@ -330,6 +335,20 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     _tvSurfaceFocusNode.dispose();
     _tvPlayPauseFocusNode.dispose();
     super.dispose();
+  }
+
+  void _startMobileVolumeSync() {
+    if (!_usesSystemVolumeGestures) return;
+    MobileSystemVolume.addListener(_handleSystemVolumeChanged);
+  }
+
+  void _stopMobileVolumeSync() {
+    if (!_usesSystemVolumeGestures) return;
+    MobileSystemVolume.removeListener();
+  }
+
+  void _handleSystemVolumeChanged(double volume) {
+    _playerVolume = volume;
   }
 
   Future<void> _requestExitThenPop() async {
@@ -1282,12 +1301,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
         break;
       case _GestureMode.volume:
         final v = (_gestureStartVolume + delta).clamp(0.0, 1.0).toDouble();
-        _playerVolume = v;
-        final controller = _controller;
-        if (controller != null) {
-          // ignore: unawaited_futures
-          controller.setVolume(v);
-        }
+        // ignore: unawaited_futures
+        unawaited(_applyMobilePlayerVolume(v));
         _setGestureOverlay(
           icon: v == 0 ? Icons.volume_off : Icons.volume_up,
           text: '音量 ${(100 * v).round()}%',
@@ -1299,12 +1314,17 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   }
 
   void _onSideDragEnd(DragEndDetails details) {
+    final persistVolume = _gestureMode == _GestureMode.volume;
     if (_gestureMode == _GestureMode.brightness ||
         _gestureMode == _GestureMode.volume) {
       _hideGestureOverlay();
     }
     _gestureMode = _GestureMode.none;
     _gestureStartPos = null;
+    if (persistVolume) {
+      // ignore: unawaited_futures
+      unawaited(_persistMobilePlayerVolume());
+    }
   }
 
   void _onLongPressStart(LongPressStartDetails details) {
@@ -2160,6 +2180,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
       _mobileAutoPlayNextEpisode = next;
       _mobileLoopMode = loop;
     });
+    await _syncMobileVolumeForActivePlayer();
   }
 
   void _setMobileVideoDisplayMode(VideoDisplayMode mode) {
@@ -2185,6 +2206,52 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     setState(() => _mobileLoopMode = mode);
     await MobilePlaybackPreferences.saveLoopMode(mode);
     await _applyMobileLoopModeToExo();
+  }
+
+  Future<void> _applyMobilePlayerVolume(
+    double value, {
+    bool persist = false,
+  }) async {
+    final normalized = MobilePlaybackPreferences.normalizePlayerVolume(value);
+    _playerVolume = normalized;
+    if (_usesSystemVolumeGestures) {
+      await MobileSystemVolume.setVolume(normalized);
+      return;
+    }
+    final controller = _controller;
+    if (controller != null) {
+      try {
+        await controller.setVolume(normalized);
+      } catch (_) {}
+    }
+    if (persist && _shouldPersistMobilePlayerVolume) {
+      await MobilePlaybackPreferences.savePlayerVolume(normalized);
+    }
+  }
+
+  Future<void> _persistMobilePlayerVolume() async {
+    if (!_shouldPersistMobilePlayerVolume) return;
+    await MobilePlaybackPreferences.savePlayerVolume(_playerVolume);
+  }
+
+  Future<void> _syncMobileVolumeForActivePlayer() async {
+    if (_usesSystemVolumeGestures) {
+      _playerVolume = await MobileSystemVolume.getVolume();
+      await _forceMobilePlayerVolumeToMax();
+      return;
+    }
+    if (_shouldPersistMobilePlayerVolume) {
+      _playerVolume = await MobilePlaybackPreferences.loadPlayerVolume();
+    }
+    await _applyMobilePlayerVolume(_playerVolume);
+  }
+
+  Future<void> _forceMobilePlayerVolumeToMax() async {
+    final controller = _controller;
+    if (controller == null) return;
+    try {
+      await controller.setVolume(1.0);
+    } catch (_) {}
   }
 
   Future<void> _applyMobileLoopModeToExo() async {
@@ -3485,6 +3552,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
 
           _controller = controller;
           await controller.initialize();
+          await _syncMobileVolumeForActivePlayer();
           await _applyMobileLoopModeToExo();
           await _applyOrientationForMode();
           await _applyExoSubtitleOptions();

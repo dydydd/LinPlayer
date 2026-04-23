@@ -23,6 +23,7 @@ import 'services/app_route_observer.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/desktop_window.dart';
 import 'services/playback/mobile_playback_preferences.dart';
+import 'services/playback/mobile_system_volume.dart';
 import 'services/playback/player_core_pages.dart';
 import 'services/playback/player_core_ui.dart';
 import 'services/playback/video_display_mode.dart';
@@ -365,6 +366,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _startMobileVolumeSync();
     _serverAccess =
         resolveServerAccess(appState: widget.appState, server: widget.server);
     final access = _serverAccess;
@@ -805,6 +807,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         httpProxy: httpProxy,
         preferFastStartForLoopbackProxy: usesLoopbackProxy,
       );
+      await _syncMobileVolumeForActivePlayer();
       playerInitializeStopwatch.stop();
       AppDiagnosticsLogger.instance.info(
         'player_network_mpv',
@@ -1807,6 +1810,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       _mobileAutoPlayNextEpisode = next;
       _mobileLoopMode = loop;
     });
+    await _syncMobileVolumeForActivePlayer();
   }
 
   void _setMobileVideoDisplayMode(VideoDisplayMode mode) {
@@ -1832,6 +1836,52 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     setState(() => _mobileLoopMode = mode);
     await MobilePlaybackPreferences.saveLoopMode(mode);
     await _applyMobileLoopModeToPlayer();
+  }
+
+  Future<void> _applyMobilePlayerVolume(
+    double value, {
+    bool persist = false,
+  }) async {
+    final normalized = MobilePlaybackPreferences.normalizePlayerVolume(value);
+    _playerVolume = normalized;
+    if (_usesSystemVolumeGestures) {
+      await MobileSystemVolume.setVolume(normalized);
+      return;
+    }
+    if (_playerService.isInitialized && !_playerService.isExternalPlayback) {
+      try {
+        await _playerService.player.setVolume(normalized * 100);
+      } catch (_) {}
+    }
+    if (persist && _shouldPersistMobilePlayerVolume) {
+      await MobilePlaybackPreferences.savePlayerVolume(normalized);
+    }
+  }
+
+  Future<void> _persistMobilePlayerVolume() async {
+    if (!_shouldPersistMobilePlayerVolume) return;
+    await MobilePlaybackPreferences.savePlayerVolume(_playerVolume);
+  }
+
+  Future<void> _syncMobileVolumeForActivePlayer() async {
+    if (_usesSystemVolumeGestures) {
+      _playerVolume = await MobileSystemVolume.getVolume();
+      await _forceMobilePlayerVolumeToMax();
+      return;
+    }
+    if (_shouldPersistMobilePlayerVolume) {
+      _playerVolume = await MobilePlaybackPreferences.loadPlayerVolume();
+    }
+    await _applyMobilePlayerVolume(_playerVolume);
+  }
+
+  Future<void> _forceMobilePlayerVolumeToMax() async {
+    if (!_playerService.isInitialized || _playerService.isExternalPlayback) {
+      return;
+    }
+    try {
+      await _playerService.player.setVolume(100);
+    } catch (_) {}
   }
 
   Future<void> _applyMobileLoopModeToPlayer() async {
@@ -4231,6 +4281,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     return Platform.isAndroid || Platform.isIOS;
   }
 
+  bool get _usesSystemVolumeGestures => !kIsWeb && Platform.isIOS;
+
+  bool get _shouldPersistMobilePlayerVolume => !kIsWeb && Platform.isAndroid;
+
   bool get _shouldIgnoreLifecyclePause {
     final until = _suppressLifecyclePauseUntil;
     return until != null && DateTime.now().isBefore(until);
@@ -4450,6 +4504,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _netSpeedTimer = null;
     _serverProgressSync?.dispose();
     _serverProgressSync = null;
+    _stopMobileVolumeSync();
     _errorSub?.cancel();
     _bufferingSub?.cancel();
     _bufferingPctSub?.cancel();
@@ -4476,6 +4531,20 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _tvCoreExoFocusNode.dispose();
     _playerService.dispose();
     super.dispose();
+  }
+
+  void _startMobileVolumeSync() {
+    if (!_usesSystemVolumeGestures) return;
+    MobileSystemVolume.addListener(_handleSystemVolumeChanged);
+  }
+
+  void _stopMobileVolumeSync() {
+    if (!_usesSystemVolumeGestures) return;
+    MobileSystemVolume.removeListener();
+  }
+
+  void _handleSystemVolumeChanged(double volume) {
+    _playerVolume = volume;
   }
 
   @override
@@ -5766,8 +5835,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     }
     if (!isLeft && widget.appState.gestureVolume) {
       _gestureMode = _GestureMode.volume;
-      final player = _playerService.player;
-      _playerVolume = (player.state.volume / 100).clamp(0.0, 1.0);
       _gestureStartVolume = _playerVolume;
       _setGestureOverlay(
         icon: Icons.volume_up,
@@ -5805,9 +5872,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         break;
       case _GestureMode.volume:
         final v = (_gestureStartVolume + delta).clamp(0.0, 1.0).toDouble();
-        _playerVolume = v;
         // ignore: unawaited_futures
-        _playerService.player.setVolume(v * 100);
+        unawaited(_applyMobilePlayerVolume(v));
         _setGestureOverlay(
           icon: v == 0 ? Icons.volume_off : Icons.volume_up,
           text: '音量 ${(100 * v).round()}%',
@@ -5819,12 +5885,17 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   }
 
   void _onSideDragEnd(DragEndDetails details) {
+    final persistVolume = _gestureMode == _GestureMode.volume;
     if (_gestureMode == _GestureMode.brightness ||
         _gestureMode == _GestureMode.volume) {
       _hideGestureOverlay();
     }
     _gestureMode = _GestureMode.none;
     _gestureStartPos = null;
+    if (persistVolume) {
+      // ignore: unawaited_futures
+      unawaited(_persistMobilePlayerVolume());
+    }
   }
 
   void _onLongPressStart(LongPressStartDetails details) {

@@ -21,6 +21,7 @@ import 'server_adapters/server_access.dart';
 import 'services/app_diagnostics_log.dart';
 import 'services/app_route_observer.dart';
 import 'services/playback/mobile_playback_preferences.dart';
+import 'services/playback/mobile_system_volume.dart';
 import 'services/playback/player_core_pages.dart';
 import 'services/playback/player_core_ui.dart';
 import 'services/playback/video_display_mode.dart';
@@ -273,6 +274,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
   bool get _isIos => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
   bool get _supportsNativeVideoPlayer => _isAndroid || _isIos;
+  bool get _usesSystemVolumeGestures => _isIos;
+  bool get _shouldPersistMobilePlayerVolume => _isAndroid;
   PlayerCore get _nativeCore {
     final current = normalizePlayerCoreForPlatform(widget.appState.playerCore);
     return current == PlayerCore.avplayer
@@ -354,6 +357,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _startMobileVolumeSync();
     _serverAccess =
         resolveServerAccess(appState: widget.appState, server: widget.server);
     final access = _serverAccess;
@@ -527,6 +531,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _uiTimer = null;
     _serverProgressSync?.dispose();
     _serverProgressSync = null;
+    _stopMobileVolumeSync();
     _resumeHintTimer?.cancel();
     _resumeHintTimer = null;
     _startOverHintTimer?.cancel();
@@ -559,6 +564,20 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _tvCoreMpvFocusNode.dispose();
     _tvCoreExoFocusNode.dispose();
     super.dispose();
+  }
+
+  void _startMobileVolumeSync() {
+    if (!_usesSystemVolumeGestures) return;
+    MobileSystemVolume.addListener(_handleSystemVolumeChanged);
+  }
+
+  void _stopMobileVolumeSync() {
+    if (!_usesSystemVolumeGestures) return;
+    MobileSystemVolume.removeListener();
+  }
+
+  void _handleSystemVolumeChanged(double volume) {
+    _playerVolume = volume;
   }
 
   @override
@@ -755,8 +774,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     final cached =
         List<vp_android.ExoPlayerSubtitleTrackData>.unmodifiable(tracks);
     _mobileSubtitleTracks = cached;
-    _mobileSubtitleTracksFuture = SynchronousFuture<
-        List<vp_android.ExoPlayerSubtitleTrackData>>(cached);
+    _mobileSubtitleTracksFuture =
+        SynchronousFuture<List<vp_android.ExoPlayerSubtitleTrackData>>(cached);
   }
 
   void _invalidateMobileTrackPanelState({bool resetScroll = false}) {
@@ -903,6 +922,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       _mobileAutoPlayNextEpisode = next;
       _mobileLoopMode = loop;
     });
+    await _syncMobileVolumeForActivePlayer();
   }
 
   void _setMobileVideoDisplayMode(VideoDisplayMode mode) {
@@ -928,6 +948,52 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     setState(() => _mobileLoopMode = mode);
     await MobilePlaybackPreferences.saveLoopMode(mode);
     await _applyMobileLoopModeToExo();
+  }
+
+  Future<void> _applyMobilePlayerVolume(
+    double value, {
+    bool persist = false,
+  }) async {
+    final normalized = MobilePlaybackPreferences.normalizePlayerVolume(value);
+    _playerVolume = normalized;
+    if (_usesSystemVolumeGestures) {
+      await MobileSystemVolume.setVolume(normalized);
+      return;
+    }
+    final controller = _controller;
+    if (controller != null) {
+      try {
+        await controller.setVolume(normalized);
+      } catch (_) {}
+    }
+    if (persist && _shouldPersistMobilePlayerVolume) {
+      await MobilePlaybackPreferences.savePlayerVolume(normalized);
+    }
+  }
+
+  Future<void> _persistMobilePlayerVolume() async {
+    if (!_shouldPersistMobilePlayerVolume) return;
+    await MobilePlaybackPreferences.savePlayerVolume(_playerVolume);
+  }
+
+  Future<void> _syncMobileVolumeForActivePlayer() async {
+    if (_usesSystemVolumeGestures) {
+      _playerVolume = await MobileSystemVolume.getVolume();
+      await _forceMobilePlayerVolumeToMax();
+      return;
+    }
+    if (_shouldPersistMobilePlayerVolume) {
+      _playerVolume = await MobilePlaybackPreferences.loadPlayerVolume();
+    }
+    await _applyMobilePlayerVolume(_playerVolume);
+  }
+
+  Future<void> _forceMobilePlayerVolumeToMax() async {
+    final controller = _controller;
+    if (controller == null) return;
+    try {
+      await controller.setVolume(1.0);
+    } catch (_) {}
   }
 
   Future<void> _applyMobileLoopModeToExo() async {
@@ -3027,6 +3093,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     );
     _controller = controller;
     await controller.initialize();
+    await _syncMobileVolumeForActivePlayer();
     await _applyMobileLoopModeToExo();
     await _tryInjectEmbyExternalSubtitlesIntoExo(controller);
     await _applyExoSubtitleOptions();
@@ -3701,7 +3768,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       initialData: _mobileAudioTracks,
       builder: (context, snapshot) {
         final tracks = snapshot.data ?? const <vp_platform.VideoAudioTrack>[];
-        if (snapshot.connectionState != ConnectionState.done && tracks.isEmpty) {
+        if (snapshot.connectionState != ConnectionState.done &&
+            tracks.isEmpty) {
           return const Center(child: CircularProgressIndicator());
         }
         if (tracks.isEmpty) {
@@ -3756,12 +3824,14 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       builder: (context, snapshot) {
         final tracks =
             snapshot.data ?? const <vp_android.ExoPlayerSubtitleTrackData>[];
-        if (snapshot.connectionState != ConnectionState.done && tracks.isEmpty) {
+        if (snapshot.connectionState != ConnectionState.done &&
+            tracks.isEmpty) {
           return const Center(child: CircularProgressIndicator());
         }
         final controller = _controller;
         return ListView(
-          key: const PageStorageKey<String>('exo_network_mobile_subtitle_tracks'),
+          key: const PageStorageKey<String>(
+              'exo_network_mobile_subtitle_tracks'),
           controller: _mobileSubtitleScrollController,
           padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
           children: [
@@ -5184,12 +5254,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         break;
       case _GestureMode.volume:
         final v = (_gestureStartVolume + delta).clamp(0.0, 1.0).toDouble();
-        _playerVolume = v;
-        final controller = _controller;
-        if (controller != null) {
-          // ignore: unawaited_futures
-          controller.setVolume(v);
-        }
+        // ignore: unawaited_futures
+        unawaited(_applyMobilePlayerVolume(v));
         _setGestureOverlay(
           icon: v == 0 ? Icons.volume_off : Icons.volume_up,
           text: '音量 ${(100 * v).round()}%',
@@ -5201,12 +5267,17 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   }
 
   void _onSideDragEnd(DragEndDetails details) {
+    final persistVolume = _gestureMode == _GestureMode.volume;
     if (_gestureMode == _GestureMode.brightness ||
         _gestureMode == _GestureMode.volume) {
       _hideGestureOverlay();
     }
     _gestureMode = _GestureMode.none;
     _gestureStartPos = null;
+    if (persistVolume) {
+      // ignore: unawaited_futures
+      unawaited(_persistMobilePlayerVolume());
+    }
   }
 
   void _onLongPressStart(LongPressStartDetails details) {
@@ -5705,6 +5776,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       _controller = controller;
       final controllerInitializeStopwatch = Stopwatch()..start();
       await controller.initialize();
+      await _syncMobileVolumeForActivePlayer();
       await _applyMobileLoopModeToExo();
       controllerInitializeStopwatch.stop();
       AppDiagnosticsLogger.instance.info(

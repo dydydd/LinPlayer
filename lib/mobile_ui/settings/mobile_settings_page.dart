@@ -1238,7 +1238,9 @@ class _MobileSettingsPageState extends State<MobileSettingsPage> {
             contentPadding: EdgeInsets.zero,
             title:
                 const Text('\u53f3\u4fa7\u5c4f\u5e55\u4e0a\u4e0b\u6ed1\u52a8'),
-            subtitle: const Text('\u8c03\u6574\u97f3\u91cf'),
+            subtitle: const Text(
+              'Android 调整播放器音量，iOS 调整系统音量',
+            ),
           ),
           const Divider(height: 1),
           SwitchListTile(

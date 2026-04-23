@@ -29,6 +29,12 @@ class MobilePlaybackPreferences {
   static const String _prefsListenVideo = 'mobilePlayback_listenVideo_v1';
   static const String _prefsAutoNext = 'mobilePlayback_autoNextEpisode_v1';
   static const String _prefsLoop = 'mobilePlayback_loopMode_v1';
+  static const String _prefsPlayerVolume = 'mobilePlayback_playerVolume_v1';
+
+  static double normalizePlayerVolume(double value) {
+    final normalized = value.clamp(0.0, 1.0).toDouble();
+    return normalized.isFinite ? normalized : 1.0;
+  }
 
   static Future<bool> loadListenVideoOnly() async {
     final prefs = await SharedPreferences.getInstance();
@@ -58,5 +64,15 @@ class MobilePlaybackPreferences {
   static Future<void> saveLoopMode(MobilePlaybackLoopMode mode) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefsLoop, mode.storageKey);
+  }
+
+  static Future<double> loadPlayerVolume() async {
+    final prefs = await SharedPreferences.getInstance();
+    return normalizePlayerVolume(prefs.getDouble(_prefsPlayerVolume) ?? 1.0);
+  }
+
+  static Future<void> savePlayerVolume(double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_prefsPlayerVolume, normalizePlayerVolume(value));
   }
 }

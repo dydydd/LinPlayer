@@ -24,6 +24,7 @@ import 'services/app_route_observer.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/desktop_window.dart';
 import 'services/playback/mobile_playback_preferences.dart';
+import 'services/playback/mobile_system_volume.dart';
 import 'services/playback/player_core_pages.dart';
 import 'services/playback/player_core_ui.dart';
 import 'services/playback/video_display_mode.dart';
@@ -211,6 +212,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _startMobileVolumeSync();
     final appState = widget.appState;
     _hwdecOn = appState?.preferHardwareDecode ?? true;
     _anime4kPreset = appState?.anime4kPreset ?? Anime4kPreset.off;
@@ -287,6 +289,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _completedSub?.cancel();
     _bufferingSub?.cancel();
     _bufferSub?.cancel();
+    _stopMobileVolumeSync();
     // ignore: unawaited_futures
     _exitOrientationLock();
     if (_fullScreen) {
@@ -303,6 +306,20 @@ class _PlayerScreenState extends State<PlayerScreen>
     _tvPlayPauseFocusNode.dispose();
     _playerService.dispose();
     super.dispose();
+  }
+
+  void _startMobileVolumeSync() {
+    if (!_usesSystemVolumeGestures) return;
+    MobileSystemVolume.addListener(_handleSystemVolumeChanged);
+  }
+
+  void _stopMobileVolumeSync() {
+    if (!_usesSystemVolumeGestures) return;
+    MobileSystemVolume.removeListener();
+  }
+
+  void _handleSystemVolumeChanged(double volume) {
+    _playerVolume = volume;
   }
 
   void _scheduleNetSpeedTick() {
@@ -1094,8 +1111,6 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     if (!isLeft && _gestureVolumeEnabled) {
       _gestureMode = _GestureMode.volume;
-      final player = _playerService.player;
-      _playerVolume = (player.state.volume / 100).clamp(0.0, 1.0);
       _gestureStartVolume = _playerVolume;
       _setGestureOverlay(
         icon: Icons.volume_up,
@@ -1133,9 +1148,8 @@ class _PlayerScreenState extends State<PlayerScreen>
         break;
       case _GestureMode.volume:
         final v = (_gestureStartVolume + delta).clamp(0.0, 1.0).toDouble();
-        _playerVolume = v;
         // ignore: unawaited_futures
-        _playerService.player.setVolume(v * 100);
+        unawaited(_applyMobilePlayerVolume(v));
         _setGestureOverlay(
           icon: v == 0 ? Icons.volume_off : Icons.volume_up,
           text: '音量 ${(100 * v).round()}%',
@@ -1147,12 +1161,17 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   void _onSideDragEnd(DragEndDetails details) {
+    final persistVolume = _gestureMode == _GestureMode.volume;
     if (_gestureMode == _GestureMode.brightness ||
         _gestureMode == _GestureMode.volume) {
       _hideGestureOverlay();
     }
     _gestureMode = _GestureMode.none;
     _gestureStartPos = null;
+    if (persistVolume) {
+      // ignore: unawaited_futures
+      unawaited(_persistMobilePlayerVolume());
+    }
   }
 
   void _onLongPressStart(LongPressStartDetails details) {
@@ -1802,6 +1821,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             externalMpvPath: widget.appState?.externalMpvPath,
             httpProxy: attemptProxy,
           );
+          await _syncMobileVolumeForActivePlayer();
           selectedSource = attemptSource;
           selectedHeaders = c.httpHeaders;
           selectedIsNetwork = attemptIsNetwork;
@@ -2046,6 +2066,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (_isTvDevice) return false;
     return Platform.isAndroid || Platform.isIOS;
   }
+
+  bool get _usesSystemVolumeGestures => !kIsWeb && Platform.isIOS;
+
+  bool get _shouldPersistMobilePlayerVolume => !kIsWeb && Platform.isAndroid;
 
   Future<void> _enterImmersiveMode() async {
     if (!_shouldControlSystemUi) return;
@@ -6331,6 +6355,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       _mobileAutoPlayNextEpisode = next;
       _mobileLoopMode = loop;
     });
+    await _syncMobileVolumeForActivePlayer();
   }
 
   Future<void> _setMobileListenVideoOnly(bool value) async {
@@ -6350,6 +6375,52 @@ class _PlayerScreenState extends State<PlayerScreen>
     setState(() => _mobileLoopMode = mode);
     await MobilePlaybackPreferences.saveLoopMode(mode);
     await _applyMobileLoopModeToPlayer();
+  }
+
+  Future<void> _applyMobilePlayerVolume(
+    double value, {
+    bool persist = false,
+  }) async {
+    final normalized = MobilePlaybackPreferences.normalizePlayerVolume(value);
+    _playerVolume = normalized;
+    if (_usesSystemVolumeGestures) {
+      await MobileSystemVolume.setVolume(normalized);
+      return;
+    }
+    if (_playerService.isInitialized && !_playerService.isExternalPlayback) {
+      try {
+        await _playerService.player.setVolume(normalized * 100);
+      } catch (_) {}
+    }
+    if (persist && _shouldPersistMobilePlayerVolume) {
+      await MobilePlaybackPreferences.savePlayerVolume(normalized);
+    }
+  }
+
+  Future<void> _persistMobilePlayerVolume() async {
+    if (!_shouldPersistMobilePlayerVolume) return;
+    await MobilePlaybackPreferences.savePlayerVolume(_playerVolume);
+  }
+
+  Future<void> _syncMobileVolumeForActivePlayer() async {
+    if (_usesSystemVolumeGestures) {
+      _playerVolume = await MobileSystemVolume.getVolume();
+      await _forceMobilePlayerVolumeToMax();
+      return;
+    }
+    if (_shouldPersistMobilePlayerVolume) {
+      _playerVolume = await MobilePlaybackPreferences.loadPlayerVolume();
+    }
+    await _applyMobilePlayerVolume(_playerVolume);
+  }
+
+  Future<void> _forceMobilePlayerVolumeToMax() async {
+    if (!_playerService.isInitialized || _playerService.isExternalPlayback) {
+      return;
+    }
+    try {
+      await _playerService.player.setVolume(100);
+    } catch (_) {}
   }
 
   Future<void> _applyMobileLoopModeToPlayer() async {

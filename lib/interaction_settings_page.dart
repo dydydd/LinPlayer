@@ -107,7 +107,9 @@ class _InteractionSettingsPageState extends State<InteractionSettingsPage> {
                         value: appState.gestureVolume,
                         onChanged: (v) => appState.setGestureVolume(v),
                         title: const Text('右侧屏幕上下拖动'),
-                        subtitle: const Text('以调整音量'),
+                        subtitle: const Text(
+                          'Android 调整播放器音量，iOS 调整系统音量',
+                        ),
                         contentPadding: EdgeInsets.zero,
                       ),
                       const Divider(height: 1),
