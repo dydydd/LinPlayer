@@ -398,13 +398,31 @@ jobs:
 
           Get-ChildItem -Path $outDirResolved
 
+      - name: Stage Windows release assets
+        shell: pwsh
+        run: |
+          $stageDir = "build/ci-windows-release-assets"
+          Remove-Item -LiteralPath $stageDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $stageDir -Force | Out-Null
+
+          if (-not (Test-Path "LinPlayer-Windows-Setup-x64.exe")) {
+            throw "Installer output not found for Windows release staging."
+          }
+
+          Copy-Item -LiteralPath "LinPlayer-Windows-Setup-x64.exe" -Destination $stageDir -Force
+
+          $portableArchives = Get-ChildItem -Path "build/ci-windows-packages" -Filter "LinPlayer-Windows-Portable-x64.*" -ErrorAction SilentlyContinue
+          foreach ($archive in $portableArchives) {
+            Copy-Item -LiteralPath $archive.FullName -Destination $stageDir -Force
+          }
+
+          Get-ChildItem -Path $stageDir
+
       - name: Upload Windows package artifacts
         uses: actions/upload-artifact@v4
         with:
           name: LinPlayer-Windows-Packages-${{ env.VERSION_FULL }}
-          path: |
-            LinPlayer-Windows-Setup-x64.exe
-            build/ci-windows-packages/LinPlayer-Windows-Portable-x64.*
+          path: build/ci-windows-release-assets/*
 
   build-linux:
     name: Build Linux Packages (${{ matrix.arch }})
