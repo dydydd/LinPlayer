@@ -1,3 +1,4 @@
+import Darwin
 import Flutter
 import Foundation
 import MobileVLCKit
@@ -9,17 +10,17 @@ final class VLCPlayerHostedView: UIView {
             attachDrawableIfNeeded(forceRebind: true)
         }
     }
-    
+
     override func layoutSubviews() {
         super.layoutSubviews()
         attachDrawableIfNeeded()
     }
-    
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
         attachDrawableIfNeeded(forceRebind: true)
     }
-    
+
     func attachDrawableIfNeeded(forceRebind: Bool = false) {
         guard let player = player else {
             return
@@ -31,366 +32,416 @@ final class VLCPlayerHostedView: UIView {
         if forceRebind {
             player.drawable = nil
         }
+        if !forceRebind, let drawable = player.drawable as? UIView, drawable === self {
+            return
+        }
         player.drawable = self
     }
 }
 
 public class VLCViewController: NSObject, FlutterPlatformView {
-    var hostedView: UIView
-    var vlcMediaPlayer: VLCMediaPlayer
-    var mediaEventChannel: FlutterEventChannel
-    let mediaEventChannelHandler: VLCPlayerEventStreamHandler
-    var rendererEventChannel: FlutterEventChannel
-    let rendererEventChannelHandler: VLCRendererEventStreamHandler
-    var rendererdiscoverers: [VLCRendererDiscoverer] = .init()
+    private let hostedView: VLCPlayerHostedView
+    private let vlcMediaPlayer: VLCMediaPlayer
+    private let mediaEventChannel: FlutterEventChannel
+    private let mediaEventChannelHandler: VLCPlayerEventStreamHandler
+    private let rendererEventChannel: FlutterEventChannel
+    private let rendererEventChannelHandler: VLCRendererEventStreamHandler
+    private var rendererDiscoverers: [VLCRendererDiscoverer] = []
+
+    private var mediaOptions: [String] = []
+    private var loopingEnabled = false
+    private var pendingSeekPosition: Int64?
+    private var requestedVolume: Int32
+    private var requestedPlaybackSpeed: Float
+    private var requestedVideoScale: Float
+    private var requestedAspectRatio: String?
+    private var aspectRatioCString: UnsafeMutablePointer<Int8>?
     private var isDisposed = false
-    
+
     public func view() -> UIView {
         refreshDrawableBinding()
-        return self.hostedView
+        return hostedView
     }
-    
+
     init(frame: CGRect, viewId: Int64, messenger: FlutterBinaryMessenger) {
-        let mediaEventChannel = FlutterEventChannel(
+        mediaEventChannel = FlutterEventChannel(
             name: "flutter_video_plugin/getVideoEvents_\(viewId)",
             binaryMessenger: messenger
         )
-        let rendererEventChannel = FlutterEventChannel(
+        rendererEventChannel = FlutterEventChannel(
             name: "flutter_video_plugin/getRendererEvents_\(viewId)",
             binaryMessenger: messenger
         )
-        
+
         let hostedView = VLCPlayerHostedView(frame: frame)
         hostedView.backgroundColor = .black
         hostedView.clipsToBounds = true
         self.hostedView = hostedView
-        self.vlcMediaPlayer = VLCMediaPlayer()
-//        self.vlcMediaPlayer.libraryInstance.debugLogging = true
-//        self.vlcMediaPlayer.libraryInstance.debugLoggingLevel = 3
-        self.mediaEventChannel = mediaEventChannel
-        self.mediaEventChannelHandler = VLCPlayerEventStreamHandler()
-        self.rendererEventChannel = rendererEventChannel
-        self.rendererEventChannelHandler = VLCRendererEventStreamHandler()
+
+        let mediaPlayer = VLCMediaPlayer()
+        vlcMediaPlayer = mediaPlayer
+        requestedVolume = mediaPlayer.audio?.volume ?? 100
+        requestedPlaybackSpeed = mediaPlayer.rate > 0 ? mediaPlayer.rate : 1.0
+        requestedVideoScale = mediaPlayer.scaleFactor
+
+        mediaEventChannelHandler = VLCPlayerEventStreamHandler()
+        rendererEventChannelHandler = VLCRendererEventStreamHandler()
+
         super.init()
-        //
-        self.mediaEventChannel.setStreamHandler(self.mediaEventChannelHandler)
-        self.rendererEventChannel.setStreamHandler(self.rendererEventChannelHandler)
-        hostedView.player = self.vlcMediaPlayer
-        self.vlcMediaPlayer.delegate = self.mediaEventChannelHandler
+
+        mediaEventChannelHandler.owner = self
+        mediaEventChannel.setStreamHandler(mediaEventChannelHandler)
+        rendererEventChannel.setStreamHandler(rendererEventChannelHandler)
+
+        hostedView.player = mediaPlayer
+        mediaPlayer.delegate = mediaEventChannelHandler
+
         registerLifecycleObservers()
     }
-    
+
     public func play() {
-        refreshDrawableBinding(forceRebind: true)
-        self.vlcMediaPlayer.play()
-        refreshDrawableBinding()
-    }
-    
-    public func pause() {
-        self.vlcMediaPlayer.pause()
-    }
-    
-    public func stop() {
-        self.vlcMediaPlayer.stop()
-    }
-    
-    public var isPlaying: Bool {
-        self.vlcMediaPlayer.isPlaying
-    }
-    
-    public var isSeekable: Bool {
-        self.vlcMediaPlayer.isSeekable
-    }
-    
-    public func setLooping(isLooping: Bool) {
-        self.vlcMediaPlayer.media?.addOption(isLooping ? "--loop" : "--no-loop")
-    }
-    
-    public func seek(position: Int64) {
-        self.vlcMediaPlayer.time = VLCTime(number: position as NSNumber)
-    }
-    
-    public var position: Int32 {
-        self.vlcMediaPlayer.time.intValue
-    }
-    
-    public var duration: Int32 {
-        self.vlcMediaPlayer.media?.length.intValue ?? 0
-    }
-    
-    public func setVolume(volume: Int64) {
-        self.vlcMediaPlayer.audio?.volume = volume.int32
-    }
-    
-    public var volume: Int32 {
-        self.vlcMediaPlayer.audio?.volume ?? 100
-    }
-    
-    public func setPlaybackSpeed(speed: Float) {
-        self.vlcMediaPlayer.rate = speed
-    }
-    
-    public var playbackSpeed: Float {
-        self.vlcMediaPlayer.rate
-    }
-    
-    public func takeSnapshot() -> String? {
-        let drawable: UIView = self.vlcMediaPlayer.drawable as! UIView
-        let size = drawable.frame.size
-        UIGraphicsBeginImageContextWithOptions(size, _: false, _: 0.0)
-        let rec = drawable.frame
-        drawable.drawHierarchy(in: rec, afterScreenUpdates: false)
-        let image = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
-        let byteArray = (image ?? UIImage()).pngData()
-        //
-        return byteArray?.base64EncodedString()
-    }
-    
-    public var spuTracksCount: Int32 {
-        return self.vlcMediaPlayer.numberOfSubtitlesTracks
-    }
-    
-    public var spuTracks: [Int: String] {
-        self.vlcMediaPlayer.subtitles()
-    }
-    
-    public func setSpuTrack(spuTrackNumber: Int32) {
-        self.vlcMediaPlayer.currentVideoSubTitleIndex = spuTrackNumber
-    }
-    
-    public var spuTrack: Int32 {
-        self.vlcMediaPlayer.currentVideoSubTitleIndex
-    }
-    
-    public func setSpuDelay(delay: Int) {
-        self.vlcMediaPlayer.currentVideoSubTitleDelay = delay
-    }
-    
-    public var spuDelay: Int {
-        self.vlcMediaPlayer.currentVideoSubTitleDelay
-    }
-    
-    public func addSubtitleTrack(uri: String, isSelected: Bool) {
-        // TODO: check for file type
-        guard
-            let url = URL(string: uri)
-        else {
+        guard !isDisposed else {
             return
         }
-        
-        self.vlcMediaPlayer.addPlaybackSlave(
+        refreshDrawableBinding(forceRebind: true)
+        applyPendingSeekIfNeeded()
+        vlcMediaPlayer.play()
+        schedulePendingSeekReapply()
+        schedulePlaybackSpeedApply()
+        refreshDrawableBinding()
+    }
+
+    public func pause() {
+        guard !isDisposed else {
+            return
+        }
+        vlcMediaPlayer.pause()
+    }
+
+    public func stop() {
+        guard !isDisposed else {
+            return
+        }
+        pendingSeekPosition = nil
+        vlcMediaPlayer.stop()
+    }
+
+    public var isPlaying: Bool {
+        vlcMediaPlayer.isPlaying
+    }
+
+    public var isSeekable: Bool {
+        vlcMediaPlayer.isSeekable
+    }
+
+    public func setMediaOptions(_ options: [String]) {
+        mediaOptions = options
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    public func setLooping(isLooping: Bool) {
+        loopingEnabled = isLooping
+        guard let media = vlcMediaPlayer.media else {
+            return
+        }
+        applyLoopingOption(to: media)
+    }
+
+    public func seek(position: Int64) {
+        guard !isDisposed else {
+            return
+        }
+        let shouldDeferSeek = vlcMediaPlayer.media == nil || vlcMediaPlayer.state == .stopped
+        pendingSeekPosition = shouldDeferSeek ? position : nil
+        vlcMediaPlayer.time = VLCTime(number: NSNumber(value: position))
+        if shouldDeferSeek {
+            schedulePendingSeekReapply()
+        }
+    }
+
+    public var position: Int64 {
+        vlcMediaPlayer.time.value?.int64Value ?? 0
+    }
+
+    public var duration: Int64 {
+        vlcMediaPlayer.media?.length.value?.int64Value ?? 0
+    }
+
+    public func setVolume(volume: Int64) {
+        requestedVolume = Int32(truncatingIfNeeded: volume)
+        vlcMediaPlayer.audio?.volume = requestedVolume
+    }
+
+    public var volume: Int32 {
+        vlcMediaPlayer.audio?.volume ?? requestedVolume
+    }
+
+    public func setPlaybackSpeed(speed: Float) {
+        requestedPlaybackSpeed = speed > 0 ? speed : 1.0
+        applyPlaybackSpeedIfNeeded()
+    }
+
+    public var playbackSpeed: Float {
+        requestedPlaybackSpeed
+    }
+
+    public func takeSnapshot() -> String? {
+        guard !isDisposed else {
+            return nil
+        }
+        let targetView = (vlcMediaPlayer.drawable as? UIView) ?? hostedView
+        let bounds = targetView.bounds.integral
+        guard bounds.width > 0, bounds.height > 0 else {
+            return nil
+        }
+        let renderer = UIGraphicsImageRenderer(bounds: bounds)
+        let image = renderer.image { _ in
+            targetView.drawHierarchy(in: bounds, afterScreenUpdates: true)
+        }
+        return image.pngData()?.base64EncodedString()
+    }
+
+    public var spuTracksCount: Int32 {
+        vlcMediaPlayer.numberOfSubtitlesTracks
+    }
+
+    public var spuTracks: [Int: String] {
+        vlcMediaPlayer.subtitles()
+    }
+
+    public func setSpuTrack(spuTrackNumber: Int32) {
+        vlcMediaPlayer.currentVideoSubTitleIndex = spuTrackNumber
+    }
+
+    public var spuTrack: Int32 {
+        vlcMediaPlayer.currentVideoSubTitleIndex
+    }
+
+    public func setSpuDelay(delay: Int) {
+        vlcMediaPlayer.currentVideoSubTitleDelay = delay
+    }
+
+    public var spuDelay: Int {
+        vlcMediaPlayer.currentVideoSubTitleDelay
+    }
+
+    public func addSubtitleTrack(uri: String, type: DataSourceType, isSelected: Bool) {
+        guard let url = resolvedMediaURL(from: uri, sourceType: type) else {
+            return
+        }
+        vlcMediaPlayer.addPlaybackSlave(
             url,
             type: VLCMediaPlaybackSlaveType.subtitle,
             enforce: isSelected
         )
     }
-    
+
     public var audioTracksCount: Int32 {
-        self.vlcMediaPlayer.numberOfAudioTracks
+        vlcMediaPlayer.numberOfAudioTracks
     }
-    
+
     public var audioTracks: [Int: String] {
-        self.vlcMediaPlayer.audioTracks()
+        vlcMediaPlayer.audioTracks()
     }
-    
+
     public func setAudioTrack(audioTrackNumber: Int32) {
-        self.vlcMediaPlayer.currentAudioTrackIndex = audioTrackNumber
+        vlcMediaPlayer.currentAudioTrackIndex = audioTrackNumber
     }
-    
+
     public var audioTrack: Int32 {
-        self.vlcMediaPlayer.currentAudioTrackIndex
+        vlcMediaPlayer.currentAudioTrackIndex
     }
-    
+
     public func setAudioDelay(delay: Int) {
-        self.vlcMediaPlayer.currentAudioPlaybackDelay = delay
+        vlcMediaPlayer.currentAudioPlaybackDelay = delay
     }
-    
+
     public var audioDelay: Int {
-        self.vlcMediaPlayer.currentAudioPlaybackDelay
+        vlcMediaPlayer.currentAudioPlaybackDelay
     }
-    
-    public func addAudioTrack(uri: String, isSelected: Bool) {
-        // TODO: check for file type
-        guard let url = URL(string: uri)
-        else {
+
+    public func addAudioTrack(uri: String, type: DataSourceType, isSelected: Bool) {
+        guard let url = resolvedMediaURL(from: uri, sourceType: type) else {
             return
         }
-        self.vlcMediaPlayer.addPlaybackSlave(
+        vlcMediaPlayer.addPlaybackSlave(
             url,
             type: VLCMediaPlaybackSlaveType.audio,
             enforce: isSelected
         )
     }
-    
+
     public var videoTracksCount: Int32 {
-        self.vlcMediaPlayer.numberOfVideoTracks
+        vlcMediaPlayer.numberOfVideoTracks
     }
-    
+
     public var videoTracks: [Int: String] {
-        self.vlcMediaPlayer.videoTracks()
+        vlcMediaPlayer.videoTracks()
     }
-    
+
     public func setVideoTrack(videoTrackNumber: Int32) {
-        self.vlcMediaPlayer.currentVideoTrackIndex = videoTrackNumber
+        vlcMediaPlayer.currentVideoTrackIndex = videoTrackNumber
     }
-    
+
     public var videoTrack: Int32 {
-        self.vlcMediaPlayer.currentVideoTrackIndex
+        vlcMediaPlayer.currentVideoTrackIndex
     }
-    
+
     public func setVideoScale(scale: Float) {
-        self.vlcMediaPlayer.scaleFactor = scale
+        requestedVideoScale = scale
+        vlcMediaPlayer.scaleFactor = scale
     }
-    
+
     public var videoScale: Float {
-        self.vlcMediaPlayer.scaleFactor
+        requestedVideoScale
     }
-    
+
     public func setVideoAspectRatio(aspectRatio: String) {
-        let aspectRatio = UnsafeMutablePointer<Int8>(
-            mutating: (aspectRatio as NSString).utf8String
-        )
-        self.vlcMediaPlayer.videoAspectRatio = aspectRatio
+        let normalized = aspectRatio.trimmingCharacters(in: .whitespacesAndNewlines)
+        requestedAspectRatio = normalized.isEmpty ? nil : normalized
+        applyAspectRatio()
     }
-    
+
     public var videoAspectRatio: String {
-        guard let aspectRatio = self.vlcMediaPlayer.videoAspectRatio else {
+        if let requestedAspectRatio, !requestedAspectRatio.isEmpty {
+            return requestedAspectRatio
+        }
+        guard let aspectRatio = vlcMediaPlayer.videoAspectRatio else {
             return "1"
         }
-        
         return String(cString: aspectRatio)
     }
-    
+
     public var availableRendererServices: [String] {
-        self.vlcMediaPlayer.rendererServices()
+        vlcMediaPlayer.rendererServices()
     }
-    
+
     public func startRendererScanning() {
-        self.rendererdiscoverers.removeAll()
-        self.rendererEventChannelHandler.renderItems.removeAll()
-        // chromecast service name: "Bonjour_renderer"
-        let rendererServices = self.vlcMediaPlayer.rendererServices()
-        for rendererService in rendererServices {
-            guard let rendererDiscoverer
-                = VLCRendererDiscoverer(name: rendererService)
-            else {
+        stopRendererScanning()
+        for rendererService in vlcMediaPlayer.rendererServices() {
+            guard let rendererDiscoverer = VLCRendererDiscoverer(name: rendererService) else {
                 continue
             }
-            rendererDiscoverer.delegate = self.rendererEventChannelHandler
+            rendererDiscoverer.delegate = rendererEventChannelHandler
             rendererDiscoverer.start()
-            self.rendererdiscoverers.append(rendererDiscoverer)
+            rendererDiscoverers.append(rendererDiscoverer)
         }
     }
-    
+
     public func stopRendererScanning() {
-        for rendererDiscoverer in self.rendererdiscoverers {
+        for rendererDiscoverer in rendererDiscoverers {
             rendererDiscoverer.stop()
             rendererDiscoverer.delegate = nil
         }
-        self.rendererdiscoverers.removeAll()
-        self.rendererEventChannelHandler.renderItems.removeAll()
-        if self.vlcMediaPlayer.isPlaying {
-            self.vlcMediaPlayer.pause()
+        rendererDiscoverers.removeAll()
+        rendererEventChannelHandler.renderItems.removeAll()
+        if vlcMediaPlayer.isPlaying {
+            vlcMediaPlayer.pause()
         }
-        self.vlcMediaPlayer.setRendererItem(nil)
+        vlcMediaPlayer.setRendererItem(nil)
     }
-    
+
     public var rendererDevices: [String: String] {
         var rendererDevices: [String: String] = [:]
-        let rendererItems = self.rendererEventChannelHandler.renderItems
-        for (_, item) in rendererItems.enumerated() {
+        for item in rendererEventChannelHandler.renderItems {
             rendererDevices[item.name] = item.name
         }
         return rendererDevices
     }
-    
+
     public func cast(rendererDevice: String) {
-        if self.vlcMediaPlayer.isPlaying {
-            self.vlcMediaPlayer.pause()
+        if vlcMediaPlayer.isPlaying {
+            vlcMediaPlayer.pause()
         }
-        let rendererItems = self.rendererEventChannelHandler.renderItems
-        let rendererItem = rendererItems.first {
-            $0.name.contains(rendererDevice)
-        }
-        self.vlcMediaPlayer.setRendererItem(rendererItem)
-        self.vlcMediaPlayer.play()
+        let rendererItem = rendererEventChannelHandler.renderItems.first { $0.name == rendererDevice }
+        vlcMediaPlayer.setRendererItem(rendererItem)
+        vlcMediaPlayer.play()
     }
-    
+
     public func startRecording(saveDirectory: String) -> Bool {
-        return !self.vlcMediaPlayer.startRecording(atPath: saveDirectory)
+        vlcMediaPlayer.startRecording(atPath: saveDirectory)
     }
-    
+
     public func stopRecording() -> Bool {
-        return !self.vlcMediaPlayer.stopRecording()
+        vlcMediaPlayer.stopRecording()
     }
-    
+
     public func dispose() {
+        guard !isDisposed else {
+            return
+        }
         isDisposed = true
         NotificationCenter.default.removeObserver(self)
-        self.mediaEventChannel.setStreamHandler(nil)
-        self.rendererEventChannel.setStreamHandler(nil)
-        self.rendererdiscoverers.removeAll()
-        self.rendererEventChannelHandler.renderItems.removeAll()
-        self.vlcMediaPlayer.stop()
-        self.vlcMediaPlayer.delegate = nil
-        self.vlcMediaPlayer.drawable = nil
-        self.vlcMediaPlayer.media = nil
-        (self.hostedView as? VLCPlayerHostedView)?.player = nil
+        stopRendererScanning()
+        mediaEventChannel.setStreamHandler(nil)
+        rendererEventChannel.setStreamHandler(nil)
+        vlcMediaPlayer.stop()
+        vlcMediaPlayer.delegate = nil
+        vlcMediaPlayer.drawable = nil
+        vlcMediaPlayer.media = nil
+        hostedView.player = nil
+        if let aspectRatioCString {
+            free(aspectRatioCString)
+            self.aspectRatioCString = nil
+        }
+        pendingSeekPosition = nil
     }
-    
-    func setMediaPlayerUrl(uri: String, isAssetUrl: Bool, autoPlay: Bool, hwAcc: Int, options: [String]) {
-        self.vlcMediaPlayer.stop()
-        self.vlcMediaPlayer.media = nil
-        
-        var media: VLCMedia
-        if isAssetUrl {
-            guard let path = Bundle.main.path(forResource: uri, ofType: nil)
-            else {
-                return
-            }
-            media = VLCMedia(path: path)
-        }
-        else {
-            guard let url = URL(string: uri)
-            else {
-                return
-            }
-            media = VLCMedia(url: url)
-        }
-        
-        if !options.isEmpty {
-            for option in options {
-                media.addOption(option)
-            }
-        }
-        
-        switch HWAccellerationType(rawValue: hwAcc) {
-        case .HW_ACCELERATION_DISABLED:
-            media.addOption("--codec=avcodec")
 
-        case .HW_ACCELERATION_DECODING:
-            media.addOption("--codec=all")
-            media.addOption(":no-mediacodec-dr")
-            media.addOption(":no-omxil-dr")
-
-        case .HW_ACCELERATION_FULL:
-            media.addOption("--codec=all")
-
-        case .HW_ACCELERATION_AUTOMATIC:
-            break
-
-        case .none:
-            break
+    func setMediaPlayerUrl(
+        uri: String,
+        sourceType: DataSourceType,
+        autoPlay: Bool,
+        hwAcc: Int
+    ) {
+        guard !isDisposed else {
+            return
         }
-        
-        self.vlcMediaPlayer.media = media
+
+        stopRendererScanning()
+        pendingSeekPosition = nil
+        vlcMediaPlayer.stop()
+        vlcMediaPlayer.media = nil
+
+        guard let media = makeMedia(uri: uri, sourceType: sourceType) else {
+            return
+        }
+
+        media.delegate = mediaEventChannelHandler
+        applyMediaOptions(to: media, hwAcc: hwAcc)
+
+        vlcMediaPlayer.media = media
         refreshDrawableBinding(forceRebind: true)
-//        self.vlcMediaPlayer.media.parse(withOptions: VLCMediaParsingOptions(VLCMediaParseLocal | VLCMediaFetchLocal | VLCMediaParseNetwork | VLCMediaFetchNetwork))
-        self.vlcMediaPlayer.play()
-        refreshDrawableBinding()
-        if !autoPlay {
-            self.vlcMediaPlayer.stop()
+        applyPersistentPlayerState(allowDeferredPlaybackSpeed: false)
+
+        if autoPlay {
+            DispatchQueue.main.async { [weak self] in
+                self?.play()
+            }
+        }
+    }
+
+    func handleMediaPlayerStateChanged(_ player: VLCMediaPlayer?) {
+        guard !isDisposed, player === vlcMediaPlayer else {
+            return
+        }
+        switch player?.state {
+        case .opening, .buffering, .playing:
+            applyPendingSeekIfNeeded()
+        default:
+            break
+        }
+        if player?.state == .playing {
+            applyPlaybackSpeedIfNeeded()
+        }
+    }
+
+    func handleMediaPlayerTimeChanged(_ position: Int64) {
+        guard let pendingSeekPosition else {
+            return
+        }
+        if abs(position - pendingSeekPosition) <= 1500 {
+            self.pendingSeekPosition = nil
         }
     }
 
@@ -407,68 +458,213 @@ public class VLCViewController: NSObject, FlutterPlatformView {
             name: UIApplication.willEnterForegroundNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleApplicationDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+    }
+
+    private func makeMedia(uri: String, sourceType: DataSourceType) -> VLCMedia? {
+        let trimmedUri = uri.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedUri.isEmpty else {
+            return nil
+        }
+
+        switch sourceType {
+        case .ASSET:
+            return VLCMedia(path: trimmedUri)
+        case .FILE:
+            guard let fileURL = resolvedMediaURL(from: trimmedUri, sourceType: sourceType) else {
+                return nil
+            }
+            return VLCMedia(url: fileURL)
+        case .NETWORK:
+            guard let url = resolvedMediaURL(from: trimmedUri, sourceType: sourceType) else {
+                return nil
+            }
+            return url.isFileURL ? VLCMedia(url: url) : VLCMedia(url: url)
+        }
+    }
+
+    private func resolvedMediaURL(from uri: String, sourceType: DataSourceType) -> URL? {
+        let trimmedUri = uri.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedUri.isEmpty else {
+            return nil
+        }
+
+        switch sourceType {
+        case .ASSET:
+            return URL(fileURLWithPath: trimmedUri)
+        case .FILE:
+            if let url = URL(string: trimmedUri), url.isFileURL {
+                return url
+            }
+            let expandedPath = NSString(string: trimmedUri).expandingTildeInPath
+            return URL(fileURLWithPath: expandedPath)
+        case .NETWORK:
+            if let url = URL(string: trimmedUri) {
+                return url
+            }
+            guard let encoded = trimmedUri.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed) else {
+                return nil
+            }
+            return URL(string: encoded)
+        }
+    }
+
+    private func applyMediaOptions(to media: VLCMedia, hwAcc: Int) {
+        for option in mediaOptions {
+            media.addOption(option)
+        }
+        applyLoopingOption(to: media)
+
+        switch HWAccellerationType(rawValue: hwAcc) {
+        case .HW_ACCELERATION_DISABLED:
+            media.addOption("--codec=avcodec")
+        case .HW_ACCELERATION_DECODING:
+            media.addOption("--codec=all")
+            media.addOption(":no-mediacodec-dr")
+            media.addOption(":no-omxil-dr")
+        case .HW_ACCELERATION_FULL:
+            media.addOption("--codec=all")
+        case .HW_ACCELERATION_AUTOMATIC, .none:
+            break
+        }
+    }
+
+    private func applyLoopingOption(to media: VLCMedia) {
+        media.addOption(loopingEnabled ? "--loop" : "--no-loop")
+    }
+
+    private func applyPersistentPlayerState(allowDeferredPlaybackSpeed: Bool) {
+        vlcMediaPlayer.audio?.volume = requestedVolume
+        vlcMediaPlayer.scaleFactor = requestedVideoScale
+        applyAspectRatio()
+        if allowDeferredPlaybackSpeed {
+            applyPlaybackSpeedIfNeeded()
+        }
+    }
+
+    private func applyAspectRatio() {
+        if let aspectRatioCString {
+            free(aspectRatioCString)
+            self.aspectRatioCString = nil
+        }
+        guard let requestedAspectRatio, !requestedAspectRatio.isEmpty else {
+            vlcMediaPlayer.videoAspectRatio = nil
+            return
+        }
+        aspectRatioCString = strdup(requestedAspectRatio)
+        vlcMediaPlayer.videoAspectRatio = aspectRatioCString
+    }
+
+    private func applyPlaybackSpeedIfNeeded() {
+        guard !isDisposed, requestedPlaybackSpeed > 0 else {
+            return
+        }
+        guard vlcMediaPlayer.isPlaying else {
+            return
+        }
+        vlcMediaPlayer.rate = requestedPlaybackSpeed
+    }
+
+    private func applyPendingSeekIfNeeded() {
+        guard let pendingSeekPosition else {
+            return
+        }
+        vlcMediaPlayer.time = VLCTime(number: NSNumber(value: pendingSeekPosition))
+    }
+
+    private func schedulePendingSeekReapply() {
+        guard pendingSeekPosition != nil else {
+            return
+        }
+        scheduleOnMain(delay: 0.1) { [weak self] in
+            self?.applyPendingSeekIfNeeded()
+        }
+        scheduleOnMain(delay: 0.3) { [weak self] in
+            self?.applyPendingSeekIfNeeded()
+        }
+    }
+
+    private func schedulePlaybackSpeedApply() {
+        scheduleOnMain(delay: 0.0) { [weak self] in
+            self?.applyPlaybackSpeedIfNeeded()
+        }
+        scheduleOnMain(delay: 0.1) { [weak self] in
+            self?.applyPlaybackSpeedIfNeeded()
+        }
     }
 
     private func refreshDrawableBinding(forceRebind: Bool = false) {
         guard !isDisposed else {
             return
         }
-        scheduleDrawableBinding(forceRebind: forceRebind, delay: 0.0)
-        scheduleDrawableBinding(forceRebind: false, delay: 0.1)
-        scheduleDrawableBinding(forceRebind: false, delay: 0.3)
+        scheduleOnMain(delay: 0.0) { [weak self] in
+            self?.hostedView.attachDrawableIfNeeded(forceRebind: forceRebind)
+        }
+        scheduleOnMain(delay: 0.1) { [weak self] in
+            self?.hostedView.attachDrawableIfNeeded(forceRebind: false)
+        }
+        scheduleOnMain(delay: 0.3) { [weak self] in
+            self?.hostedView.attachDrawableIfNeeded(forceRebind: false)
+        }
     }
 
-    private func scheduleDrawableBinding(forceRebind: Bool, delay: TimeInterval) {
+    private func scheduleOnMain(delay: TimeInterval, _ action: @escaping () -> Void) {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self = self, !self.isDisposed else {
+            guard let self, !self.isDisposed else {
                 return
             }
-            (self.hostedView as? VLCPlayerHostedView)?
-                .attachDrawableIfNeeded(forceRebind: forceRebind)
+            action()
         }
     }
 
     @objc private func handleApplicationDidBecomeActive() {
         refreshDrawableBinding(forceRebind: true)
+        applyPersistentPlayerState(allowDeferredPlaybackSpeed: true)
     }
 
     @objc private func handleApplicationWillEnterForeground() {
         refreshDrawableBinding(forceRebind: true)
+        applyPersistentPlayerState(allowDeferredPlaybackSpeed: true)
+    }
+
+    @objc private func handleApplicationDidEnterBackground() {
+        vlcMediaPlayer.drawable = nil
     }
 }
 
-class VLCRendererEventStreamHandler: NSObject, FlutterStreamHandler, VLCRendererDiscovererDelegate {
+final class VLCRendererEventStreamHandler: NSObject, FlutterStreamHandler, VLCRendererDiscovererDelegate {
     private var rendererEventSink: FlutterEventSink?
-    var renderItems: [VLCRendererItem] = .init()
-    
+    var renderItems: [VLCRendererItem] = []
+
     func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
-        self.rendererEventSink = events
+        rendererEventSink = events
         return nil
     }
-    
+
     func onCancel(withArguments arguments: Any?) -> FlutterError? {
-        self.rendererEventSink = nil
+        rendererEventSink = nil
         return nil
     }
-    
+
     func rendererDiscovererItemAdded(_ rendererDiscoverer: VLCRendererDiscoverer, item: VLCRendererItem) {
-        self.renderItems.append(item)
-        
-        guard let rendererEventSink = self.rendererEventSink else { return }
-        rendererEventSink([
+        renderItems.append(item)
+        rendererEventSink?([
             "event": "attached",
             "id": item.name,
             "name": item.name,
         ])
     }
-    
+
     func rendererDiscovererItemDeleted(_ rendererDiscoverer: VLCRendererDiscoverer, item: VLCRendererItem) {
         if let index = renderItems.firstIndex(of: item) {
-            self.renderItems.remove(at: index)
+            renderItems.remove(at: index)
         }
-        
-        guard let rendererEventSink = self.rendererEventSink else { return }
-        rendererEventSink([
+        rendererEventSink?([
             "event": "detached",
             "id": item.name,
             "name": item.name,
@@ -476,158 +672,102 @@ class VLCRendererEventStreamHandler: NSObject, FlutterStreamHandler, VLCRenderer
     }
 }
 
-class VLCPlayerEventStreamHandler: NSObject, FlutterStreamHandler, VLCMediaPlayerDelegate, VLCMediaDelegate {
+final class VLCPlayerEventStreamHandler: NSObject, FlutterStreamHandler, VLCMediaPlayerDelegate, VLCMediaDelegate {
+    weak var owner: VLCViewController?
     private var mediaEventSink: FlutterEventSink?
-    
+
     func onListen(withArguments _: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
-        self.mediaEventSink = events
+        mediaEventSink = events
         return nil
     }
-    
+
     func onCancel(withArguments _: Any?) -> FlutterError? {
-        self.mediaEventSink = nil
+        mediaEventSink = nil
         return nil
     }
-    
+
     func mediaPlayerStateChanged(_ aNotification: Notification) {
-        guard let mediaEventSink = self.mediaEventSink else { return }
-        
-        let player = aNotification.object as? VLCMediaPlayer
-        let media = player?.media
-        let height = player?.videoSize.height ?? 0
-        let width = player?.videoSize.width ?? 0
-        let audioTracksCount = player?.numberOfAudioTracks ?? 0
-        let activeAudioTrack = player?.currentAudioTrackIndex ?? 0
-        let spuTracksCount = player?.numberOfSubtitlesTracks ?? 0
-        let activeSpuTrack = player?.currentVideoSubTitleIndex ?? 0
-        let duration = media?.length.value ?? 0
-        let speed = player?.rate ?? 1
-        let position = player?.time.value?.intValue ?? 0
-        let buffering = 100.0
-        let isPlaying = player?.isPlaying ?? false
-                
-        switch player?.state {
+        guard let player = aNotification.object as? VLCMediaPlayer else {
+            return
+        }
+        owner?.handleMediaPlayerStateChanged(player)
+        guard let mediaEventSink else {
+            return
+        }
+
+        switch player.state {
         case .opening:
             mediaEventSink([
                 "event": "opening",
             ])
-            
         case .paused:
             mediaEventSink([
                 "event": "paused",
             ])
-            
         case .stopped:
             mediaEventSink([
                 "event": "stopped",
             ])
-            
         case .playing:
-            mediaEventSink([
-                "event": "playing",
-                "height": height,
-                "width": width,
-                "speed": speed,
-                "duration": duration,
-                "audioTracksCount": audioTracksCount,
-                "activeAudioTrack": activeAudioTrack,
-                "spuTracksCount": spuTracksCount,
-                "activeSpuTrack": activeSpuTrack,
-            ])
-            
+            mediaEventSink(eventPayload(event: "playing", player: player))
         case .ended:
             mediaEventSink([
                 "event": "ended",
-                "position": position,
+                "position": player.time.value?.int64Value ?? 0,
             ])
-            
         case .buffering:
-            mediaEventSink([
-                "event": "timeChanged",
-                "height": height,
-                "width": width,
-                "speed": speed,
-                "duration": duration,
-                "position": position,
-                "buffer": buffering,
-                "audioTracksCount": audioTracksCount,
-                "activeAudioTrack": activeAudioTrack,
-                "spuTracksCount": spuTracksCount,
-                "activeSpuTrack": activeSpuTrack,
-                "isPlaying": isPlaying,
-            ])
-            
+            mediaEventSink(eventPayload(event: "buffering", player: player))
         case .error:
-            /* mediaEventSink(
-             FlutterError(
-             code: "500",
-             message: "Player State got an error",
-             details: nil)
-             ) */
             mediaEventSink([
                 "event": "error",
             ])
-            
         case .esAdded:
             break
-            
-        default:
+        @unknown default:
             break
         }
     }
-    
+
     func mediaPlayerStartedRecording(_ player: VLCMediaPlayer) {
-        guard let mediaEventSink = self.mediaEventSink else { return }
-                
-        mediaEventSink([
+        mediaEventSink?([
             "event": "recording",
             "isRecording": true,
             "recordPath": "",
         ])
     }
-    
+
     func mediaPlayer(_ player: VLCMediaPlayer, recordingStoppedAtPath path: String) {
-        guard let mediaEventSink = self.mediaEventSink else { return }
-        
-        mediaEventSink([
+        mediaEventSink?([
             "event": "recording",
             "isRecording": false,
             "recordPath": path,
         ])
     }
-    
+
     func mediaPlayerTimeChanged(_ aNotification: Notification) {
-        guard let mediaEventSink = self.mediaEventSink else { return }
-        
-        let player = aNotification.object as? VLCMediaPlayer
-        //
-        let height = player?.videoSize.height ?? 0
-        let width = player?.videoSize.width ?? 0
-        let speed = player?.rate ?? 1
-        let duration = player?.media?.length.value ?? 0
-        let audioTracksCount = player?.numberOfAudioTracks ?? 0
-        let activeAudioTrack = player?.currentAudioTrackIndex ?? 0
-        let spuTracksCount = player?.numberOfSubtitlesTracks ?? 0
-        let activeSpuTrack = player?.currentVideoSubTitleIndex ?? 0
-        let buffering = 100.0
-        let isPlaying = player?.isPlaying ?? false
-        //
-        if let position = player?.time.value {
-            mediaEventSink([
-                "event": "timeChanged",
-                "height": height,
-                "width": width,
-                "speed": speed,
-                "duration": duration,
-                "position": position,
-                "buffer": buffering,
-                "audioTracksCount": audioTracksCount,
-                "activeAudioTrack": activeAudioTrack,
-                "spuTracksCount": spuTracksCount,
-                "activeSpuTrack": activeSpuTrack,
-                "isPlaying": isPlaying,
-            ])
+        guard let player = aNotification.object as? VLCMediaPlayer else {
+            return
         }
+        let position = player.time.value?.int64Value ?? 0
+        owner?.handleMediaPlayerTimeChanged(position)
+        mediaEventSink?(eventPayload(event: "timeChanged", player: player))
+    }
+
+    private func eventPayload(event: String, player: VLCMediaPlayer) -> [String: Any] {
+        [
+            "event": event,
+            "height": Int64(player.videoSize.height),
+            "width": Int64(player.videoSize.width),
+            "speed": Double(player.rate),
+            "duration": player.media?.length.value?.int64Value ?? 0,
+            "position": player.time.value?.int64Value ?? 0,
+            "buffer": 100.0,
+            "audioTracksCount": Int64(player.numberOfAudioTracks),
+            "activeAudioTrack": Int64(player.currentAudioTrackIndex),
+            "spuTracksCount": Int64(player.numberOfSubtitlesTracks),
+            "activeSpuTrack": Int64(player.currentVideoSubTitleIndex),
+            "isPlaying": player.isPlaying,
+        ]
     }
 }
 
@@ -646,77 +786,52 @@ enum HWAccellerationType: Int {
 
 extension VLCMediaPlayer {
     func subtitles() -> [Int: String] {
-        guard let indexs = videoSubTitlesIndexes as? [Int],
+        guard let indexes = videoSubTitlesIndexes as? [Int],
               let names = videoSubTitlesNames as? [String],
-              indexs.count == names.count
-        else {
+              indexes.count == names.count else {
             return [:]
         }
-        
+
         var subtitles: [Int: String] = [:]
-        
-        var i = 0
-        for index in indexs {
-            if index >= 0 {
-                let name = names[i]
-                subtitles[Int(index)] = name
-            }
-            i = i + 1
+        for (index, value) in indexes.enumerated() where value >= 0 {
+            subtitles[value] = names[index]
         }
-        
         return subtitles
     }
-    
+
     func audioTracks() -> [Int: String] {
-        guard let indexs = audioTrackIndexes as? [Int],
+        guard let indexes = audioTrackIndexes as? [Int],
               let names = audioTrackNames as? [String],
-              indexs.count == names.count
-        else {
+              indexes.count == names.count else {
             return [:]
         }
-        
+
         var audios: [Int: String] = [:]
-        
-        var i = 0
-        for index in indexs {
-            if index >= 0 {
-                let name = names[i]
-                audios[Int(index)] = name
-            }
-            i = i + 1
+        for (index, value) in indexes.enumerated() where value >= 0 {
+            audios[value] = names[index]
         }
-        
         return audios
     }
-    
+
     func videoTracks() -> [Int: String] {
-        guard let indexs = videoTrackIndexes as? [Int],
+        guard let indexes = videoTrackIndexes as? [Int],
               let names = videoTrackNames as? [String],
-              indexs.count == names.count
-        else {
+              indexes.count == names.count else {
             return [:]
         }
-        
+
         var videos: [Int: String] = [:]
-        
-        var i = 0
-        for index in indexs {
-            if index >= 0 {
-                let name = names[i]
-                videos[Int(index)] = name
-            }
-            i = i + 1
+        for (index, value) in indexes.enumerated() where value >= 0 {
+            videos[value] = names[index]
         }
-        
         return videos
     }
-    
+
     func rendererServices() -> [String] {
         let renderers = VLCRendererDiscoverer.list()
         var services: [String] = []
-        
-        renderers?.forEach { VLCRendererDiscovererDescription in
-            services.append(VLCRendererDiscovererDescription.name)
+        renderers?.forEach { description in
+            services.append(description.name)
         }
         return services
     }

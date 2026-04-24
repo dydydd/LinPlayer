@@ -16,6 +16,18 @@ PlatformException _createConnectionError(String channelName) {
   );
 }
 
+int _asInt(Object? value, [int fallback = 0]) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return fallback;
+}
+
+double _asDouble(Object? value, [double fallback = 0.0]) {
+  if (value is double) return value;
+  if (value is num) return value.toDouble();
+  return fallback;
+}
+
 class _CompatCreateMessage {
   const _CompatCreateMessage({
     required this.playerId,
@@ -518,38 +530,45 @@ class LinPlayerMethodChannelVlcPlayer extends VlcPlayerPlatform {
         case 'playing':
           return VlcMediaEvent(
             mediaEventType: VlcMediaEventType.playing,
-            size: Size(
-              (map['width'] as num?)?.toDouble() ?? 0.0,
-              (map['height'] as num?)?.toDouble() ?? 0.0,
-            ),
-            playbackSpeed: (map['speed'] as num?)?.toDouble() ?? 1.0,
-            duration: Duration(milliseconds: map['duration'] as int? ?? 0),
-            audioTracksCount: map['audioTracksCount'] as int? ?? 1,
-            activeAudioTrack: map['activeAudioTrack'] as int? ?? 0,
-            spuTracksCount: map['spuTracksCount'] as int? ?? 0,
-            activeSpuTrack: map['activeSpuTrack'] as int? ?? -1,
+            size: Size(_asDouble(map['width']), _asDouble(map['height'])),
+            playbackSpeed: _asDouble(map['speed'], 1.0),
+            duration: Duration(milliseconds: _asInt(map['duration'])),
+            audioTracksCount: _asInt(map['audioTracksCount'], 1),
+            activeAudioTrack: _asInt(map['activeAudioTrack']),
+            spuTracksCount: _asInt(map['spuTracksCount']),
+            activeSpuTrack: _asInt(map['activeSpuTrack'], -1),
           );
         case 'ended':
           return VlcMediaEvent(
             mediaEventType: VlcMediaEventType.ended,
-            position: Duration(milliseconds: map['position'] as int? ?? 0),
+            position: Duration(milliseconds: _asInt(map['position'])),
           );
         case 'buffering':
+          return VlcMediaEvent(
+            mediaEventType: VlcMediaEventType.buffering,
+            size: Size(_asDouble(map['width']), _asDouble(map['height'])),
+            playbackSpeed: _asDouble(map['speed'], 1.0),
+            position: Duration(milliseconds: _asInt(map['position'])),
+            duration: Duration(milliseconds: _asInt(map['duration'])),
+            audioTracksCount: _asInt(map['audioTracksCount'], 1),
+            activeAudioTrack: _asInt(map['activeAudioTrack']),
+            spuTracksCount: _asInt(map['spuTracksCount']),
+            activeSpuTrack: _asInt(map['activeSpuTrack'], -1),
+            bufferPercent: _asDouble(map['buffer'], 100.0),
+            isPlaying: map['isPlaying'] as bool? ?? false,
+          );
         case 'timeChanged':
           return VlcMediaEvent(
             mediaEventType: VlcMediaEventType.timeChanged,
-            size: Size(
-              (map['width'] as num?)?.toDouble() ?? 0.0,
-              (map['height'] as num?)?.toDouble() ?? 0.0,
-            ),
-            playbackSpeed: (map['speed'] as num?)?.toDouble() ?? 1.0,
-            position: Duration(milliseconds: map['position'] as int? ?? 0),
-            duration: Duration(milliseconds: map['duration'] as int? ?? 0),
-            audioTracksCount: map['audioTracksCount'] as int? ?? 1,
-            activeAudioTrack: map['activeAudioTrack'] as int? ?? 0,
-            spuTracksCount: map['spuTracksCount'] as int? ?? 0,
-            activeSpuTrack: map['activeSpuTrack'] as int? ?? -1,
-            bufferPercent: (map['buffer'] as num?)?.toDouble() ?? 100.0,
+            size: Size(_asDouble(map['width']), _asDouble(map['height'])),
+            playbackSpeed: _asDouble(map['speed'], 1.0),
+            position: Duration(milliseconds: _asInt(map['position'])),
+            duration: Duration(milliseconds: _asInt(map['duration'])),
+            audioTracksCount: _asInt(map['audioTracksCount'], 1),
+            activeAudioTrack: _asInt(map['activeAudioTrack']),
+            spuTracksCount: _asInt(map['spuTracksCount']),
+            activeSpuTrack: _asInt(map['activeSpuTrack'], -1),
+            bufferPercent: _asDouble(map['buffer'], 100.0),
             isPlaying: map['isPlaying'] as bool? ?? false,
           );
         case 'mediaChanged':

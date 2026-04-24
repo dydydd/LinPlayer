@@ -5,12 +5,10 @@ public class VLCViewBuilder: NSObject, VlcPlayerApi {
     var players = [Int: VLCViewController]()
     private var registrar: FlutterPluginRegistrar
     private var messenger: FlutterBinaryMessenger
-    private var options: [String]
     
     init(registrar: FlutterPluginRegistrar) {
         self.registrar = registrar
         messenger = registrar.messenger()
-        options = []
         super.init()
         //
         VlcPlayerApiSetup.setUp(binaryMessenger: messenger, api: self)
@@ -37,31 +35,14 @@ public class VLCViewBuilder: NSObject, VlcPlayerApi {
     func create(msg: CreateMessage) throws {
         let player = try getPlayer(id: msg.playerId)
         
-        var isAssetUrl = false
-        var mediaUrl = ""
-        
-        if DataSourceType(rawValue: msg.type.int) == DataSourceType.ASSET {
-            var assetPath: String
-            if let packageName = msg.packageName {
-                assetPath = registrar.lookupKey(forAsset: msg.uri, fromPackage: packageName)
-            } else {
-                assetPath = registrar.lookupKey(forAsset: msg.uri)
-            }
-            mediaUrl = assetPath
-            isAssetUrl = true
-        } else {
-            mediaUrl = msg.uri
-            isAssetUrl = false
-        }
-        
-        options = msg.options
-        
+        let sourceType = DataSourceType(rawValue: msg.type.int) ?? .NETWORK
+        let mediaUrl = resolvedMediaUrl(uri: msg.uri, packageName: msg.packageName, sourceType: sourceType)
+        player.setMediaOptions(msg.options)
         player.setMediaPlayerUrl(
             uri: mediaUrl,
-            isAssetUrl: isAssetUrl,
+            sourceType: sourceType,
             autoPlay: msg.autoPlay,
-            hwAcc: msg.hwAcc?.int ?? HWAccellerationType.HW_ACCELERATION_AUTOMATIC.rawValue,
-            options: options
+            hwAcc: msg.hwAcc?.int ?? HWAccellerationType.HW_ACCELERATION_AUTOMATIC.rawValue
         )
     }
     
@@ -75,29 +56,13 @@ public class VLCViewBuilder: NSObject, VlcPlayerApi {
     func setStreamUrl(msg: SetMediaMessage) throws {
         let player = try getPlayer(id: msg.playerId)
         
-        var isAssetUrl = false
-        var mediaUrl = ""
-        
-        if DataSourceType(rawValue: msg.type.int) == DataSourceType.ASSET {
-            var assetPath: String
-            if let packageName = msg.packageName {
-                assetPath = registrar.lookupKey(forAsset: msg.uri, fromPackage: packageName)
-            } else {
-                assetPath = registrar.lookupKey(forAsset: msg.uri)
-            }
-            mediaUrl = assetPath
-            isAssetUrl = true
-        } else {
-            mediaUrl = msg.uri
-            isAssetUrl = false
-        }
-        
+        let sourceType = DataSourceType(rawValue: msg.type.int) ?? .NETWORK
+        let mediaUrl = resolvedMediaUrl(uri: msg.uri, packageName: msg.packageName, sourceType: sourceType)
         player.setMediaPlayerUrl(
             uri: mediaUrl,
-            isAssetUrl: isAssetUrl,
+            sourceType: sourceType,
             autoPlay: msg.autoPlay,
-            hwAcc: msg.hwAcc?.int ?? HWAccellerationType.HW_ACCELERATION_AUTOMATIC.rawValue,
-            options: options
+            hwAcc: msg.hwAcc?.int ?? HWAccellerationType.HW_ACCELERATION_AUTOMATIC.rawValue
         )
     }
     
@@ -140,11 +105,11 @@ public class VLCViewBuilder: NSObject, VlcPlayerApi {
     }
     
     func position(playerId: Int64) throws -> Int64 {
-        return try getPlayer(id: playerId).position.int64
+        return try getPlayer(id: playerId).position
     }
     
     func duration(playerId: Int64) throws -> Int64 {
-        return try getPlayer(id: playerId).duration.int64
+        return try getPlayer(id: playerId).duration
     }
     
     func setVolume(playerId: Int64, volume: Int64) throws {
@@ -203,7 +168,9 @@ public class VLCViewBuilder: NSObject, VlcPlayerApi {
     func addSubtitleTrack(msg: AddSubtitleMessage) throws {
         let player = try getPlayer(id: msg.playerId)
         
-        player.addSubtitleTrack(uri: msg.uri, isSelected: msg.isSelected)
+        let sourceType = DataSourceType(rawValue: msg.type.int) ?? .NETWORK
+        let mediaUrl = resolvedMediaUrl(uri: msg.uri, packageName: nil, sourceType: sourceType)
+        player.addSubtitleTrack(uri: mediaUrl, type: sourceType, isSelected: msg.isSelected)
     }
     
     // MARK: - Audio Tracks
@@ -239,7 +206,9 @@ public class VLCViewBuilder: NSObject, VlcPlayerApi {
     func addAudioTrack(msg: AddAudioMessage) throws {
         let player = try getPlayer(id: msg.playerId)
         
-        player.addAudioTrack(uri: msg.uri, isSelected: msg.isSelected)
+        let sourceType = DataSourceType(rawValue: msg.type.int) ?? .NETWORK
+        let mediaUrl = resolvedMediaUrl(uri: msg.uri, packageName: nil, sourceType: sourceType)
+        player.addAudioTrack(uri: mediaUrl, type: sourceType, isSelected: msg.isSelected)
     }
     
     // MARK: - Video Tracks
@@ -324,6 +293,16 @@ public class VLCViewBuilder: NSObject, VlcPlayerApi {
         let player = try getPlayer(id: playerId)
         
         return player.stopRecording()
+    }
+
+    private func resolvedMediaUrl(uri: String, packageName: String?, sourceType: DataSourceType) -> String {
+        guard sourceType == .ASSET else {
+            return uri
+        }
+        if let packageName {
+            return registrar.lookupKey(forAsset: uri, fromPackage: packageName)
+        }
+        return registrar.lookupKey(forAsset: uri)
     }
 }
 

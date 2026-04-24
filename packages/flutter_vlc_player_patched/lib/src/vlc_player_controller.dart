@@ -79,6 +79,8 @@ class VlcPlayerController extends ValueNotifier<VlcPlayerValue> {
 
   VlcAppLifeCycleObserver? _lifeCycleObserver;
   VlcPlayerPlatform? _boundPlatform;
+  StreamSubscription<VlcMediaEvent>? _mediaEventSubscription;
+  StreamSubscription<VlcRendererEvent>? _rendererEventSubscription;
 
   /// Describes the type of data source this [VlcPlayerController]
   /// is constructed with.
@@ -207,16 +209,6 @@ class VlcPlayerController extends ValueNotifier<VlcPlayerValue> {
       _lifeCycleObserver = VlcAppLifeCycleObserver(this)..initialize();
     }
 
-    await vlcPlayerPlatform.create(
-      viewId: _viewId,
-      uri: dataSource,
-      type: dataSourceType,
-      package: package,
-      hwAcc: hwAcc,
-      autoPlay: autoPlay,
-      options: options,
-    );
-
     final initializingCompleter = Completer<void>();
 
     // listen for media events
@@ -322,7 +314,7 @@ class VlcPlayerController extends ValueNotifier<VlcPlayerValue> {
       }
     }
 
-    vlcPlayerPlatform
+    _mediaEventSubscription = vlcPlayerPlatform
         .mediaEventsFor(_viewId)
         .listen(mediaEventListener, onError: errorListener);
 
@@ -344,7 +336,27 @@ class VlcPlayerController extends ValueNotifier<VlcPlayerValue> {
       }
     }
 
-    vlcPlayerPlatform.rendererEventsFor(_viewId).listen(rendererEventListener);
+    _rendererEventSubscription = vlcPlayerPlatform
+        .rendererEventsFor(_viewId)
+        .listen(rendererEventListener);
+
+    try {
+      await vlcPlayerPlatform.create(
+        viewId: _viewId,
+        uri: dataSource,
+        type: dataSourceType,
+        package: package,
+        hwAcc: hwAcc,
+        autoPlay: autoPlay,
+        options: options,
+      );
+    } catch (_) {
+      await _mediaEventSubscription?.cancel();
+      await _rendererEventSubscription?.cancel();
+      _mediaEventSubscription = null;
+      _rendererEventSubscription = null;
+      rethrow;
+    }
 
     if (!initializingCompleter.isCompleted) {
       initializingCompleter.complete(null);
@@ -370,6 +382,10 @@ class VlcPlayerController extends ValueNotifier<VlcPlayerValue> {
     _onRendererEventListeners.clear();
     _lifeCycleObserver?.dispose();
     _isDisposed = true;
+    await _mediaEventSubscription?.cancel();
+    await _rendererEventSubscription?.cancel();
+    _mediaEventSubscription = null;
+    _rendererEventSubscription = null;
     //
     if (_hasPlatformView) {
       await vlcPlayerPlatform.dispose(_viewId);

@@ -8,6 +8,7 @@ import 'package:flutter_vlc_player/flutter_vlc_player.dart';
 class _FakeVlcPlayerPlatform extends VlcPlayerPlatform {
   final List<int> createdViewIds = <int>[];
   final List<int> disposedViewIds = <int>[];
+  final List<String> callOrder = <String>[];
 
   @override
   Widget buildView(
@@ -27,21 +28,27 @@ class _FakeVlcPlayerPlatform extends VlcPlayerPlatform {
     HwAcc? hwAcc,
     VlcPlayerOptions? options,
   }) async {
+    callOrder.add('create');
     createdViewIds.add(viewId);
   }
 
   @override
   Future<void> dispose(int viewId) async {
+    callOrder.add('dispose');
     disposedViewIds.add(viewId);
   }
 
   @override
-  Stream<VlcMediaEvent> mediaEventsFor(int viewId) =>
-      const Stream<VlcMediaEvent>.empty();
+  Stream<VlcMediaEvent> mediaEventsFor(int viewId) {
+    callOrder.add('mediaEventsFor');
+    return const Stream<VlcMediaEvent>.empty();
+  }
 
   @override
-  Stream<VlcRendererEvent> rendererEventsFor(int viewId) =>
-      const Stream<VlcRendererEvent>.empty();
+  Stream<VlcRendererEvent> rendererEventsFor(int viewId) {
+    callOrder.add('rendererEventsFor');
+    return const Stream<VlcRendererEvent>.empty();
+  }
 }
 
 void main() {
@@ -80,6 +87,10 @@ void main() {
     expect(controller.viewId, 42);
     expect(controller.isReadyToInitialize, isTrue);
     expect(controller.value.isInitialized, isTrue);
+    expect(
+      fakePlatform.callOrder.take(3),
+      <String>['mediaEventsFor', 'rendererEventsFor', 'create'],
+    );
 
     await controller.dispose();
     expect(fakePlatform.disposedViewIds, <int>[42]);
