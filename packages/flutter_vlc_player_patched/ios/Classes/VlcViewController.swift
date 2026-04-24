@@ -771,7 +771,7 @@ final class VLCPlayerEventStreamHandler: NSObject, FlutterStreamHandler, VLCMedi
     }
 }
 
-enum DataSourceType: Int {
+public enum DataSourceType: Int {
     case ASSET = 0
     case NETWORK = 1
     case FILE = 2
