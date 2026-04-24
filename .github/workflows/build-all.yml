@@ -706,7 +706,7 @@ jobs:
             DART_DEFINE_ARGS+=(--dart-define=TMDB_API_KEY="${TMDB_API_KEY}")
           fi
 
-          find_built_ios_app() {
+          resolve_built_ios_app() {
             local app_path=""
             app_path="$(find build/ios -maxdepth 6 -type d -name '*.app' 2>/dev/null | grep -v RunnerTests | head -n 1 || true)"
             if [[ -z "${app_path:-}" ]]; then
@@ -720,30 +720,100 @@ jobs:
             printf '%s\n' "$app_path"
           }
 
+          validate_built_ios_app() {
+            local app_path="$1"
+            if [[ -z "${app_path:-}" || ! -d "$app_path" ]]; then
+              echo "Built iOS app path is missing: ${app_path:-<empty>}" >&2
+              return 1
+            fi
+
+            local info_plist="$app_path/Info.plist"
+            if [[ ! -f "$info_plist" ]]; then
+              echo "Missing Info.plist in app bundle: $app_path" >&2
+              return 1
+            fi
+
+            local executable_name=""
+            executable_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$info_plist" 2>/dev/null || true)"
+            if [[ -z "${executable_name:-}" ]]; then
+              echo "CFBundleExecutable missing in $info_plist" >&2
+              return 1
+            fi
+
+            local executable_path="$app_path/$executable_name"
+            if [[ ! -f "$executable_path" ]]; then
+              echo "App executable missing: $executable_path" >&2
+              return 1
+            fi
+
+            if ! file "$executable_path" | grep -q "Mach-O"; then
+              echo "App executable is not a Mach-O binary: $executable_path" >&2
+              return 1
+            fi
+
+            local flutter_framework="$app_path/Frameworks/Flutter.framework/Flutter"
+            if [[ ! -f "$flutter_framework" ]]; then
+              echo "Flutter.framework binary missing: $flutter_framework" >&2
+              return 1
+            fi
+
+            local app_framework_binary="$app_path/Frameworks/App.framework/App"
+            if [[ ! -f "$app_framework_binary" ]]; then
+              echo "App.framework binary missing: $app_framework_binary" >&2
+              return 1
+            fi
+
+            local app_size_kb=""
+            app_size_kb="$(du -sk "$app_path" | awk '{print $1}')"
+            if [[ ! "$app_size_kb" =~ ^[0-9]+$ ]]; then
+              echo "Could not determine app bundle size for $app_path" >&2
+              return 1
+            fi
+
+            if (( app_size_kb < 10240 )); then
+              echo "App bundle is suspiciously small (${app_size_kb} KB): $app_path" >&2
+              return 1
+            fi
+
+            return 0
+          }
+
+          find_built_ios_app() {
+            resolve_built_ios_app
+          }
+
           build_ios_once() {
             local status=0
+            local app_path=""
 
-            # flutter build ios --no-codesign can return a non-zero exit code on CI
-            # with the generic "select a Development Team" message, even though the
-            # Xcode build already produced a usable .app. Treat it as a soft-fail
-            # when build output exists, so we can still package an unsigned IPA.
+            rm -rf build/ios build/native_assets/ios
+
             set +e
             flutter build ios --release --no-codesign --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" "${DART_DEFINE_ARGS[@]}"
             status=$?
             set -e
 
-            if [[ "$status" -ne 0 ]]; then
-              local app_path=""
-              echo "flutter build ios exited with $status; checking for built app output..."
-              app_path="$(find_built_ios_app)"
+            app_path="$(find_built_ios_app)"
 
-              if [[ -z "${app_path:-}" || ! -d "$app_path" ]]; then
-                echo "No built .app found under build/ios; allowing retry."
+            if [[ "$status" -ne 0 ]]; then
+              echo "flutter build ios exited with $status; checking for built app output..."
+
+              # flutter build ios --no-codesign can return a non-zero exit code on CI
+              # with the generic "select a Development Team" message, even though the
+              # Xcode build already produced a usable .app. Only treat it as a soft-fail
+              # when the generated app bundle passes structural validation.
+              if ! validate_built_ios_app "$app_path"; then
+                echo "Build failed and no valid iOS app bundle was produced; allowing retry."
                 return "$status"
               fi
 
-              echo "Found built app despite non-zero exit: $app_path"
+              echo "Found valid built app despite non-zero exit: $app_path"
+            elif ! validate_built_ios_app "$app_path"; then
+              echo "Build command succeeded but produced an invalid iOS app bundle." >&2
+              return 1
             fi
+
+            echo "IOS_APP_PATH=$app_path" >> "$GITHUB_ENV"
           }
 
           retry build_ios_once
@@ -753,27 +823,88 @@ jobs:
         run: |
           set -euo pipefail
 
-          APP_PATH="$(find build/ios -maxdepth 6 -type d -name '*.app' 2>/dev/null | grep -v RunnerTests | head -n 1 || true)"
-          if [[ -z "${APP_PATH:-}" ]]; then
-            ARCHIVE_PATH="$(find build/ios -maxdepth 6 -type d -name '*.xcarchive' 2>/dev/null | head -n 1 || true)"
-            if [[ -n "${ARCHIVE_PATH:-}" ]]; then
-              APP_PATH="$(find "$ARCHIVE_PATH/Products/Applications" -maxdepth 1 -type d -name '*.app' 2>/dev/null | head -n 1 || true)"
+          resolve_built_ios_app() {
+            local app_path=""
+            app_path="${IOS_APP_PATH:-}"
+            if [[ -z "${app_path:-}" ]]; then
+              app_path="$(find build/ios -maxdepth 6 -type d -name '*.app' 2>/dev/null | grep -v RunnerTests | head -n 1 || true)"
             fi
-          fi
-          if [[ -z "${APP_PATH:-}" || ! -d "$APP_PATH" ]]; then
-            echo "Could not find built .app under build/ios."
-            echo "--- Debug: build/ios (maxdepth 4) ---"
-            find build/ios -maxdepth 4 -print || true
-            echo "--- Debug: build/ios/iphoneos ---"
-            ls -la build/ios/iphoneos || true
+            if [[ -z "${app_path:-}" ]]; then
+              local archive_path=""
+              archive_path="$(find build/ios -maxdepth 6 -type d -name '*.xcarchive' 2>/dev/null | head -n 1 || true)"
+              if [[ -n "${archive_path:-}" ]]; then
+                app_path="$(find "$archive_path/Products/Applications" -maxdepth 1 -type d -name '*.app' 2>/dev/null | head -n 1 || true)"
+              fi
+            fi
+
+            printf '%s\n' "$app_path"
+          }
+
+          validate_built_ios_app() {
+            local app_path="$1"
+            if [[ -z "${app_path:-}" || ! -d "$app_path" ]]; then
+              echo "Built iOS app path is missing: ${app_path:-<empty>}" >&2
+              return 1
+            fi
+
+            local info_plist="$app_path/Info.plist"
+            if [[ ! -f "$info_plist" ]]; then
+              echo "Missing Info.plist in app bundle: $app_path" >&2
+              return 1
+            fi
+
+            local executable_name=""
+            executable_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$info_plist" 2>/dev/null || true)"
+            if [[ -z "${executable_name:-}" ]]; then
+              echo "CFBundleExecutable missing in $info_plist" >&2
+              return 1
+            fi
+
+            local executable_path="$app_path/$executable_name"
+            if [[ ! -f "$executable_path" ]]; then
+              echo "App executable missing: $executable_path" >&2
+              return 1
+            fi
+
+            local flutter_framework="$app_path/Frameworks/Flutter.framework/Flutter"
+            local app_framework_binary="$app_path/Frameworks/App.framework/App"
+            if [[ ! -f "$flutter_framework" || ! -f "$app_framework_binary" ]]; then
+              echo "App bundle frameworks are incomplete: $app_path" >&2
+              return 1
+            fi
+
+            local app_size_kb=""
+            app_size_kb="$(du -sk "$app_path" | awk '{print $1}')"
+            if [[ ! "$app_size_kb" =~ ^[0-9]+$ || "$app_size_kb" -lt 10240 ]]; then
+              echo "App bundle is suspiciously small (${app_size_kb:-unknown} KB): $app_path" >&2
+              return 1
+            fi
+
+            return 0
+          }
+
+          APP_PATH="$(resolve_built_ios_app)"
+          if ! validate_built_ios_app "$APP_PATH"; then
+            echo "--- Debug: build/ios (maxdepth 5) ---"
+            find build/ios -maxdepth 5 -print || true
+            echo "--- Debug: app bundle snapshot ---"
+            find "$APP_PATH" -maxdepth 3 -print 2>/dev/null || true
             exit 1
           fi
 
-          rm -rf Payload
+          rm -rf Payload LinPlayer-iPhone-unsigned.ipa
           mkdir -p Payload
-          cp -R "$APP_PATH" Payload/
+          ditto "$APP_PATH" "Payload/$(basename "$APP_PATH")"
 
-          /usr/bin/zip -qry LinPlayer-iPhone-unsigned.ipa Payload
+          ditto -c -k --sequesterRsrc --keepParent Payload LinPlayer-iPhone-unsigned.ipa
+
+          IPA_SIZE_BYTES="$(stat -f%z LinPlayer-iPhone-unsigned.ipa)"
+          if [[ ! "$IPA_SIZE_BYTES" =~ ^[0-9]+$ || "$IPA_SIZE_BYTES" -lt 1048576 ]]; then
+            echo "Generated IPA is suspiciously small (${IPA_SIZE_BYTES:-unknown} bytes)." >&2
+            exit 1
+          fi
+
+          echo "Packaged IPA size: ${IPA_SIZE_BYTES} bytes"
 
       - name: Upload unsigned IPA artifact
         uses: actions/upload-artifact@v4

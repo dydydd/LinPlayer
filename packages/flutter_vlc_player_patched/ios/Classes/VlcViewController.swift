@@ -71,6 +71,7 @@ public class VLCViewController: NSObject, FlutterPlatformView {
         self.mediaEventChannelHandler = VLCPlayerEventStreamHandler()
         self.rendererEventChannel = rendererEventChannel
         self.rendererEventChannelHandler = VLCRendererEventStreamHandler()
+        super.init()
         //
         self.mediaEventChannel.setStreamHandler(self.mediaEventChannelHandler)
         self.rendererEventChannel.setStreamHandler(self.rendererEventChannelHandler)
