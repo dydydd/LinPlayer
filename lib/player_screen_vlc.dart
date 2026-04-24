@@ -268,10 +268,11 @@ class _VlcPlayerScreenState extends State<VlcPlayerScreen>
       );
     }
     await _shutdownPlaybackForReplacementRoute();
+    await PlaybackTransitionGuard.waitForPlayerRouteReplacementReady();
     await widget.appState.setPlayerCore(nextCore);
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
+      PlaybackTransitionGuard.buildPlayerReplacementRoute(
         builder: (_) => buildLocalPlayerScreen(
           appState: widget.appState,
           startFullScreen: widget.startFullScreen,
@@ -311,6 +312,9 @@ class _VlcPlayerScreenState extends State<VlcPlayerScreen>
       try {
         await controller.dispose();
       } catch (_) {}
+    }
+    if (mounted) {
+      setState(() {});
     }
   }
 

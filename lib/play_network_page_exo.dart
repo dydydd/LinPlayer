@@ -510,6 +510,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         await controller.dispose();
       } catch (_) {}
     }
+    if (mounted) {
+      setState(() {});
+    }
 
     await _exitImmersiveMode(resetOrientations: resetSystemUi);
   }
@@ -1473,9 +1476,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     final episodeSeriesId = (episode.seriesId ?? '').trim();
     _preserveOrientationForReplacementRoute();
     await _shutdownPlaybackForRouteExit(resetSystemUi: false);
+    await PlaybackTransitionGuard.waitForPlayerRouteReplacementReady();
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
+      PlaybackTransitionGuard.buildPlayerReplacementRoute(
         builder: (_) => ExoPlayNetworkPage(
           title: episode.name,
           itemId: episode.id,
@@ -5351,10 +5355,11 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _maybeReportPlaybackProgress(pos, force: true);
     _preserveOrientationForReplacementRoute();
     await _shutdownPlaybackForRouteExit(resetSystemUi: false);
+    await PlaybackTransitionGuard.waitForPlayerRouteReplacementReady();
     await widget.appState.setPlayerCore(nextCore);
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
+      PlaybackTransitionGuard.buildPlayerReplacementRoute(
         builder: (_) => buildNetworkPlayerPage(
           title: widget.title,
           itemId: widget.itemId,

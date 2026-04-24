@@ -1371,10 +1371,11 @@ class _PlayerScreenState extends State<PlayerScreen>
       );
     }
     await _shutdownPlaybackForReplacementRoute();
+    await PlaybackTransitionGuard.waitForPlayerRouteReplacementReady();
     await appState.setPlayerCore(nextCore);
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
+      PlaybackTransitionGuard.buildPlayerReplacementRoute(
         builder: (_) => buildLocalPlayerScreen(
           appState: appState,
           startFullScreen: widget.startFullScreen,
@@ -1450,6 +1451,9 @@ class _PlayerScreenState extends State<PlayerScreen>
       try {
         await thumb.dispose();
       } catch (_) {}
+    }
+    if (mounted) {
+      setState(() {});
     }
   }
 

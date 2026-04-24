@@ -531,6 +531,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     try {
       await _playerService.dispose();
     } catch (_) {}
+    if (mounted) {
+      setState(() {});
+    }
     await _exitImmersiveMode(resetOrientations: resetSystemUi);
   }
 
@@ -2398,9 +2401,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     final episodeSeriesId = (episode.seriesId ?? '').trim();
     _preserveOrientationForReplacementRoute();
     await _shutdownPlaybackForRouteExit(resetSystemUi: false);
+    await PlaybackTransitionGuard.waitForPlayerRouteReplacementReady();
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
+      PlaybackTransitionGuard.buildPlayerReplacementRoute(
         builder: (_) => PlayNetworkPage(
           title: episode.name,
           itemId: episode.id,
@@ -6070,10 +6074,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _maybeReportPlaybackProgress(pos, force: true);
     _preserveOrientationForReplacementRoute();
     await _shutdownPlaybackForRouteExit(resetSystemUi: false);
+    await PlaybackTransitionGuard.waitForPlayerRouteReplacementReady();
     await widget.appState.setPlayerCore(nextCore);
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
+      PlaybackTransitionGuard.buildPlayerReplacementRoute(
         builder: (_) => buildNetworkPlayerPage(
           title: widget.title,
           itemId: widget.itemId,
