@@ -26,6 +26,7 @@ import 'services/playback/mobile_playback_preferences.dart';
 import 'services/playback/mobile_system_volume.dart';
 import 'services/playback/player_core_pages.dart';
 import 'services/playback/player_core_ui.dart';
+import 'services/playback/playback_transition_guard.dart';
 import 'services/playback/video_display_mode.dart';
 import 'services/playback/playback_thresholds.dart';
 import 'services/playback/video_display_hint.dart';
@@ -439,16 +440,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   @override
   void didPushNext() {
     // User navigated away from the playback page: stop playback & buffering.
-    _netSpeedTimer?.cancel();
-    _netSpeedTimer = null;
-    _serverProgressSync?.stop();
-    PlaybackPreloadCoordinator.cancelOwner(_preloadOwnerKey);
-    _preloadOwnerKey = '';
-    _cancelActivePlaybackCacheFills();
-    // ignore: unawaited_futures
-    _reportPlaybackStoppedBestEffort();
-    // ignore: unawaited_futures
-    _playerService.dispose();
+    unawaited(
+      PlaybackTransitionGuard.enqueue(
+        () => _shutdownPlaybackForRouteExit(resetSystemUi: false),
+      ),
+    );
   }
 
   void _cancelActivePlaybackCacheFills() {
@@ -540,6 +536,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
   Future<void> _init() async {
     final initSession = ++_initSession;
+    await PlaybackTransitionGuard.waitForSettled();
+    if (!mounted || initSession != _initSession) return;
     final startupStopwatch = Stopwatch()..start();
     _allowRoutePop = false;
     _exitInProgress = false;

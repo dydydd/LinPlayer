@@ -6,7 +6,7 @@ import UIKit
 final class VLCPlayerHostedView: UIView {
     weak var player: VLCMediaPlayer? {
         didSet {
-            attachDrawableIfNeeded()
+            attachDrawableIfNeeded(forceRebind: true)
         }
     }
     
@@ -17,14 +17,21 @@ final class VLCPlayerHostedView: UIView {
     
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        attachDrawableIfNeeded()
+        attachDrawableIfNeeded(forceRebind: true)
     }
     
-    func attachDrawableIfNeeded() {
+    func attachDrawableIfNeeded(forceRebind: Bool = false) {
         guard let player = player else {
             return
         }
-        player.drawable = window == nil ? nil : self
+        guard window != nil else {
+            player.drawable = nil
+            return
+        }
+        if forceRebind {
+            player.drawable = nil
+        }
+        player.drawable = self
     }
 }
 
@@ -36,8 +43,10 @@ public class VLCViewController: NSObject, FlutterPlatformView {
     var rendererEventChannel: FlutterEventChannel
     let rendererEventChannelHandler: VLCRendererEventStreamHandler
     var rendererdiscoverers: [VLCRendererDiscoverer] = .init()
+    private var isDisposed = false
     
     public func view() -> UIView {
+        refreshDrawableBinding()
         return self.hostedView
     }
     
@@ -67,11 +76,13 @@ public class VLCViewController: NSObject, FlutterPlatformView {
         self.rendererEventChannel.setStreamHandler(self.rendererEventChannelHandler)
         hostedView.player = self.vlcMediaPlayer
         self.vlcMediaPlayer.delegate = self.mediaEventChannelHandler
+        registerLifecycleObservers()
     }
     
     public func play() {
-        (self.hostedView as? VLCPlayerHostedView)?.attachDrawableIfNeeded()
+        refreshDrawableBinding(forceRebind: true)
         self.vlcMediaPlayer.play()
+        refreshDrawableBinding()
     }
     
     public func pause() {
@@ -314,6 +325,8 @@ public class VLCViewController: NSObject, FlutterPlatformView {
     }
     
     public func dispose() {
+        isDisposed = true
+        NotificationCenter.default.removeObserver(self)
         self.mediaEventChannel.setStreamHandler(nil)
         self.rendererEventChannel.setStreamHandler(nil)
         self.rendererdiscoverers.removeAll()
@@ -371,12 +384,55 @@ public class VLCViewController: NSObject, FlutterPlatformView {
         }
         
         self.vlcMediaPlayer.media = media
-        (self.hostedView as? VLCPlayerHostedView)?.attachDrawableIfNeeded()
+        refreshDrawableBinding(forceRebind: true)
 //        self.vlcMediaPlayer.media.parse(withOptions: VLCMediaParsingOptions(VLCMediaParseLocal | VLCMediaFetchLocal | VLCMediaParseNetwork | VLCMediaFetchNetwork))
         self.vlcMediaPlayer.play()
+        refreshDrawableBinding()
         if !autoPlay {
             self.vlcMediaPlayer.stop()
         }
+    }
+
+    private func registerLifecycleObservers() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleApplicationDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleApplicationWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+    }
+
+    private func refreshDrawableBinding(forceRebind: Bool = false) {
+        guard !isDisposed else {
+            return
+        }
+        scheduleDrawableBinding(forceRebind: forceRebind, delay: 0.0)
+        scheduleDrawableBinding(forceRebind: false, delay: 0.1)
+        scheduleDrawableBinding(forceRebind: false, delay: 0.3)
+    }
+
+    private func scheduleDrawableBinding(forceRebind: Bool, delay: TimeInterval) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self = self, !self.isDisposed else {
+                return
+            }
+            (self.hostedView as? VLCPlayerHostedView)?
+                .attachDrawableIfNeeded(forceRebind: forceRebind)
+        }
+    }
+
+    @objc private func handleApplicationDidBecomeActive() {
+        refreshDrawableBinding(forceRebind: true)
+    }
+
+    @objc private func handleApplicationWillEnterForeground() {
+        refreshDrawableBinding(forceRebind: true)
     }
 }
 

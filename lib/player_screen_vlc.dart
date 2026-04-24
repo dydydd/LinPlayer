@@ -21,6 +21,7 @@ import 'services/playback/mobile_playback_preferences.dart';
 import 'services/playback/mobile_system_volume.dart';
 import 'services/playback/player_core_pages.dart';
 import 'services/playback/player_core_ui.dart';
+import 'services/playback/playback_transition_guard.dart';
 import 'services/playback/video_display_mode.dart';
 import 'services/playback/vlc_video_player_adapter.dart';
 import 'services/subtitle_support.dart';
@@ -233,13 +234,9 @@ class _VlcPlayerScreenState extends State<VlcPlayerScreen>
   @override
   void didPushNext() {
     // User navigated away from the playback page: stop playback & buffering.
-    _controlsHideTimer?.cancel();
-    _controlsHideTimer = null;
-    _uiTimer?.cancel();
-    _uiTimer = null;
-    // ignore: unawaited_futures
-    _controller?.dispose();
-    _controller = null;
+    unawaited(
+      PlaybackTransitionGuard.enqueue(_shutdownPlaybackForReplacementRoute),
+    );
   }
 
   Future<void> _switchToPlayerCore(PlayerCore core) async {
@@ -3218,6 +3215,7 @@ class _VlcPlayerScreenState extends State<VlcPlayerScreen>
     bool? autoPlay,
     bool resetDanmaku = true,
   }) async {
+    await PlaybackTransitionGuard.waitForSettled();
     final rawPath = (file.path ?? '').trim();
 
     final resolved = await StreamResolver.resolve(

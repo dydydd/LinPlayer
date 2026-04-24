@@ -27,6 +27,7 @@ import 'services/playback/mobile_playback_preferences.dart';
 import 'services/playback/mobile_system_volume.dart';
 import 'services/playback/player_core_pages.dart';
 import 'services/playback/player_core_ui.dart';
+import 'services/playback/playback_transition_guard.dart';
 import 'services/playback/video_display_mode.dart';
 import 'services/playback_proxy/playback_proxy.dart';
 import 'services/subtitle_support.dart';
@@ -1665,8 +1666,9 @@ class _PlayerScreenState extends State<PlayerScreen>
   @override
   void didPushNext() {
     // User navigated away from the playback page: stop playback & buffering.
-    // ignore: unawaited_futures
-    _playerService.dispose();
+    unawaited(
+      PlaybackTransitionGuard.enqueue(_shutdownPlaybackForReplacementRoute),
+    );
   }
 
   Future<void> _playFile(
@@ -1675,6 +1677,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     Duration? startPosition,
     bool? autoPlay,
   }) async {
+    await PlaybackTransitionGuard.waitForSettled();
+    if (!mounted) return;
     final isTv = _isTv(context);
     final rawPath = (file.path ?? '').trim();
 

@@ -23,6 +23,7 @@ import 'services/playback/mobile_playback_preferences.dart';
 import 'services/playback/mobile_system_volume.dart';
 import 'services/playback/player_core_pages.dart';
 import 'services/playback/player_core_ui.dart';
+import 'services/playback/playback_transition_guard.dart';
 import 'services/playback/video_display_mode.dart';
 import 'services/playback/vlc_video_player_adapter.dart';
 import 'services/playback/playback_thresholds.dart';
@@ -420,17 +421,11 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
   @override
   void didPushNext() {
     // User navigated away from the playback page: stop playback & buffering.
-    _uiTimer?.cancel();
-    _uiTimer = null;
-    _serverProgressSync?.stop();
-    PlaybackPreloadCoordinator.cancelOwner(_preloadOwnerKey);
-    _preloadOwnerKey = '';
-    _cancelActivePlaybackCacheFills();
-    // ignore: unawaited_futures
-    _reportPlaybackStoppedBestEffort();
-    // ignore: unawaited_futures
-    _controller?.dispose();
-    _controller = null;
+    unawaited(
+      PlaybackTransitionGuard.enqueue(
+        () => _shutdownPlaybackForRouteExit(resetSystemUi: false),
+      ),
+    );
   }
 
   void _cancelActivePlaybackCacheFills() {
@@ -5361,6 +5356,8 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
 
   Future<void> _init() async {
     final initSession = ++_initSession;
+    await PlaybackTransitionGuard.waitForSettled();
+    if (!mounted || initSession != _initSession) return;
     _allowRoutePop = false;
     _exitInProgress = false;
     _uiTimer?.cancel();

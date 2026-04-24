@@ -22,6 +22,7 @@ import 'services/playback/mobile_playback_preferences.dart';
 import 'services/playback/mobile_system_volume.dart';
 import 'services/playback/player_core_pages.dart';
 import 'services/playback/player_core_ui.dart';
+import 'services/playback/playback_transition_guard.dart';
 import 'services/playback/video_display_mode.dart';
 import 'services/subtitle_support.dart';
 import 'services/stream_proxy/local_http_stream_proxy.dart';
@@ -187,6 +188,9 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _startMobileVolumeSync();
+    if (_isIos || (_isAndroid && !DeviceType.isTv)) {
+      _viewType = VideoViewType.textureView;
+    }
     _danmakuEnabled = widget.appState.danmakuEnabled;
     _danmakuOpacity = widget.appState.danmakuOpacity;
     _danmakuScale = widget.appState.danmakuScale;
@@ -245,14 +249,9 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   @override
   void didPushNext() {
     // User navigated away from the playback page: stop playback & buffering.
-    _controlsHideTimer?.cancel();
-    _controlsHideTimer = null;
-    _uiTimer?.cancel();
-    _uiTimer = null;
-    // ignore: unawaited_futures
-    _controller?.dispose();
-    _controller = null;
-    _invalidateMobileTrackPanelState(resetScroll: true);
+    unawaited(
+      PlaybackTransitionGuard.enqueue(_shutdownPlaybackForReplacementRoute),
+    );
   }
 
   Future<void> _switchToPlayerCore(PlayerCore core) async {
@@ -3419,6 +3418,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     bool? autoPlay,
     bool resetDanmaku = true,
   }) async {
+    await PlaybackTransitionGuard.waitForSettled();
     final rawPath = (file.path ?? '').trim();
 
     final resolved = await StreamResolver.resolve(

@@ -82,12 +82,14 @@ class VideoPlayerController {
     VideoViewType viewType = VideoViewType.textureView,
   }) {
     final resolvedUri = _withTokenQuery(uri, httpHeaders);
+    final options = buildVlcPlayerOptionsFromHttpHeaders(httpHeaders);
     return VideoPlayerController._(
       VlcPlayerController.network(
         resolvedUri.toString(),
         autoInitialize: false,
         autoPlay: false,
         hwAcc: HwAcc.auto,
+        options: options,
       ),
       debugSource: resolvedUri.toString(),
     );
@@ -102,9 +104,10 @@ class VideoPlayerController {
 
   static Uri _withTokenQuery(Uri uri, Map<String, String>? headers) {
     if (headers == null || headers.isEmpty) return uri;
-    final token =
-        (headers['X-Emby-Token'] ?? headers['X-MediaBrowser-Token'] ?? '')
-            .trim();
+    final token = (_headerValue(headers, const <String>[
+      'x-emby-token',
+      'x-mediabrowser-token',
+    ])).trim();
     if (token.isEmpty || uri.queryParameters.containsKey('api_key')) {
       return uri;
     }
@@ -185,6 +188,56 @@ class VideoPlayerController {
     await _controller.stop();
     await _controller.dispose();
   }
+}
+
+String _headerValue(Map<String, String>? headers, List<String> keys) {
+  if (headers == null || headers.isEmpty) return '';
+  final lowerKeys = keys.map((key) => key.toLowerCase()).toSet();
+  for (final entry in headers.entries) {
+    if (!lowerKeys.contains(entry.key.toLowerCase())) continue;
+    final value = entry.value.trim();
+    if (value.isNotEmpty) return value;
+  }
+  return '';
+}
+
+@visibleForTesting
+VlcPlayerOptions? buildVlcPlayerOptionsFromHttpHeaders(
+  Map<String, String>? headers,
+) {
+  if (headers == null || headers.isEmpty) return null;
+
+  final httpOptions = <String>[];
+  final extraOptions = <String>[];
+
+  final userAgent = _headerValue(headers, const <String>['user-agent']);
+  if (userAgent.isNotEmpty) {
+    httpOptions.add(VlcHttpOptions.httpUserAgent(userAgent));
+  }
+
+  final referer = _headerValue(headers, const <String>[
+    'referer',
+    'referrer',
+  ]);
+  if (referer.isNotEmpty) {
+    httpOptions.add(VlcHttpOptions.httpReferrer(referer));
+  }
+
+  final cookie = _headerValue(headers, const <String>['cookie']);
+  if (cookie.isNotEmpty) {
+    extraOptions.add(':http-cookie=$cookie');
+    httpOptions.add(VlcHttpOptions.httpForwardCookies(true));
+  }
+
+  if (httpOptions.isEmpty && extraOptions.isEmpty) {
+    return null;
+  }
+
+  return VlcPlayerOptions(
+    http: httpOptions.isEmpty ? null : VlcHttpOptions(httpOptions),
+    extras:
+        extraOptions.isEmpty ? null : List<String>.unmodifiable(extraOptions),
+  );
 }
 
 class VideoPlayer extends StatelessWidget {
