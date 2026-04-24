@@ -479,7 +479,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     }
   }
 
-  Future<void> _shutdownPlaybackForRouteExit() async {
+  Future<void> _shutdownPlaybackForRouteExit({
+    bool resetSystemUi = true,
+  }) async {
     _resumeHintTimer?.cancel();
     _resumeHintTimer = null;
     _startOverHintTimer?.cancel();
@@ -533,7 +535,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     try {
       await _playerService.dispose();
     } catch (_) {}
-    await _exitImmersiveMode(resetOrientations: true);
+    await _exitImmersiveMode(resetOrientations: resetSystemUi);
   }
 
   Future<void> _init() async {
@@ -2385,7 +2387,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     }
   }
 
-  void _playEpisodeFromPicker(MediaItem episode) {
+  Future<void> _playEpisodeFromPicker(MediaItem episode) async {
     if (episode.id == widget.itemId) {
       setState(() => _episodePickerVisible = false);
       return;
@@ -2397,6 +2399,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         ticks > 0 ? Duration(microseconds: (ticks / 10).round()) : null;
     final episodeSeriesId = (episode.seriesId ?? '').trim();
     _preserveOrientationForReplacementRoute();
+    await _shutdownPlaybackForRouteExit(resetSystemUi: false);
+    if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => PlayNetworkPage(
@@ -6066,9 +6070,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     if (nextCore == widget.appState.playerCore) return;
     final pos = _lastPosition;
     _maybeReportPlaybackProgress(pos, force: true);
+    _preserveOrientationForReplacementRoute();
+    await _shutdownPlaybackForRouteExit(resetSystemUi: false);
     await widget.appState.setPlayerCore(nextCore);
     if (!mounted) return;
-    _preserveOrientationForReplacementRoute();
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => buildNetworkPlayerPage(

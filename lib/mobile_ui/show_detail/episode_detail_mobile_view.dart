@@ -55,7 +55,7 @@ class EpisodeDetailMobileView extends StatelessWidget {
     return Scaffold(
       body: Stack(
         children: [
-          Positioned.fill(child: _background(context)),
+          SizedBox.expand(child: _background(context)),
           RefreshIndicator(
             onRefresh: onRefresh,
             child: ListView(
@@ -125,37 +125,41 @@ class EpisodeDetailMobileView extends StatelessWidget {
               ),
             ),
           ),
-        Positioned.fill(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                stops: const [0.0, 0.28, 0.7, 1.0],
-                colors: [
-                  Colors.black.withValues(alpha: 0.10),
-                  Colors.black.withValues(alpha: 0.38),
-                  const Color(0xFF10161D).withValues(alpha: 0.95),
-                  const Color(0xFF080B0F),
-                ],
-              ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              stops: const [0.0, 0.28, 0.7, 1.0],
+              colors: [
+                Colors.black.withValues(alpha: 0.10),
+                Colors.black.withValues(alpha: 0.38),
+                const Color(0xFF10161D).withValues(alpha: 0.95),
+                const Color(0xFF080B0F),
+              ],
             ),
           ),
         ),
-        Positioned(
-          top: -80,
-          left: -30,
-          right: -30,
-          height: 240,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: RadialGradient(
-                center: const Alignment(0, -0.9),
-                radius: 1.0,
-                colors: [
-                  theme.colorScheme.primary.withValues(alpha: 0.22),
-                  Colors.transparent,
-                ],
+        Align(
+          alignment: Alignment.topCenter,
+          child: Transform.translate(
+            offset: const Offset(0, -80),
+            child: FractionallySizedBox(
+              widthFactor: 1.15,
+              child: SizedBox(
+                height: 240,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      center: const Alignment(0, -0.9),
+                      radius: 1.0,
+                      colors: [
+                        theme.colorScheme.primary.withValues(alpha: 0.22),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
           ),

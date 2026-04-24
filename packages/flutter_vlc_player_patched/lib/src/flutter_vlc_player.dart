@@ -66,18 +66,14 @@ class _VlcPlayerState extends State<VlcPlayer> {
     return AspectRatio(
       aspectRatio: widget.aspectRatio,
       child: Stack(
+        fit: StackFit.expand,
         children: <Widget>[
-          Offstage(
-            offstage: _isInitialized,
-            child: widget.placeholder ?? Container(),
+          vlcPlayerPlatform.buildView(
+            widget.controller.onPlatformViewCreated,
+            virtualDisplay: widget.virtualDisplay,
           ),
-          Offstage(
-            offstage: !_isInitialized,
-            child: vlcPlayerPlatform.buildView(
-              widget.controller.onPlatformViewCreated,
-              virtualDisplay: widget.virtualDisplay,
-            ),
-          ),
+          if (!_isInitialized)
+            Positioned.fill(child: widget.placeholder ?? Container()),
         ],
       ),
     );
@@ -94,8 +90,8 @@ class _VlcPlayerState extends State<VlcPlayer> {
   }
 
   @override
-  void deactivate() {
-    super.deactivate();
+  void dispose() {
     widget.controller.removeListener(_listener);
+    super.dispose();
   }
 }

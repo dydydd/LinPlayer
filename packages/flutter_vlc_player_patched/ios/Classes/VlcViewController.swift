@@ -3,6 +3,31 @@ import Foundation
 import MobileVLCKit
 import UIKit
 
+final class VLCPlayerHostedView: UIView {
+    weak var player: VLCMediaPlayer? {
+        didSet {
+            attachDrawableIfNeeded()
+        }
+    }
+    
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        attachDrawableIfNeeded()
+    }
+    
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        attachDrawableIfNeeded()
+    }
+    
+    func attachDrawableIfNeeded() {
+        guard let player = player else {
+            return
+        }
+        player.drawable = window == nil ? nil : self
+    }
+}
+
 public class VLCViewController: NSObject, FlutterPlatformView {
     var hostedView: UIView
     var vlcMediaPlayer: VLCMediaPlayer
@@ -26,7 +51,10 @@ public class VLCViewController: NSObject, FlutterPlatformView {
             binaryMessenger: messenger
         )
         
-        self.hostedView = UIView(frame: frame)
+        let hostedView = VLCPlayerHostedView(frame: frame)
+        hostedView.backgroundColor = .black
+        hostedView.clipsToBounds = true
+        self.hostedView = hostedView
         self.vlcMediaPlayer = VLCMediaPlayer()
 //        self.vlcMediaPlayer.libraryInstance.debugLogging = true
 //        self.vlcMediaPlayer.libraryInstance.debugLoggingLevel = 3
@@ -37,11 +65,12 @@ public class VLCViewController: NSObject, FlutterPlatformView {
         //
         self.mediaEventChannel.setStreamHandler(self.mediaEventChannelHandler)
         self.rendererEventChannel.setStreamHandler(self.rendererEventChannelHandler)
-        self.vlcMediaPlayer.drawable = self.hostedView
+        hostedView.player = self.vlcMediaPlayer
         self.vlcMediaPlayer.delegate = self.mediaEventChannelHandler
     }
     
     public func play() {
+        (self.hostedView as? VLCPlayerHostedView)?.attachDrawableIfNeeded()
         self.vlcMediaPlayer.play()
     }
     
@@ -290,10 +319,15 @@ public class VLCViewController: NSObject, FlutterPlatformView {
         self.rendererdiscoverers.removeAll()
         self.rendererEventChannelHandler.renderItems.removeAll()
         self.vlcMediaPlayer.stop()
+        self.vlcMediaPlayer.delegate = nil
+        self.vlcMediaPlayer.drawable = nil
+        self.vlcMediaPlayer.media = nil
+        (self.hostedView as? VLCPlayerHostedView)?.player = nil
     }
     
     func setMediaPlayerUrl(uri: String, isAssetUrl: Bool, autoPlay: Bool, hwAcc: Int, options: [String]) {
         self.vlcMediaPlayer.stop()
+        self.vlcMediaPlayer.media = nil
         
         var media: VLCMedia
         if isAssetUrl {
@@ -337,6 +371,7 @@ public class VLCViewController: NSObject, FlutterPlatformView {
         }
         
         self.vlcMediaPlayer.media = media
+        (self.hostedView as? VLCPlayerHostedView)?.attachDrawableIfNeeded()
 //        self.vlcMediaPlayer.media.parse(withOptions: VLCMediaParsingOptions(VLCMediaParseLocal | VLCMediaFetchLocal | VLCMediaParseNetwork | VLCMediaFetchNetwork))
         self.vlcMediaPlayer.play()
         if !autoPlay {

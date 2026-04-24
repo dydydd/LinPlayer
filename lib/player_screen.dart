@@ -1369,6 +1369,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         ),
       );
     }
+    await _shutdownPlaybackForReplacementRoute();
     await appState.setPlayerCore(nextCore);
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
@@ -1389,6 +1390,66 @@ class _PlayerScreenState extends State<PlayerScreen>
         playerCoresForPlatform().where((core) => core != current);
     final next = candidates.isEmpty ? current : candidates.first;
     await _switchToPlayerCore(next);
+  }
+
+  Future<void> _shutdownPlaybackForReplacementRoute() async {
+    _controlsHideTimer?.cancel();
+    _controlsHideTimer = null;
+    _mobileSpeedAdjustTimer?.cancel();
+    _mobileSpeedAdjustTimer = null;
+    _gestureOverlayTimer?.cancel();
+    _gestureOverlayTimer = null;
+    _tvOkLongPressTimer?.cancel();
+    _tvOkLongPressTimer = null;
+    _desktopSecondarySpeedTimer?.cancel();
+    _desktopSecondarySpeedTimer = null;
+    _netSpeedTimer?.cancel();
+    _netSpeedTimer = null;
+
+    final cancels = <Future<void>>[];
+    final posSub = _posSub;
+    _posSub = null;
+    if (posSub != null) cancels.add(posSub.cancel().catchError((_) {}));
+    final errorSub = _errorSub;
+    _errorSub = null;
+    if (errorSub != null) cancels.add(errorSub.cancel().catchError((_) {}));
+    final videoParamsSub = _videoParamsSub;
+    _videoParamsSub = null;
+    if (videoParamsSub != null) {
+      cancels.add(videoParamsSub.cancel().catchError((_) {}));
+    }
+    final playingSub = _playingSub;
+    _playingSub = null;
+    if (playingSub != null) cancels.add(playingSub.cancel().catchError((_) {}));
+    final completedSub = _completedSub;
+    _completedSub = null;
+    if (completedSub != null) {
+      cancels.add(completedSub.cancel().catchError((_) {}));
+    }
+    final bufferingSub = _bufferingSub;
+    _bufferingSub = null;
+    if (bufferingSub != null) {
+      cancels.add(bufferingSub.cancel().catchError((_) {}));
+    }
+    final bufferSub = _bufferSub;
+    _bufferSub = null;
+    if (bufferSub != null) cancels.add(bufferSub.cancel().catchError((_) {}));
+    if (cancels.isNotEmpty) await Future.wait(cancels);
+
+    _gestureOverlayIcon = null;
+    _gestureOverlayText = null;
+    final thumb = _thumbnailer;
+    _thumbnailer = null;
+
+    try {
+      await _playerService.dispose();
+    } catch (_) {}
+
+    if (thumb != null) {
+      try {
+        await thumb.dispose();
+      } catch (_) {}
+    }
   }
 
   void _applyDanmakuPauseState(bool pause) {

@@ -182,17 +182,9 @@ Widget _detailGlassPanel({
   if (!enableBlur) return ClipRRect(borderRadius: borderRadius, child: surface);
   return ClipRRect(
     borderRadius: borderRadius,
-    child: Stack(
-      fit: StackFit.passthrough,
-      children: [
-        Positioned.fill(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-            child: const SizedBox.expand(),
-          ),
-        ),
-        surface,
-      ],
+    child: BackdropFilter(
+      filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+      child: surface,
     ),
   );
 }
@@ -682,6 +674,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           maxWidth: 1200,
         ),
       ];
+      if (!mounted) return;
       setState(() {
         _detail = detail;
         _seasons = seasonsForUi;
@@ -704,6 +697,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       });
       _persistShowDetailCache();
     } catch (e) {
+      if (!mounted) return;
       if (cachedPayload == null) {
         setState(() => _error = e.toString());
       }
@@ -1699,27 +1693,29 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                           ),
                   ),
                 ),
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: Material(
-                    color: Colors.black.withValues(alpha: 0.58),
-                    borderRadius: BorderRadius.circular(999),
-                    child: InkWell(
+                Align(
+                  alignment: Alignment.topRight,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 8, right: 8),
+                    child: Material(
+                      color: Colors.black.withValues(alpha: 0.58),
                       borderRadius: BorderRadius.circular(999),
-                      onTap: _favoriteLoaded ? _toggleLocalFavorite : null,
-                      child: Container(
-                        width: 32,
-                        height: 32,
-                        alignment: Alignment.center,
-                        child: Icon(
-                          _localFavorite
-                              ? Icons.favorite_rounded
-                              : Icons.favorite_border_rounded,
-                          size: 18,
-                          color: _localFavorite
-                              ? const Color(0xFFFF8CA8)
-                              : Colors.white,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(999),
+                        onTap: _favoriteLoaded ? _toggleLocalFavorite : null,
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          alignment: Alignment.center,
+                          child: Icon(
+                            _localFavorite
+                                ? Icons.favorite_rounded
+                                : Icons.favorite_border_rounded,
+                            size: 18,
+                            color: _localFavorite
+                                ? const Color(0xFFFF8CA8)
+                                : Colors.white,
+                          ),
                         ),
                       ),
                     ),
@@ -8790,41 +8786,40 @@ Widget _withHorizontalEdgeFade(
   final isDark = Theme.of(context).brightness == Brightness.dark;
   final background = Colors.black.withValues(alpha: isDark ? 0.42 : 0.34);
   return Stack(
+    fit: StackFit.expand,
     children: [
-      Positioned.fill(child: child),
-      Positioned.fill(
-        child: IgnorePointer(
-          child: Row(
-            children: [
-              Container(
-                width: fadeWidth,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
-                    colors: [
-                      background,
-                      background.withValues(alpha: 0),
-                    ],
-                  ),
+      child,
+      IgnorePointer(
+        child: Row(
+          children: [
+            Container(
+              width: fadeWidth,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: [
+                    background,
+                    background.withValues(alpha: 0),
+                  ],
                 ),
               ),
-              const Spacer(),
-              Container(
-                width: fadeWidth,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
-                    colors: [
-                      background.withValues(alpha: 0),
-                      background,
-                    ],
-                  ),
+            ),
+            const Spacer(),
+            Container(
+              width: fadeWidth,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: [
+                    background.withValues(alpha: 0),
+                    background,
+                  ],
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     ],

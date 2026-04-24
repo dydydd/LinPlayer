@@ -25,14 +25,15 @@ class ShowDetailMobileView extends StatelessWidget {
     return Scaffold(
       body: Stack(
         children: [
-          Positioned.fill(child: _background(context)),
+          SizedBox.expand(child: _background(context)),
           RefreshIndicator(
             onRefresh: onRefresh,
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(
                 parent: BouncingScrollPhysics(),
               ),
-              padding: EdgeInsets.fromLTRB(16, topInset + 16, 16, bottomPadding),
+              padding:
+                  EdgeInsets.fromLTRB(16, topInset + 16, 16, bottomPadding),
               children: [
                 heroSection,
                 if (sections.isNotEmpty) ...[
@@ -114,34 +115,30 @@ class ShowDetailMobileView extends StatelessWidget {
       fit: StackFit.expand,
       children: [
         backdrop,
-        Positioned.fill(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                stops: const [0, 0.30, 0.72, 1],
-                colors: [
-                  Colors.black.withValues(alpha: 0.22),
-                  Colors.black.withValues(alpha: 0.52),
-                  const Color(0xFF0D1014).withValues(alpha: 0.96),
-                  const Color(0xFF060708),
-                ],
-              ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              stops: const [0, 0.30, 0.72, 1],
+              colors: [
+                Colors.black.withValues(alpha: 0.22),
+                Colors.black.withValues(alpha: 0.52),
+                const Color(0xFF0D1014).withValues(alpha: 0.96),
+                const Color(0xFF060708),
+              ],
             ),
           ),
         ),
-        Positioned.fill(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: RadialGradient(
-                center: const Alignment(0, -0.92),
-                radius: 1.1,
-                colors: [
-                  scheme.primary.withValues(alpha: 0.18),
-                  Colors.transparent,
-                ],
-              ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: RadialGradient(
+              center: const Alignment(0, -0.92),
+              radius: 1.1,
+              colors: [
+                scheme.primary.withValues(alpha: 0.18),
+                Colors.transparent,
+              ],
             ),
           ),
         ),

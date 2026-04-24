@@ -474,7 +474,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     }
   }
 
-  Future<void> _shutdownPlaybackForRouteExit() async {
+  Future<void> _shutdownPlaybackForRouteExit({
+    bool resetSystemUi = true,
+  }) async {
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
     _uiTimer?.cancel();
@@ -512,7 +514,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       } catch (_) {}
     }
 
-    await _exitImmersiveMode(resetOrientations: true);
+    await _exitImmersiveMode(resetOrientations: resetSystemUi);
   }
 
   @override
@@ -1461,7 +1463,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     return future;
   }
 
-  void _playEpisodeFromPicker(MediaItem episode) {
+  Future<void> _playEpisodeFromPicker(MediaItem episode) async {
     if (episode.id == widget.itemId) {
       setState(() => _episodePickerVisible = false);
       return;
@@ -1473,6 +1475,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         ticks > 0 ? Duration(microseconds: (ticks / 10).round()) : null;
     final episodeSeriesId = (episode.seriesId ?? '').trim();
     _preserveOrientationForReplacementRoute();
+    await _shutdownPlaybackForRouteExit(resetSystemUi: false);
+    if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => ExoPlayNetworkPage(
@@ -5348,9 +5352,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     if (nextCore == widget.appState.playerCore) return;
     final pos = _position;
     _maybeReportPlaybackProgress(pos, force: true);
+    _preserveOrientationForReplacementRoute();
+    await _shutdownPlaybackForRouteExit(resetSystemUi: false);
     await widget.appState.setPlayerCore(nextCore);
     if (!mounted) return;
-    _preserveOrientationForReplacementRoute();
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => buildNetworkPlayerPage(

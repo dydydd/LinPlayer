@@ -283,6 +283,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
         ),
       );
     }
+    await _shutdownPlaybackForReplacementRoute();
     await widget.appState.setPlayerCore(nextCore);
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
@@ -301,6 +302,33 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
         playerCoresForPlatform().where((core) => core != current);
     final next = candidates.isEmpty ? current : candidates.first;
     await _switchToPlayerCore(next);
+  }
+
+  Future<void> _shutdownPlaybackForReplacementRoute() async {
+    _controlsHideTimer?.cancel();
+    _controlsHideTimer = null;
+    _mobileSpeedAdjustTimer?.cancel();
+    _mobileSpeedAdjustTimer = null;
+    _uiTimer?.cancel();
+    _uiTimer = null;
+    _gestureOverlayTimer?.cancel();
+    _gestureOverlayTimer = null;
+    _tvOkLongPressTimer?.cancel();
+    _tvOkLongPressTimer = null;
+
+    final controller = _controller;
+    _controller = null;
+    _invalidateMobileTrackPanelState(resetScroll: true);
+    if (controller != null) {
+      try {
+        if (controller.value.isInitialized && controller.value.isPlaying) {
+          await controller.pause();
+        }
+      } catch (_) {}
+      try {
+        await controller.dispose();
+      } catch (_) {}
+    }
   }
 
   @override
