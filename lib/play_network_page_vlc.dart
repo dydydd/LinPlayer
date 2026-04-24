@@ -2933,6 +2933,9 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
       viewType: next,
     );
     _controller = controller;
+    if (mounted) {
+      setState(() {});
+    }
     await controller.initialize();
     await _syncMobileVolumeForActivePlayer();
     await _applyMobileLoopModeToExo();
@@ -5597,6 +5600,9 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
         viewType: _viewType,
       );
       _controller = controller;
+      if (mounted) {
+        setState(() {});
+      }
       final controllerInitializeStopwatch = Stopwatch()..start();
       await controller.initialize();
       await _syncMobileVolumeForActivePlayer();
@@ -6897,7 +6903,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
               Expanded(
                 child: Container(
                   color: Colors.black,
-                  child: isReady
+                  child: controller != null
                       ? Stack(
                           fit: StackFit.expand,
                           children: [
@@ -7553,6 +7559,17 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
                               _buildMobileSidePanelOverlay(
                                 context: context,
                                 controlsEnabled: controlsEnabled,
+                              ),
+                            if (!isReady)
+                              const Positioned.fill(
+                                child: IgnorePointer(
+                                  child: ColoredBox(
+                                    color: Colors.black,
+                                    child: Center(
+                                      child: CircularProgressIndicator(),
+                                    ),
+                                  ),
+                                ),
                               ),
                           ],
                         )

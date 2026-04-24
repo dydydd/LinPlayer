@@ -3379,6 +3379,9 @@ class _VlcPlayerScreenState extends State<VlcPlayerScreen>
           }
 
           _controller = controller;
+          if (mounted) {
+            setState(() {});
+          }
           await controller.initialize();
           await _syncMobileVolumeForActivePlayer();
           await _applyMobileLoopModeToExo();
@@ -3821,7 +3824,7 @@ class _VlcPlayerScreenState extends State<VlcPlayerScreen>
                   children: [
                     Container(
                       color: Colors.black,
-                      child: isReady
+                      child: controller != null
                           ? Stack(
                               fit: StackFit.expand,
                               children: [
@@ -3904,6 +3907,17 @@ class _VlcPlayerScreenState extends State<VlcPlayerScreen>
                                           alpha: (1.0 - _screenBrightness)
                                               .clamp(0.0, 0.8)
                                               .toDouble(),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                if (!isReady)
+                                  const Positioned.fill(
+                                    child: IgnorePointer(
+                                      child: ColoredBox(
+                                        color: Colors.black,
+                                        child: Center(
+                                          child: CircularProgressIndicator(),
                                         ),
                                       ),
                                     ),
@@ -4161,7 +4175,7 @@ class _VlcPlayerScreenState extends State<VlcPlayerScreen>
                     wrapVideo(
                       Container(
                         color: Colors.black,
-                        child: isReady
+                        child: controller != null
                             ? Stack(
                                 fit: StackFit.expand,
                                 children: [
@@ -4247,6 +4261,17 @@ class _VlcPlayerScreenState extends State<VlcPlayerScreen>
                                             alpha: (1.0 - _screenBrightness)
                                                 .clamp(0.0, 0.8)
                                                 .toDouble(),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  if (!isReady)
+                                    const Positioned.fill(
+                                      child: IgnorePointer(
+                                        child: ColoredBox(
+                                          color: Colors.black,
+                                          child: Center(
+                                            child: CircularProgressIndicator(),
                                           ),
                                         ),
                                       ),
