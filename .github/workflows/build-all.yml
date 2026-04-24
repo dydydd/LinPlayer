@@ -18,6 +18,15 @@ on:
         description: "Build number (integer) like 45"
         type: string
         required: false
+      windows_archive_format:
+        description: "Windows portable archive format"
+        type: choice
+        required: false
+        default: zip
+        options:
+          - zip
+          - 7z
+          - both
 concurrency:
   group: nightly-release
   cancel-in-progress: true
@@ -26,6 +35,7 @@ env:
   VERSION_FULL_INPUT: ${{ github.event.inputs.version_full }}
   BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
   BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
+  WINDOWS_ARCHIVE_FORMAT_INPUT: ${{ github.event.inputs.windows_archive_format || 'zip' }}
 
 jobs:
   build-android:
@@ -152,7 +162,7 @@ jobs:
           path: build/ci-android-apks/*.apk
 
   build-windows:
-    name: Build Windows Setup (x64)
+    name: Build Windows Packages (x64)
     runs-on: windows-latest
     env:
       PUB_CACHE: C:\Users\runneradmin\AppData\Local\Pub\Cache
@@ -220,7 +230,7 @@ jobs:
           }
           flutter build windows --release --build-name $env:BUILD_NAME --build-number $env:BUILD_NUMBER @dartDefineArgs
 
-      - name: Copy MSVC runtime DLLs
+      - name: Resolve Windows release directory
         shell: pwsh
         run: |
           $release64 = "build/windows/x64/runner/Release"
@@ -230,9 +240,20 @@ jobs:
           } elseif (Test-Path $releaseLegacy) {
             $release = $releaseLegacy
           } else {
-            Write-Error "Release folder not found after build."
-            exit 1
+            throw "Release folder not found after build."
           }
+
+          $resolvedRelease = (Resolve-Path $release).Path
+          "WINDOWS_RELEASE_DIR=$resolvedRelease" >> $env:GITHUB_ENV
+          Write-Host "WINDOWS_RELEASE_DIR=$resolvedRelease"
+
+      - name: Copy MSVC runtime DLLs
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_RELEASE_DIR) -or -not (Test-Path $env:WINDOWS_RELEASE_DIR)) {
+            throw "WINDOWS_RELEASE_DIR is missing or invalid."
+          }
+          $release = $env:WINDOWS_RELEASE_DIR
 
           $roots = @(
             "C:\Program Files\Microsoft Visual Studio\2022",
@@ -258,18 +279,18 @@ jobs:
         shell: pwsh
         run: choco install innosetup --no-progress -y
 
+      - name: Install 7-Zip
+        if: ${{ env.WINDOWS_ARCHIVE_FORMAT_INPUT == '7z' || env.WINDOWS_ARCHIVE_FORMAT_INPUT == 'both' }}
+        shell: pwsh
+        run: choco install 7zip --no-progress -y
+
       - name: Build Windows installer
         shell: pwsh
         run: |
-          $release64 = "build/windows/x64/runner/Release"
-          $releaseLegacy = "build/windows/runner/Release"
-          if (Test-Path $release64) {
-            $release = $release64
-          } elseif (Test-Path $releaseLegacy) {
-            $release = $releaseLegacy
-          } else {
-            throw "Release folder not found after build."
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_RELEASE_DIR) -or -not (Test-Path $env:WINDOWS_RELEASE_DIR)) {
+            throw "WINDOWS_RELEASE_DIR is missing or invalid."
           }
+          $release = $env:WINDOWS_RELEASE_DIR
 
           if ([string]::IsNullOrWhiteSpace($env:APP_VERSION) -or [string]::IsNullOrWhiteSpace($env:APP_VERSION_FULL)) {
             throw "Missing APP_VERSION/APP_VERSION_FULL env vars. Did 'Compute build version' run?"
@@ -299,11 +320,91 @@ jobs:
             throw "Installer output not found."
           }
 
-      - name: Upload Windows installer artifact
+      - name: Package Windows portable archive(s)
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_RELEASE_DIR) -or -not (Test-Path $env:WINDOWS_RELEASE_DIR)) {
+            throw "WINDOWS_RELEASE_DIR is missing or invalid."
+          }
+
+          $formatInput = $env:WINDOWS_ARCHIVE_FORMAT_INPUT
+          if ([string]::IsNullOrWhiteSpace($formatInput)) {
+            $formatInput = "zip"
+          }
+
+          $formats = switch ($formatInput.ToLowerInvariant()) {
+            "zip" { @("zip") }
+            "7z" { @("7z") }
+            "both" { @("zip", "7z") }
+            default { throw "Unsupported WINDOWS_ARCHIVE_FORMAT_INPUT: $formatInput" }
+          }
+
+          $stageRoot = Join-Path $env:RUNNER_TEMP "windows-portable"
+          $portableDir = Join-Path $stageRoot "LinPlayer-Windows-Portable-x64"
+          $outDir = "build/ci-windows-packages"
+
+          Remove-Item -LiteralPath $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $portableDir -Force | Out-Null
+          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+
+          Copy-Item -Path (Join-Path $env:WINDOWS_RELEASE_DIR "*") -Destination $portableDir -Recurse -Force
+
+          $outDirResolved = (Resolve-Path $outDir).Path
+
+          Push-Location $stageRoot
+          try {
+            if ($formats -contains "zip") {
+              $zipPath = Join-Path $outDirResolved "LinPlayer-Windows-Portable-x64.zip"
+              if (Test-Path $zipPath) {
+                Remove-Item -LiteralPath $zipPath -Force
+              }
+              Compress-Archive -Path "LinPlayer-Windows-Portable-x64" -DestinationPath $zipPath -CompressionLevel Optimal
+            }
+
+            if ($formats -contains "7z") {
+              $sevenZipPath = $null
+              $sevenZipCommand = Get-Command 7z.exe -ErrorAction SilentlyContinue
+              if ($sevenZipCommand) {
+                $sevenZipPath = $sevenZipCommand.Source
+              }
+              if (-not $sevenZipPath) {
+                foreach ($candidate in @(
+                  "C:\Program Files\7-Zip\7z.exe",
+                  "C:\Program Files (x86)\7-Zip\7z.exe"
+                )) {
+                  if (Test-Path $candidate) {
+                    $sevenZipPath = $candidate
+                    break
+                  }
+                }
+              }
+              if (-not $sevenZipPath) {
+                throw "7z.exe not found after installing 7-Zip."
+              }
+
+              $sevenZipArchivePath = Join-Path $outDirResolved "LinPlayer-Windows-Portable-x64.7z"
+              if (Test-Path $sevenZipArchivePath) {
+                Remove-Item -LiteralPath $sevenZipArchivePath -Force
+              }
+
+              & $sevenZipPath a -t7z -mx=9 $sevenZipArchivePath "LinPlayer-Windows-Portable-x64"
+              if ($LASTEXITCODE -ne 0) {
+                throw "7z packaging failed with exit code $LASTEXITCODE."
+              }
+            }
+          } finally {
+            Pop-Location
+          }
+
+          Get-ChildItem -Path $outDirResolved
+
+      - name: Upload Windows package artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: LinPlayer-Windows-Setup-${{ env.VERSION_FULL }}
-          path: LinPlayer-Windows-Setup-x64.exe
+          name: LinPlayer-Windows-Packages-${{ env.VERSION_FULL }}
+          path: |
+            LinPlayer-Windows-Setup-x64.exe
+            build/ci-windows-packages/LinPlayer-Windows-Portable-x64.*
 
   build-linux:
     name: Build Linux Packages (${{ matrix.arch }})
@@ -983,10 +1084,21 @@ jobs:
             "LinPlayer-Linux-arm64.deb"
             "LinPlayer-Linux-arm64.rpm"
           )
+          windows_assets=(
+            "LinPlayer-Windows-Setup-x64.exe"
+          )
+          if [[ -f "dist/LinPlayer-Windows-Portable-x64.zip" ]]; then
+            windows_assets+=("LinPlayer-Windows-Portable-x64.zip")
+          fi
+          if [[ -f "dist/LinPlayer-Windows-Portable-x64.7z" ]]; then
+            windows_assets+=("LinPlayer-Windows-Portable-x64.7z")
+          fi
 
           gh_retry release upload nightly "dist/LinPlayer-Android-PHONE-arm64-v8a.apk" --clobber
           gh_retry release upload nightly "dist/LinPlayer-Android-TV-armeabi-v7a.apk" --clobber
-          gh_retry release upload nightly "dist/LinPlayer-Windows-Setup-x64.exe" --clobber
+          for asset in "${windows_assets[@]}"; do
+            gh_retry release upload nightly "dist/${asset}" --clobber
+          done
           for asset in "${linux_assets[@]}"; do
             gh_retry release upload nightly "dist/${asset}" --clobber
           done
@@ -1021,6 +1133,12 @@ jobs:
             "LinPlayer-macOS-arm64.dmg"
             "LinPlayer-macOS-x86_64.dmg"
           )
+          if [[ -f "dist/LinPlayer-Windows-Portable-x64.zip" ]]; then
+            expected_assets+=("LinPlayer-Windows-Portable-x64.zip")
+          fi
+          if [[ -f "dist/LinPlayer-Windows-Portable-x64.7z" ]]; then
+            expected_assets+=("LinPlayer-Windows-Portable-x64.7z")
+          fi
           if [[ -f "dist/LinPlayer-AppleTV-unsigned.ipa" ]]; then
             expected_assets+=("LinPlayer-AppleTV-unsigned.ipa")
           fi

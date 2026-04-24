@@ -249,6 +249,14 @@ jobs:
               exit 1
             fi
 
+            if [[ -f "dist/LinPlayer-Windows-Portable-x64.zip" ]]; then
+              gh_retry release upload "$target" "dist/LinPlayer-Windows-Portable-x64.zip#LinPlayer-Windows-Portable-x64.zip" --clobber
+            fi
+
+            if [[ -f "dist/LinPlayer-Windows-Portable-x64.7z" ]]; then
+              gh_retry release upload "$target" "dist/LinPlayer-Windows-Portable-x64.7z#LinPlayer-Windows-Portable-x64.7z" --clobber
+            fi
+
             # Linux
             for asset in "${linux_assets[@]}"; do
               if [[ -f "dist/${asset}" ]]; then
@@ -290,7 +298,7 @@ jobs:
             fi
           }
 
-          purge_legacy_release_assets() {
+          purge_stale_release_assets() {
             local target="$1"
             local legacy_assets=(
               "LinPlayer-Android.apk"
@@ -302,6 +310,10 @@ jobs:
               "app-armeabi-v7a-release.apk"
               "LinPlayer-iOS-unsigned.ipa"
               "LinPlayer-Linux-x86_64.tar.gz"
+            )
+            local synced_optional_assets=(
+              "LinPlayer-Windows-Portable-x64.zip"
+              "LinPlayer-Windows-Portable-x64.7z"
             )
 
             mapfile -t current_assets < <(
@@ -316,20 +328,35 @@ jobs:
             for line in "${current_assets[@]}"; do
               id="${line%%$'\t'*}"
               name="${line#*$'\t'}"
+              delete_reason=""
+
               for legacy in "${legacy_assets[@]}"; do
                 if [[ "$name" == "$legacy" ]]; then
-                  echo "Deleting legacy release asset from ${target}: ${name}"
-                  gh_retry api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${id}"
+                  delete_reason="legacy asset"
                   break
                 fi
               done
+
+              if [[ -z "${delete_reason:-}" ]]; then
+                for synced in "${synced_optional_assets[@]}"; do
+                  if [[ "$name" == "$synced" && ! -f "dist/${synced}" ]]; then
+                    delete_reason="stale optional asset"
+                    break
+                  fi
+                done
+              fi
+
+              if [[ -n "${delete_reason:-}" ]]; then
+                echo "Deleting ${delete_reason} from ${target}: ${name}"
+                gh_retry api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${id}"
+              fi
             done
           }
 
           upload_assets "$STABLE_TAG"
-          purge_legacy_release_assets "$STABLE_TAG"
+          purge_stale_release_assets "$STABLE_TAG"
           upload_assets latest
-          purge_legacy_release_assets latest
+          purge_stale_release_assets latest
 
       - name: Update VitePress download page
         shell: bash

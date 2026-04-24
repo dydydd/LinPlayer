@@ -18,6 +18,8 @@ PROXY_BASES: list[tuple[str, str]] = [
 ]
 
 KNOWN_ASSETS: list[tuple[str, str]] = [
+    ("Windows (Portable x64 / zip)", "LinPlayer-Windows-Portable-x64.zip"),
+    ("Windows (Portable x64 / 7z)", "LinPlayer-Windows-Portable-x64.7z"),
     ("Android（arm64-v8a）", "LinPlayer-Android-arm64-v8a.apk"),
     ("Android TV", "LinPlayer-Android-TV.apk"),
     ("Android（通用）", "LinPlayer-Android.apk"),
