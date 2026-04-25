@@ -1111,6 +1111,98 @@ void main() {
       },
     );
 
+    test(
+      'VLC prefers direct stream and static stream over server transcode',
+      () async {
+        final adapter = _FakeAdapter(
+          playbackInfo: PlaybackInfoResult(
+            playSessionId: 'play-vlc-direct',
+            mediaSourceId: 'ms-vlc-direct',
+            mediaSources: const <Map<String, dynamic>>[
+              <String, dynamic>{
+                'Id': 'ms-vlc-direct',
+                'Container': 'mkv',
+                'DirectStreamUrl': '/emby/Videos/item-vlc/direct.mkv',
+                'TranscodingUrl': '/emby/Videos/item-vlc/master.m3u8',
+                'MediaStreams': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'Type': 'Video',
+                    'Codec': 'hevc',
+                    'Height': 2160,
+                  },
+                ],
+              },
+              <String, dynamic>{
+                'Id': 'ms-vlc-static',
+                'Container': 'mkv',
+                'TranscodingUrl': '/emby/Videos/item-vlc/static-master.m3u8',
+                'MediaStreams': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'Type': 'Video',
+                    'Codec': 'vp9',
+                    'Height': 1080,
+                  },
+                ],
+              },
+            ],
+          ),
+          streamHeaders: const <String, String>{'X-Test': 'stream'},
+        );
+
+        final directResult = await PlaybackSourceBuilder.build(
+          PlaybackSourceBuildRequest(
+            adapter: adapter,
+            auth: auth,
+            itemId: 'item-vlc',
+            playerCore: PlaybackSourcePlayerCoreKind.vlc,
+            selectedMediaSourceId: 'ms-vlc-direct',
+            resolveExternalSource: false,
+          ),
+        );
+
+        final staticResult = await PlaybackSourceBuilder.build(
+          PlaybackSourceBuildRequest(
+            adapter: adapter,
+            auth: auth,
+            itemId: 'item-vlc',
+            playerCore: PlaybackSourcePlayerCoreKind.vlc,
+            selectedMediaSourceId: 'ms-vlc-static',
+            resolveExternalSource: false,
+          ),
+        );
+
+        final directUri = Uri.parse(directResult.resolvedSource.url);
+        final staticUri = Uri.parse(staticResult.resolvedSource.url);
+        expect(
+          adapter.fetchPlaybackInfoProfiles,
+          <PlaybackInfoProfileKind>[
+            PlaybackInfoProfileKind.vlc,
+            PlaybackInfoProfileKind.vlc,
+          ],
+        );
+        expect(directUri.path, '/emby/Videos/item-vlc/direct.mkv');
+        expect(
+          directResult.resolvedSource.mediaTypeHint,
+          ResolvedPlaybackMediaType.file,
+        );
+        expect(
+          directResult.resolvedSource.httpHeaders,
+          const <String, String>{'X-Test': 'stream'},
+        );
+        expect(staticUri.path, '/emby/Videos/item-vlc/stream');
+        expect(staticUri.queryParameters['MediaSourceId'], 'ms-vlc-static');
+        expect(staticUri.queryParameters['static'], 'true');
+        expect(
+          staticResult.resolvedSource.mediaTypeHint,
+          ResolvedPlaybackMediaType.file,
+        );
+        expect(
+          staticResult.resolvedSource.httpHeaders,
+          const <String, String>{'X-Test': 'stream'},
+        );
+      },
+    );
+
     test('body-link resolution strips sensitive headers on cross-origin target',
         () async {
       final linkServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);

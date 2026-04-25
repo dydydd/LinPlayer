@@ -1654,14 +1654,16 @@ class EmbyApi {
       PlaybackInfoProfileKind.vlc => <String, dynamic>{
           "Name": profileName,
           "MaxStreamingBitrate": 120000000,
+          "SupportsDirectPlay": true,
+          "SupportsDirectStream": true,
+          "SupportsTranscoding": false,
           "DirectPlayProfiles": [
             {
-              "Container":
-                  "3gp,avi,flv,m2ts,m4v,mkv,mov,mp4,mpeg,mpg,mts,ts,webm,wmv",
+              "Container": passthroughVideoContainers,
               "Type": "Video",
             },
             {
-              "Container": "aac,alac,flac,m4a,mp3,ogg,opus,wav,wma",
+              "Container": passthroughAudioContainers,
               "Type": "Audio",
             },
           ],
@@ -1690,6 +1692,9 @@ class EmbyApi {
           ),
           body: jsonEncode({
             'UserId': userId,
+            'EnableDirectPlay': true,
+            'EnableDirectStream': true,
+            'EnableTranscoding': false,
             'DeviceProfile': deviceProfile,
           }),
         );

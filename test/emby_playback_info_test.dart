@@ -120,6 +120,7 @@ void main() {
   test('fetchPlaybackInfo uses dedicated VLC device profile and POSTs first',
       () async {
     final methods = <String>[];
+    Map<String, dynamic>? postedBody;
     Map<String, dynamic>? postedProfile;
 
     final client = MockClient((req) async {
@@ -127,6 +128,7 @@ void main() {
       final url = req.url.toString();
       if (url == 'https://example.com/emby/Items/i1/PlaybackInfo') {
         final body = jsonDecode(req.body) as Map<String, dynamic>;
+        postedBody = body;
         postedProfile = body['DeviceProfile'] as Map<String, dynamic>?;
         return http.Response(
           jsonEncode({
@@ -159,8 +161,15 @@ void main() {
 
     expect(methods, isNotEmpty);
     expect(methods.first, 'POST');
+    expect(postedBody, isNotNull);
+    expect(postedBody!['EnableDirectPlay'], isTrue);
+    expect(postedBody!['EnableDirectStream'], isTrue);
+    expect(postedBody!['EnableTranscoding'], isFalse);
     expect(postedProfile, isNotNull);
     expect(postedProfile!['Name'], 'LinPlayer-VLC');
+    expect(postedProfile!['SupportsDirectPlay'], isTrue);
+    expect(postedProfile!['SupportsDirectStream'], isTrue);
+    expect(postedProfile!['SupportsTranscoding'], isFalse);
     final transcode = postedProfile!['TranscodingProfiles'] as List?;
     expect(transcode, isNotNull);
     expect(transcode, isEmpty);
@@ -174,5 +183,9 @@ void main() {
       (video['Container'] as String?)?.contains('m2ts'),
       isTrue,
     );
+    final audio =
+        direct.cast<Map>().firstWhere((e) => (e['Type'] as String?) == 'Audio');
+    expect((audio['Container'] as String?)?.contains('ac3'), isTrue);
+    expect((audio['Container'] as String?)?.contains('eac3'), isTrue);
   });
 }
