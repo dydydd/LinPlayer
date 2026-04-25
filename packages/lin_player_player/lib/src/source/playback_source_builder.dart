@@ -195,6 +195,9 @@ class PlaybackSourceBuilder {
       bitrate: _estimateBitrateBitsPerSecond(mediaSource),
       sizeBytes: asInt(mediaSource?['Size']),
       sourcePath: sourcePath,
+      playbackPipeline: playbackPipelineForPlaybackSourceCore(
+        request.playerCore,
+      ),
     );
   }
 
@@ -262,6 +265,7 @@ class PlaybackSourceBuilder {
       sizeBytes: resolved.sizeBytes,
       sourcePath: resolved.sourcePath,
       proxyUrl: resolved.proxyUrl,
+      playbackPipeline: resolved.playbackPipeline,
     );
 
     final secondUri = Uri.tryParse(resolved.url);
@@ -316,6 +320,7 @@ class PlaybackSourceBuilder {
       sizeBytes: source.sizeBytes,
       sourcePath: source.sourcePath,
       proxyUrl: source.proxyUrl,
+      playbackPipeline: source.playbackPipeline,
     );
   }
 

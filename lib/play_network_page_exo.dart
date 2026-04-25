@@ -286,6 +286,20 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
   String get _nativeCoreName => _nativeCore.label;
 
+  PlaybackSourcePlayerCoreKind get _playbackSourceCoreKind =>
+      _nativeCore == PlayerCore.avplayer
+          ? PlaybackSourcePlayerCoreKind.avplayer
+          : PlaybackSourcePlayerCoreKind.exo;
+
+  PlaybackInfoProfileKind get _playbackInfoProfileKind =>
+      playbackInfoProfileKindForPlaybackSourceCore(_playbackSourceCoreKind);
+
+  String get _playbackCoreNamespace => _playbackSourceCoreKind.name;
+
+  String get _preloadOwnerNamespace => 'playback_$_playbackCoreNamespace';
+
+  String get _playbackLogTag => 'player_network_$_playbackCoreNamespace';
+
   bool get _isPlaying => _controller?.value.isPlaying ?? false;
 
   String? get _baseUrl => widget.server?.baseUrl ?? widget.appState.baseUrl;
@@ -297,7 +311,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     if (prepared == null) return null;
     if (!prepared.matchesPlayback(
       itemId: widget.itemId,
-      playerCore: PlaybackSourcePlayerCoreKind.exo,
+      playerCore: _playbackSourceCoreKind,
       selectedMediaSourceId: _selectedMediaSourceId,
       audioStreamIndex: _selectedAudioStreamIndex,
       subtitleStreamIndex: _selectedSubtitleStreamIndex,
@@ -312,7 +326,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     if (prepared == null) return null;
     if (!prepared.matchesPlayback(
       itemId: itemId,
-      playerCore: PlaybackSourcePlayerCoreKind.exo,
+      playerCore: _playbackSourceCoreKind,
       selectedMediaSourceId: _selectedMediaSourceId,
       audioStreamIndex: _selectedAudioStreamIndex,
       subtitleStreamIndex: _selectedSubtitleStreamIndex,
@@ -2146,7 +2160,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         triggerSource: triggerSource,
         resolvedSource: resolvedSource,
         startPosition: effectiveStart,
-        playerCore: PlaybackSourcePlayerCoreKind.exo,
+        playerCore: _playbackSourceCoreKind,
         httpProxyUrl: _preloadHttpProxyUrl,
         ownerKey: _preloadOwnerKey,
         scopeKey: 'playback_current',
@@ -2220,7 +2234,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         final status = result?.status.name ?? 'completed';
         if (!shouldTrackStartup) return;
         AppDiagnosticsLogger.instance.info(
-          'player_network_exo',
+          _playbackLogTag,
           'Startup preload warmup completed',
           data: <String, Object?>{
             'itemId': widget.itemId,
@@ -2235,7 +2249,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         );
       } catch (error, stackTrace) {
         AppDiagnosticsLogger.instance.warn(
-          'player_network_exo',
+          _playbackLogTag,
           shouldTrackStartup
               ? 'Startup preload warmup failed'
               : 'Playback preload warmup failed',
@@ -2274,7 +2288,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       if (!shouldTrackStartup) return;
       if (observation == null) {
         AppDiagnosticsLogger.instance.warn(
-          'player_network_exo',
+          _playbackLogTag,
           'Startup playback reuse observation timed out',
           data: <String, Object?>{
             'itemId': widget.itemId,
@@ -2286,7 +2300,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         return;
       }
       AppDiagnosticsLogger.instance.info(
-        'player_network_exo',
+        _playbackLogTag,
         'Startup playback reuse observed',
         data: <String, Object?>{
           'itemId': widget.itemId,
@@ -2332,7 +2346,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           access: access,
           appState: widget.appState,
           itemId: nextId.trim(),
-          playerCore: PlaybackSourcePlayerCoreKind.exo,
+          playerCore: _playbackSourceCoreKind,
           targetKind: PlaybackPreloadTargetKind.nextItem,
           triggerSource: 'playback_next',
           selectedMediaSourceId: _selectedMediaSourceId,
@@ -3509,7 +3523,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     final info = await access.adapter.fetchPlaybackInfo(
       access.auth,
       itemId: widget.itemId,
-      profile: PlaybackInfoProfileKind.exo,
+      profile: _playbackInfoProfileKind,
     );
     final sources = List<Map<String, dynamic>>.from(
       info.mediaSources.cast<Map<String, dynamic>>(),
@@ -3538,6 +3552,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
   Future<List<vp_android.ExoPlayerSubtitleTrackData>>
       _loadMobileSubtitleTracks() async {
+    if (!_isAndroid) {
+      return const <vp_android.ExoPlayerSubtitleTrackData>[];
+    }
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) {
       return const <vp_android.ExoPlayerSubtitleTrackData>[];
@@ -3783,7 +3800,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         }
         final controller = _controller;
         return ListView.separated(
-          key: const PageStorageKey<String>('exo_network_mobile_audio_tracks'),
+          key: PageStorageKey<String>(
+            '${_playbackCoreNamespace}_network_mobile_audio_tracks',
+          ),
           controller: _mobileAudioScrollController,
           padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
           itemCount: tracks.length,
@@ -3823,6 +3842,17 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   }
 
   Widget _buildMobileSubtitlePanel({required bool controlsEnabled}) {
+    if (!_isAndroid) {
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+        children: const [
+          MobilePlayerOptionTile(
+            title: '字幕轨切换暂不支持',
+            subtitle: 'AVPlayer 现在走独立播放链路，不再复用 Android Exo 的字幕控制接口。请在播放前选择字幕，或切换到 MPV / VLC。',
+          ),
+        ],
+      );
+    }
     return FutureBuilder<List<vp_android.ExoPlayerSubtitleTrackData>>(
       future: _ensureMobileSubtitleTracksLoaded(),
       initialData: _mobileSubtitleTracks,
@@ -3835,8 +3865,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         }
         final controller = _controller;
         return ListView(
-          key: const PageStorageKey<String>(
-              'exo_network_mobile_subtitle_tracks'),
+          key: PageStorageKey<String>(
+            '${_playbackCoreNamespace}_network_mobile_subtitle_tracks',
+          ),
           controller: _mobileSubtitleScrollController,
           padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
           children: [
@@ -5628,8 +5659,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     if (_preloadOwnerKey.isNotEmpty) {
       PlaybackPreloadCoordinator.cancelOwner(_preloadOwnerKey);
     }
-    _preloadOwnerKey =
-        PlaybackPreloadCoordinator.createOwnerToken('playback_exo');
+    _preloadOwnerKey = PlaybackPreloadCoordinator.createOwnerToken(
+      _preloadOwnerNamespace,
+    );
 
     final prev = _controller;
     _controller = null;
@@ -5678,7 +5710,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         );
         selectedMediaSource = initialPrepared.selectedMediaSource;
         AppDiagnosticsLogger.instance.info(
-          'player_network_exo',
+          _playbackLogTag,
           'Reused prepared playback handoff',
           data: <String, Object?>{
             'itemId': widget.itemId,
@@ -5754,7 +5786,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       _resolvedStream = playbackSource.url;
       _resolvedStreamHeaders = playbackSource.httpHeaders;
       AppDiagnosticsLogger.instance.info(
-        'player_network_exo',
+        _playbackLogTag,
         'Prepared network playback source',
         data: <String, Object?>{
           'itemId': widget.itemId,
@@ -5789,8 +5821,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       await _applyMobileLoopModeToExo();
       controllerInitializeStopwatch.stop();
       AppDiagnosticsLogger.instance.info(
-        'player_network_exo',
-        'Exo controller initialized',
+        _playbackLogTag,
+        'Native controller initialized',
         data: <String, Object?>{
           'itemId': widget.itemId,
           'initMs': controllerInitializeStopwatch.elapsedMilliseconds,
@@ -5964,8 +5996,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       }
     } catch (e) {
       AppDiagnosticsLogger.instance.error(
-        'player_network_exo',
-        'Unhandled Exo playback initialization error',
+        _playbackLogTag,
+        'Unhandled native playback initialization error',
         data: <String, Object?>{
           'itemId': widget.itemId,
         },
@@ -6072,7 +6104,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         adapter: access.adapter,
         auth: access.auth,
         itemId: widget.itemId,
-        playerCore: PlaybackSourcePlayerCoreKind.exo,
+        playerCore: _playbackSourceCoreKind,
         selectedMediaSourceId: _selectedMediaSourceId,
         preferredMediaSourceIndex: _preferredMediaSourceIndex(),
         audioStreamIndex: _selectedAudioStreamIndex,
@@ -6738,6 +6770,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       (_subtitlePositionStep.clamp(0, 20) * 5.0).clamp(0.0, 200.0).toDouble();
 
   Future<void> _applyExoSubtitleOptions() async {
+    if (!_isAndroid) return;
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) return;
     final api = _exoApiForController(controller);
@@ -6857,6 +6890,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
   Future<void> _pollSubtitleText() async {
     if (_subtitlePollInFlight) return;
+    if (!_isAndroid) return;
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) return;
     if (_isAndroid && _viewType != VideoViewType.textureView) return;

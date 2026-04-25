@@ -100,9 +100,16 @@ void main() {
     );
   });
 
-  test('PlaybackSourceBuildRequest only enables transcoding by default for EXO',
+  test(
+      'PlaybackSourceBuildRequest enables transcoding by default for AVPlayer and EXO',
       () {
     final adapter = _NoopAdapter();
+    final avplayerRequest = PlaybackSourceBuildRequest(
+      adapter: adapter,
+      auth: auth,
+      itemId: 'item-avplayer',
+      playerCore: PlaybackSourcePlayerCoreKind.avplayer,
+    );
     final exoRequest = PlaybackSourceBuildRequest(
       adapter: adapter,
       auth: auth,
@@ -122,6 +129,7 @@ void main() {
       playerCore: PlaybackSourcePlayerCoreKind.mpv,
     );
 
+    expect(avplayerRequest.allowTranscoding, isTrue);
     expect(exoRequest.allowTranscoding, isTrue);
     expect(vlcRequest.allowTranscoding, isFalse);
     expect(mpvRequest.allowTranscoding, isFalse);
@@ -337,6 +345,76 @@ void main() {
   });
 
   test(
+      'PlaybackPreloadCoordinator.prepareItem keeps AVPlayer playback handoff metadata on its dedicated pipeline',
+      () async {
+    final adapter = _FakeAdapter(
+      playbackInfo: PlaybackInfoResult(
+        playSessionId: 'ps-avplayer-handoff',
+        mediaSourceId: 'ms-avplayer-handoff',
+        mediaSources: <dynamic>[
+          <String, dynamic>{
+            'Id': 'ms-avplayer-handoff',
+            'Path': '/Videos/item-avplayer-handoff/stream.mp4',
+            'Bitrate': 5000000,
+            'MediaStreams': <dynamic>[],
+          },
+        ],
+      ),
+      streamHeaders: const <String, String>{'X-Test': '1'},
+    );
+
+    final prepared = await PlaybackPreloadCoordinator.prepareItem(
+      PlaybackPreloadBuildRequest(
+        access: ServerAccess(adapter: adapter, auth: auth),
+        appState: AppState(),
+        itemId: 'item-avplayer-handoff',
+        playerCore: PlaybackSourcePlayerCoreKind.avplayer,
+        targetKind: PlaybackPreloadTargetKind.currentItem,
+        triggerSource: 'detail_current',
+        selectedMediaSourceId: 'ms-avplayer-handoff',
+        audioStreamIndex: 3,
+        subtitleStreamIndex: 6,
+      ),
+    );
+
+    expect(
+      adapter.fetchPlaybackInfoProfiles,
+      <PlaybackInfoProfileKind>[PlaybackInfoProfileKind.avplayer],
+    );
+    expect(prepared.playerCore, PlaybackSourcePlayerCoreKind.avplayer);
+    expect(prepared.resolvedSource.playbackPipeline, 'avplayer');
+    expect(prepared.effectivePlaySessionId, 'ps-avplayer-handoff');
+    expect(prepared.selectedMediaSourceId, 'ms-avplayer-handoff');
+    expect(prepared.mediaSources, hasLength(1));
+    expect(prepared.playbackSource, isNotNull);
+    expect(
+      Uri.tryParse(prepared.playbackSource!.url)?.host,
+      '127.0.0.1',
+    );
+    expect(prepared.matchesHttpProxyUrl(null), isTrue);
+    expect(
+      prepared.matchesPlayback(
+        itemId: 'item-avplayer-handoff',
+        playerCore: PlaybackSourcePlayerCoreKind.avplayer,
+        selectedMediaSourceId: 'ms-avplayer-handoff',
+        audioStreamIndex: 3,
+        subtitleStreamIndex: 6,
+      ),
+      isTrue,
+    );
+    expect(
+      prepared.matchesPlayback(
+        itemId: 'item-avplayer-handoff',
+        playerCore: PlaybackSourcePlayerCoreKind.exo,
+        selectedMediaSourceId: 'ms-avplayer-handoff',
+        audioStreamIndex: 3,
+        subtitleStreamIndex: 6,
+      ),
+      isFalse,
+    );
+  });
+
+  test(
     'PlaybackPreloadCoordinator separates current and next dedupe space but shares hits across trigger sources',
     () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -475,6 +553,33 @@ void main() {
     expect(keyDifferentMedia, isNotNull);
     expect(keyDifferentProxy!.fingerprint, isNot(keyA.fingerprint));
     expect(keyDifferentMedia!.fingerprint, isNot(keyA.fingerprint));
+  });
+
+  test('buildResolvedPlaybackCacheKey isolates AVPlayer playback pipeline',
+      () {
+    final shared = ResolvedPlaybackSource(
+      itemId: 'item-avplayer-cache',
+      playSessionId: 'ps-avplayer-cache',
+      mediaSourceId: 'ms-avplayer-cache',
+      url:
+          'https://media.example.com/Videos/item-avplayer-cache/stream.mp4?AudioStreamIndex=2',
+      httpHeaders: const <String, String>{'User-Agent': 'SourceUA/1.0'},
+      isExternal: false,
+      mediaTypeHint: ResolvedPlaybackMediaType.file,
+      fromStrm: false,
+      redirectChain: const <String>[
+        'https://media.example.com/Videos/item-avplayer-cache/stream.mp4',
+      ],
+    );
+
+    final exoKey = buildResolvedPlaybackCacheKey(shared);
+    final avplayerKey = buildResolvedPlaybackCacheKey(
+      shared.copyWith(playbackPipeline: 'avplayer'),
+    );
+
+    expect(exoKey, isNotNull);
+    expect(avplayerKey, isNotNull);
+    expect(avplayerKey!.fingerprint, isNot(exoKey!.fingerprint));
   });
 
   test(

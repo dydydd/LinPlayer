@@ -24,6 +24,7 @@ class HttpStreamCacheKey {
     required this.audioStreamIndex,
     required this.subtitleStreamIndex,
     required this.proxyUrl,
+    required this.playbackPipeline,
   });
 
   factory HttpStreamCacheKey.fromNetworkSource({
@@ -33,24 +34,31 @@ class HttpStreamCacheKey {
     int? audioStreamIndex,
     int? subtitleStreamIndex,
     String? proxyUrl,
+    String? playbackPipeline,
   }) {
     final normalizedHeaders = normalizeHeaders(httpHeaders);
     final normalizedUrl = _normalizeRemoteUrl(remoteUri);
     final normalizedMediaSourceId = (mediaSourceId ?? '').trim();
     final normalizedProxy = _normalizeProxyUrl(proxyUrl);
+    final normalizedPlaybackPipeline =
+        _normalizePlaybackPipeline(playbackPipeline);
     final headerPairs = normalizedHeaders.entries
         .map((entry) => '${entry.key}:${entry.value}')
         .toList(growable: false)
       ..sort();
-    final payload = <String>[
-      'v1',
+    final payloadParts = <String>['v1'];
+    if (normalizedPlaybackPipeline != null) {
+      payloadParts.add('pipeline:$normalizedPlaybackPipeline');
+    }
+    payloadParts.addAll(<String>[
       normalizedUrl,
       normalizedMediaSourceId,
       audioStreamIndex?.toString() ?? '',
       subtitleStreamIndex?.toString() ?? '',
       normalizedProxy ?? '',
       ...headerPairs,
-    ].join('|');
+    ]);
+    final payload = payloadParts.join('|');
     final fingerprint = sha1.convert(utf8.encode(payload)).toString();
     return HttpStreamCacheKey._(
       fingerprint: fingerprint,
@@ -60,6 +68,7 @@ class HttpStreamCacheKey {
       audioStreamIndex: audioStreamIndex,
       subtitleStreamIndex: subtitleStreamIndex,
       proxyUrl: normalizedProxy,
+      playbackPipeline: normalizedPlaybackPipeline,
     );
   }
 
@@ -70,6 +79,7 @@ class HttpStreamCacheKey {
   final int? audioStreamIndex;
   final int? subtitleStreamIndex;
   final String? proxyUrl;
+  final String? playbackPipeline;
 
   bool get usesProxy => (proxyUrl ?? '').trim().isNotEmpty;
 
@@ -82,6 +92,7 @@ class HttpStreamCacheKey {
       'audioStreamIndex': audioStreamIndex,
       'subtitleStreamIndex': subtitleStreamIndex,
       'proxyUrl': proxyUrl,
+      'playbackPipeline': playbackPipeline,
     };
   }
 
@@ -128,6 +139,7 @@ class HttpStreamCacheKey {
       subtitleStreamIndex:
           int.tryParse(raw['subtitleStreamIndex']?.toString() ?? ''),
       proxyUrl: raw['proxyUrl']?.toString(),
+      playbackPipeline: raw['playbackPipeline']?.toString(),
     );
   }
 
@@ -149,6 +161,11 @@ class HttpStreamCacheKey {
 
   static String? _normalizeProxyUrl(String? proxyUrl) {
     final value = (proxyUrl ?? '').trim();
+    return value.isEmpty ? null : value;
+  }
+
+  static String? _normalizePlaybackPipeline(String? playbackPipeline) {
+    final value = (playbackPipeline ?? '').trim();
     return value.isEmpty ? null : value;
   }
 

@@ -183,6 +183,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
 
   String get _nativeCoreName => _nativeCore.label;
 
+  String get _playbackLogTag => 'player_local_${_nativeCore.name}';
+
   @override
   void initState() {
     super.initState();
@@ -1535,6 +1537,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
       (_subtitlePositionStep.clamp(0, 20) * 5.0).clamp(0.0, 200.0).toDouble();
 
   Future<void> _applyExoSubtitleOptions() async {
+    if (!_isAndroid) return;
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) return;
 
@@ -1630,6 +1633,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
 
   Future<void> _pollSubtitleText() async {
     if (_subtitlePollInFlight) return;
+    if (!_isAndroid) return;
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) return;
     if (_isAndroid && _viewType != VideoViewType.textureView) return;
@@ -1654,6 +1658,18 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   }
 
   Future<void> _showSubtitleTracks(BuildContext context) async {
+    if (!_isAndroid) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'AVPlayer 本地页暂不支持复用 Android Exo 字幕控制接口',
+            ),
+          ),
+        );
+      }
+      return;
+    }
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) return;
 
@@ -2666,7 +2682,9 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
           );
         }
         return ListView(
-          key: const PageStorageKey<String>('exo_local_mobile_audio_tracks'),
+          key: PageStorageKey<String>(
+            '${_nativeCore.name}_local_mobile_audio_tracks',
+          ),
           controller: _mobileAudioScrollController,
           padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
           children: [
@@ -2724,6 +2742,19 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
       );
     }
 
+    if (!_isAndroid) {
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+        children: const [
+          MobilePlayerOptionTile(
+            title: '字幕轨切换暂不支持',
+            subtitle:
+                'AVPlayer 本地页现在走独立播放链路，不再复用 Android Exo 的字幕控制接口。',
+          ),
+        ],
+      );
+    }
+
     return FutureBuilder<List<vp_android.ExoPlayerSubtitleTrackData>>(
       future: _ensureMobileSubtitleTracksLoaded(),
       initialData: _mobileSubtitleTracks,
@@ -2735,7 +2766,9 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
           return const Center(child: CircularProgressIndicator());
         }
         return ListView(
-          key: const PageStorageKey<String>('exo_local_mobile_subtitle_tracks'),
+          key: PageStorageKey<String>(
+            '${_nativeCore.name}_local_mobile_subtitle_tracks',
+          ),
           controller: _mobileSubtitleScrollController,
           padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
           children: [
@@ -3437,7 +3470,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
         await LocalHttpStreamProxy.wrapCandidates(resolved.candidates);
     final looksLikeStrm = resolved.inputWasStrm;
     AppDiagnosticsLogger.instance.info(
-      'player_local_exo',
+      _playbackLogTag,
       'Resolved local playback candidates',
       data: <String, Object?>{
         'fileName': file.name,
@@ -3450,7 +3483,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     );
     if (candidates.isEmpty) {
       AppDiagnosticsLogger.instance.warn(
-        'player_local_exo',
+        _playbackLogTag,
         'No playable candidates for local file',
         data: <String, Object?>{
           'fileName': file.name,
@@ -3464,7 +3497,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     final source = candidates.first.url;
     if (source.isEmpty) {
       AppDiagnosticsLogger.instance.warn(
-        'player_local_exo',
+        _playbackLogTag,
         'First local playback candidate is empty',
         data: <String, Object?>{
           'fileName': file.name,
@@ -3547,7 +3580,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
             uri.host.trim().isNotEmpty;
 
         AppDiagnosticsLogger.instance.info(
-          'player_local_exo',
+          _playbackLogTag,
           'Trying local playback candidate',
           data: <String, Object?>{
             'fileName': file.name,
@@ -3602,7 +3635,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
             await controller.play();
           }
           AppDiagnosticsLogger.instance.info(
-            'player_local_exo',
+            _playbackLogTag,
             'Selected local playback candidate',
             data: <String, Object?>{
               'fileName': file.name,
@@ -3616,7 +3649,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
         } catch (e) {
           lastError = e;
           AppDiagnosticsLogger.instance.warn(
-            'player_local_exo',
+            _playbackLogTag,
             'Local playback candidate failed',
             data: <String, Object?>{
               'fileName': file.name,
@@ -3643,7 +3676,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                 : (resolved.error?.message ?? 'STRM 播放失败'))
             : (details.isNotEmpty ? details : '播放失败');
         AppDiagnosticsLogger.instance.warn(
-          'player_local_exo',
+          _playbackLogTag,
           'All local playback candidates failed',
           data: <String, Object?>{
             'fileName': file.name,
@@ -3746,7 +3779,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
       if (mounted) setState(() {});
     } catch (e) {
       AppDiagnosticsLogger.instance.error(
-        'player_local_exo',
+        _playbackLogTag,
         'Unhandled local playback error',
         data: <String, Object?>{
           'fileName': file.name,

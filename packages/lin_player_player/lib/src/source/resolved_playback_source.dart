@@ -5,6 +5,7 @@ import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 enum PlaybackSourcePlayerCoreKind {
   mpv,
   vlc,
+  avplayer,
   exo,
 }
 
@@ -13,7 +14,8 @@ PlaybackSourcePlayerCoreKind playbackSourcePlayerCoreKindForPlayerCore(
 ) {
   return switch (core) {
     PlayerCore.vlc => PlaybackSourcePlayerCoreKind.vlc,
-    PlayerCore.avplayer || PlayerCore.exo => PlaybackSourcePlayerCoreKind.exo,
+    PlayerCore.avplayer => PlaybackSourcePlayerCoreKind.avplayer,
+    PlayerCore.exo => PlaybackSourcePlayerCoreKind.exo,
     PlayerCore.mpv => PlaybackSourcePlayerCoreKind.mpv,
   };
 }
@@ -23,8 +25,21 @@ PlaybackInfoProfileKind playbackInfoProfileKindForPlaybackSourceCore(
 ) {
   return switch (core) {
     PlaybackSourcePlayerCoreKind.vlc => PlaybackInfoProfileKind.vlc,
+    PlaybackSourcePlayerCoreKind.avplayer =>
+      PlaybackInfoProfileKind.avplayer,
     PlaybackSourcePlayerCoreKind.exo => PlaybackInfoProfileKind.exo,
     PlaybackSourcePlayerCoreKind.mpv => PlaybackInfoProfileKind.defaultProfile,
+  };
+}
+
+String? playbackPipelineForPlaybackSourceCore(
+  PlaybackSourcePlayerCoreKind core,
+) {
+  return switch (core) {
+    PlaybackSourcePlayerCoreKind.avplayer => 'avplayer',
+    PlaybackSourcePlayerCoreKind.exo ||
+    PlaybackSourcePlayerCoreKind.mpv ||
+    PlaybackSourcePlayerCoreKind.vlc => null,
   };
 }
 
@@ -59,7 +74,9 @@ class PlaybackSourceBuildRequest {
     this.serverId,
     bool? allowTranscoding,
   }) : allowTranscoding =
-            allowTranscoding ?? playerCore == PlaybackSourcePlayerCoreKind.exo;
+            allowTranscoding ??
+            playerCore == PlaybackSourcePlayerCoreKind.avplayer ||
+            playerCore == PlaybackSourcePlayerCoreKind.exo;
 
   final MediaServerAdapter adapter;
   final ServerAuthSession auth;
@@ -96,6 +113,7 @@ class ResolvedPlaybackSource {
     this.sizeBytes,
     this.sourcePath,
     this.proxyUrl,
+    this.playbackPipeline,
   });
 
   final String itemId;
@@ -114,6 +132,7 @@ class ResolvedPlaybackSource {
   final int? sizeBytes;
   final String? sourcePath;
   final String? proxyUrl;
+  final String? playbackPipeline;
 
   bool get isHls => mediaTypeHint == ResolvedPlaybackMediaType.hls;
 
@@ -134,6 +153,7 @@ class ResolvedPlaybackSource {
     Object? sizeBytes = _unset,
     Object? sourcePath = _unset,
     Object? proxyUrl = _unset,
+    Object? playbackPipeline = _unset,
   }) {
     return ResolvedPlaybackSource(
       itemId: itemId ?? this.itemId,
@@ -162,6 +182,9 @@ class ResolvedPlaybackSource {
           : sourcePath as String?,
       proxyUrl:
           identical(proxyUrl, _unset) ? this.proxyUrl : proxyUrl as String?,
+      playbackPipeline: identical(playbackPipeline, _unset)
+          ? this.playbackPipeline
+          : playbackPipeline as String?,
     );
   }
 }

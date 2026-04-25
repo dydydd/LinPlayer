@@ -55,6 +55,7 @@ class AuthResult {
 enum PlaybackInfoProfileKind {
   defaultProfile,
   vlc,
+  avplayer,
   exo,
 }
 
@@ -1601,15 +1602,45 @@ class EmbyApi {
     PlaybackInfoProfileKind profile = PlaybackInfoProfileKind.defaultProfile,
   }) async {
     final profileName = switch (profile) {
+      PlaybackInfoProfileKind.avplayer => '$clientName-AVPlayer',
       PlaybackInfoProfileKind.exo => '$clientName-Exo',
       PlaybackInfoProfileKind.vlc => '$clientName-VLC',
       PlaybackInfoProfileKind.defaultProfile => clientName,
     };
     final prefersPostFirst = switch (profile) {
-      PlaybackInfoProfileKind.exo || PlaybackInfoProfileKind.vlc => true,
+      PlaybackInfoProfileKind.avplayer ||
+      PlaybackInfoProfileKind.exo ||
+      PlaybackInfoProfileKind.vlc => true,
       PlaybackInfoProfileKind.defaultProfile => false,
     };
     final deviceProfile = switch (profile) {
+      PlaybackInfoProfileKind.avplayer => <String, dynamic>{
+          "Name": profileName,
+          "MaxStreamingBitrate": 120000000,
+          "DirectPlayProfiles": [
+            {
+              "Container": "mov,mp4,m4v",
+              "Type": "Video",
+              "AudioCodec": "aac,ac3,eac3,mp3,alac",
+            },
+            {
+              "Container": "aac,ac3,eac3,alac,m4a,mp3,wav",
+              "Type": "Audio",
+              "AudioCodec": "aac,ac3,eac3,alac,mp3",
+            },
+          ],
+          "TranscodingProfiles": [
+            {
+              "Container": "ts",
+              "Type": "Video",
+              "Protocol": "hls",
+              "VideoCodec": "h264",
+              "AudioCodec": "aac",
+              "Context": "Streaming",
+            },
+          ],
+          "DeviceId": deviceId,
+        },
       PlaybackInfoProfileKind.exo => <String, dynamic>{
           "Name": profileName,
           "MaxStreamingBitrate": 120000000,

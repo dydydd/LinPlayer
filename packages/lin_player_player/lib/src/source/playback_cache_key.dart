@@ -27,6 +27,7 @@ HttpStreamCacheKey buildNetworkPlaybackCacheKey({
   int? audioStreamIndex,
   int? subtitleStreamIndex,
   String? proxyUrl,
+  String? playbackPipeline,
 }) {
   return HttpStreamCacheKey.fromNetworkSource(
     remoteUri: remoteUri,
@@ -35,6 +36,7 @@ HttpStreamCacheKey buildNetworkPlaybackCacheKey({
     audioStreamIndex: audioStreamIndex,
     subtitleStreamIndex: subtitleStreamIndex,
     proxyUrl: proxyUrl,
+    playbackPipeline: playbackPipeline,
   );
 }
 
@@ -55,6 +57,7 @@ HttpStreamCacheKey? buildResolvedPlaybackCacheKey(
     audioStreamIndex: _queryInt(uri, 'AudioStreamIndex'),
     subtitleStreamIndex: _queryInt(uri, 'SubtitleStreamIndex'),
     proxyUrl: (proxyUrl ?? source.proxyUrl)?.trim(),
+    playbackPipeline: source.playbackPipeline,
   );
 }
 
