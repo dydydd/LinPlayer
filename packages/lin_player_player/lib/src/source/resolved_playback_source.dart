@@ -49,6 +49,12 @@ PlaybackInfoProfileKind playbackInfoProfileKindForPlayerCore(PlayerCore core) {
   );
 }
 
+bool playbackSourceCoreUsesLoopbackPlaybackPackaging(
+  PlaybackSourcePlayerCoreKind core,
+) {
+  return core != PlaybackSourcePlayerCoreKind.vlc;
+}
+
 enum ResolvedPlaybackMediaType {
   unknown,
   file,

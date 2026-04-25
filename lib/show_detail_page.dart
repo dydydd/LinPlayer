@@ -447,7 +447,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
   }) async {
     if (!widget.appState.preloadEnabled) return;
     late final PreparedPlaybackPreload prepared;
-    StreamPreloadResult result;
+    StreamPreloadResult? result;
     try {
       prepared = await PlaybackPreloadCoordinator.prepareItem(
         PlaybackPreloadBuildRequest(
@@ -471,13 +471,17 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       if (itemId.trim() == widget.itemId.trim()) {
         _preparedMoviePreload = prepared;
       }
-      result = await PlaybackPreloadCoordinator.preloadPrepared(prepared);
+      if (playbackSourceCoreUsesLoopbackPlaybackPackaging(
+        _moviePlaybackCoreKind,
+      )) {
+        result = await PlaybackPreloadCoordinator.preloadPrepared(prepared);
+      }
     } catch (_) {
       return;
     }
 
     if (!mounted) return;
-    if (result.disabledNow) {
+    if (result?.disabledNow ?? false) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('预加载失败，当前源将暂时跳过')),
       );
@@ -5805,7 +5809,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   }) async {
     if (!widget.appState.preloadEnabled) return;
     late final PreparedPlaybackPreload prepared;
-    StreamPreloadResult result;
+    StreamPreloadResult? result;
     try {
       final serverId = widget.server?.id ?? widget.appState.activeServerId;
       final seriesId = (_seriesId ?? _episode.seriesId ?? '').trim();
@@ -5848,13 +5852,17 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       if (loadSeq == _loadSeq) {
         _preparedEpisodePreloads[itemId.trim()] = prepared;
       }
-      result = await PlaybackPreloadCoordinator.preloadPrepared(prepared);
+      if (playbackSourceCoreUsesLoopbackPlaybackPackaging(
+        _episodePlaybackCoreKind,
+      )) {
+        result = await PlaybackPreloadCoordinator.preloadPrepared(prepared);
+      }
     } catch (_) {
       return;
     }
 
     if (!mounted || loadSeq != _loadSeq) return;
-    if (result.disabledNow) {
+    if (result?.disabledNow ?? false) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('预加载失败，当前源将暂时跳过')),
       );

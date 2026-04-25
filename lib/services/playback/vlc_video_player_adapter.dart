@@ -29,6 +29,7 @@ class VideoPlayerValue {
     required this.buffered,
     required this.playbackSpeed,
     required this.rotationCorrection,
+    required this.errorDescription,
   });
 
   const VideoPlayerValue.uninitialized()
@@ -38,10 +39,11 @@ class VideoPlayerValue {
         position = Duration.zero,
         duration = Duration.zero,
         aspectRatio = 16 / 9,
-        size = const Size(16, 9),
+        size = Size.zero,
         buffered = const <DurationRange>[],
         playbackSpeed = 1.0,
-        rotationCorrection = 0;
+        rotationCorrection = 0,
+        errorDescription = '';
 
   final bool isInitialized;
   final bool isPlaying;
@@ -53,6 +55,9 @@ class VideoPlayerValue {
   final List<DurationRange> buffered;
   final double playbackSpeed;
   final int rotationCorrection;
+  final String errorDescription;
+
+  bool get hasError => errorDescription.trim().isNotEmpty;
 }
 
 class VideoPlayerController {
@@ -88,7 +93,7 @@ class VideoPlayerController {
         resolvedUri.toString(),
         autoInitialize: false,
         autoPlay: false,
-        hwAcc: HwAcc.auto,
+        hwAcc: resolveVlcNetworkHwAcc(isIos: Platform.isIOS),
         options: options,
       ),
       debugSource: resolvedUri.toString(),
@@ -157,7 +162,7 @@ class VideoPlayerController {
     final rawSize = raw.size;
     final size = (rawSize.width > 0 && rawSize.height > 0)
         ? Size(rawSize.width.toDouble(), rawSize.height.toDouble())
-        : const Size(16, 9);
+        : Size.zero;
     final duration = raw.duration;
     final position = raw.position;
     final bufferPercent = raw.bufferPercent.clamp(0.0, 100.0).toDouble();
@@ -173,13 +178,18 @@ class VideoPlayerController {
       isBuffering: raw.isBuffering,
       position: position,
       duration: duration,
-      aspectRatio: raw.aspectRatio <= 0 ? 16 / 9 : raw.aspectRatio,
+      aspectRatio: raw.aspectRatio > 0
+          ? raw.aspectRatio
+          : (size.width > 0 && size.height > 0
+              ? size.width / size.height
+              : 16 / 9),
       size: size,
       buffered: bufferedEnd > Duration.zero
           ? <DurationRange>[DurationRange(Duration.zero, bufferedEnd)]
           : const <DurationRange>[],
       playbackSpeed: raw.playbackSpeed <= 0 ? 1.0 : raw.playbackSpeed,
       rotationCorrection: 0,
+      errorDescription: raw.errorDescription.trim(),
     );
   }
 
@@ -199,6 +209,37 @@ String _headerValue(Map<String, String>? headers, List<String> keys) {
     if (value.isNotEmpty) return value;
   }
   return '';
+}
+
+@visibleForTesting
+HwAcc resolveVlcNetworkHwAcc({required bool isIos}) {
+  // Keep iOS network playback on the safer software-decoding path. This is a
+  // VLC-specific stability policy for authenticated Emby streams.
+  return isIos ? HwAcc.disabled : HwAcc.auto;
+}
+
+const Set<String> _hopByHopVlcHeaderNames = <String>{
+  'accept-encoding',
+  'connection',
+  'content-length',
+  'host',
+  'if-range',
+  'range',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+};
+
+bool _shouldForwardGenericVlcHeader(String name) {
+  final lower = name.trim().toLowerCase();
+  if (lower.isEmpty) return false;
+  if (_hopByHopVlcHeaderNames.contains(lower)) return false;
+  if (lower == 'cookie') return false;
+  if (lower == 'origin') return false;
+  if (lower == 'referer' || lower == 'referrer') return false;
+  if (lower == 'user-agent') return false;
+  return true;
 }
 
 @visibleForTesting
@@ -223,10 +264,23 @@ VlcPlayerOptions? buildVlcPlayerOptionsFromHttpHeaders(
     httpOptions.add(VlcHttpOptions.httpReferrer(referer));
   }
 
+  final origin = _headerValue(headers, const <String>['origin']);
+  if (origin.isNotEmpty) {
+    extraOptions.add(':http-origin=$origin');
+  }
+
   final cookie = _headerValue(headers, const <String>['cookie']);
   if (cookie.isNotEmpty) {
     extraOptions.add(':http-cookie=$cookie');
     httpOptions.add(VlcHttpOptions.httpForwardCookies(true));
+  }
+
+  for (final entry in headers.entries) {
+    final name = entry.key.trim();
+    final value = entry.value.trim();
+    if (name.isEmpty || value.isEmpty) continue;
+    if (!_shouldForwardGenericVlcHeader(name)) continue;
+    extraOptions.add(':http-header=$name: $value');
   }
 
   if (httpOptions.isEmpty && extraOptions.isEmpty) {

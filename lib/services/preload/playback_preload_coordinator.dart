@@ -185,9 +185,11 @@ class PreparedPlaybackPreload {
       // frame, so widen prepared direct-file warmups instead of only relying
       // on the default 3s preload window.
       ResolvedPlaybackMediaType.file ||
-      ResolvedPlaybackMediaType.unknown => _mpvDirectFilePreloadDuration,
+      ResolvedPlaybackMediaType.unknown =>
+        _mpvDirectFilePreloadDuration,
       ResolvedPlaybackMediaType.hls ||
-      ResolvedPlaybackMediaType.dash => PreloadRequest.defaultPreloadDuration,
+      ResolvedPlaybackMediaType.dash =>
+        PreloadRequest.defaultPreloadDuration,
     };
   }
 
@@ -346,6 +348,7 @@ class PlaybackPreloadCoordinator {
     final playbackSource = await buildPlaybackSource(
       resolvedSource: prepared.resolvedSource,
       httpProxyUrl: prepared.httpProxyUrl,
+      playerCore: prepared.playerCore,
     );
     return prepared.copyWith(playbackSource: playbackSource);
   }
@@ -353,6 +356,7 @@ class PlaybackPreloadCoordinator {
   static Future<PlayableSource> buildPlaybackSource({
     required ResolvedPlaybackSource resolvedSource,
     String? httpProxyUrl,
+    PlaybackSourcePlayerCoreKind playerCore = PlaybackSourcePlayerCoreKind.mpv,
   }) async {
     final cacheKey = buildResolvedPlaybackCacheKey(
       resolvedSource,
@@ -375,6 +379,9 @@ class PlaybackPreloadCoordinator {
       httpStatusHint: resolvedSource.httpStatusHint,
       bitrateHint: resolvedSource.bitrate,
     );
+    if (!playbackSourceCoreUsesLoopbackPlaybackPackaging(playerCore)) {
+      return candidate;
+    }
     final proxied = await LocalHttpStreamProxy.wrapPlaybackSource(
       candidate,
       cacheKey: cacheKey,

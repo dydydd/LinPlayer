@@ -77,6 +77,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
   static const String _kLocalPlaybackProgressPrefix =
       'networkPlaybackProgress_v1:';
   static const Duration _kLateResumeAutoSeekGrace = Duration(seconds: 3);
+  static const Duration _kIosVlcStartupRecoveryDelay = Duration(seconds: 3);
 
   ServerAccess? _serverAccess;
   VideoPlayerController? _controller;
@@ -127,6 +128,8 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
   bool _allowRoutePop = false;
   bool _exitInProgress = false;
   int _initSession = 0;
+  Timer? _iosVlcStartupRecoveryTimer;
+  bool _iosVlcStartupRecoveryTried = false;
 
   static const Duration _gestureOverlayAutoHideDelay =
       Duration(milliseconds: 800);
@@ -469,6 +472,8 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
     _resumeHintTimer = null;
     _startOverHintTimer?.cancel();
     _startOverHintTimer = null;
+    _iosVlcStartupRecoveryTimer?.cancel();
+    _iosVlcStartupRecoveryTimer = null;
     _gestureOverlayTimer?.cancel();
     _gestureOverlayTimer = null;
     _tvOkLongPressTimer?.cancel();
@@ -1973,6 +1978,11 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
     required String triggerSource,
   }) async {
     if (!widget.appState.preloadEnabled) return null;
+    if (!playbackSourceCoreUsesLoopbackPlaybackPackaging(
+      _playbackSourceCoreKind,
+    )) {
+      return null;
+    }
     final resolvedSource = _resolvedPlaybackSource;
     if (resolvedSource == null) return null;
     final effectiveStart =
@@ -2164,7 +2174,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
     final nextId = await _resolveNextEpisodeIdBestEffort(access);
     if (nextId == null || nextId.trim().isEmpty) return;
     late final PreparedPlaybackPreload prepared;
-    StreamPreloadResult result;
+    StreamPreloadResult? result;
     try {
       prepared = await PlaybackPreloadCoordinator.prepareItem(
         PlaybackPreloadBuildRequest(
@@ -2184,13 +2194,17 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
         ),
       );
       _preparedPreloadsByItemId[nextId.trim()] = prepared;
-      result = await PlaybackPreloadCoordinator.preloadPrepared(prepared);
+      if (playbackSourceCoreUsesLoopbackPlaybackPackaging(
+        _playbackSourceCoreKind,
+      )) {
+        result = await PlaybackPreloadCoordinator.preloadPrepared(prepared);
+      }
     } catch (_) {
       return;
     }
 
     if (!mounted) return;
-    if (result.disabledNow) {
+    if (result?.disabledNow ?? false) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('预加载失败，当前源将暂时跳过')),
       );
@@ -2903,15 +2917,22 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
     }
   }
 
-  Future<void> _reopenStreamWithViewType(VideoViewType next) async {
-    if (!_isAndroid) return;
+  Future<void> _reopenStreamWithViewType(
+    VideoViewType next, {
+    bool force = false,
+  }) async {
     final stream = _resolvedStream;
     if (stream == null || stream.trim().isEmpty) return;
-    if (_viewType == next && _controller != null) return;
+    if (!force && _viewType == next && _controller != null) return;
 
     final wasPlaying = _isPlaying;
     final pos = _position;
+    final headers = _resolvedStreamHeaders.isNotEmpty
+        ? _resolvedStreamHeaders
+        : _embyHeaders();
 
+    _iosVlcStartupRecoveryTimer?.cancel();
+    _iosVlcStartupRecoveryTimer = null;
     _uiTimer?.cancel();
     _uiTimer = null;
 
@@ -2931,7 +2952,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
 
     final controller = VideoPlayerController.networkUrl(
       Uri.parse(stream),
-      httpHeaders: _embyHeaders(),
+      httpHeaders: headers,
       viewType: next,
     );
     _controller = controller;
@@ -2956,6 +2977,10 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
 
     if (wasPlaying) {
       await _ensurePlaybackAutoStarts(controller);
+      _scheduleIosStartupRecovery(
+        initSession: _initSession,
+        controller: controller,
+      );
     } else {
       await controller.pause();
     }
@@ -2964,6 +2989,11 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
       final c = _controller;
       if (!mounted || c == null) return;
       final v = c.value;
+      _maybeSurfaceControllerRuntimeError(c);
+      if (_controllerHasKnownVideoOutput(c)) {
+        _iosVlcStartupRecoveryTimer?.cancel();
+        _iosVlcStartupRecoveryTimer = null;
+      }
       _buffering = v.isBuffering;
       _position = v.position;
       _duration = v.duration;
@@ -5374,6 +5404,9 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
     _uiTimer = null;
     _serverProgressSync?.stop();
     _serverProgressSync?.reset();
+    _iosVlcStartupRecoveryTimer?.cancel();
+    _iosVlcStartupRecoveryTimer = null;
+    _iosVlcStartupRecoveryTried = false;
     _playError = null;
     _loading = true;
     _buffering = false;
@@ -5656,6 +5689,11 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
         if (!mounted || c == null) return;
         final v = c.value;
         final now = DateTime.now();
+        _maybeSurfaceControllerRuntimeError(c);
+        if (_controllerHasKnownVideoOutput(c)) {
+          _iosVlcStartupRecoveryTimer?.cancel();
+          _iosVlcStartupRecoveryTimer = null;
+        }
         _buffering = v.isBuffering;
         _position = v.position;
         _duration = v.duration;
@@ -5770,6 +5808,10 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
       _loadIntroTimestampsBestEffort();
 
       await _ensurePlaybackAutoStarts(controller);
+      _scheduleIosStartupRecovery(
+        initSession: initSession,
+        controller: controller,
+      );
       unawaited(
         _maybeApplyLateServerResume(
           initSession: initSession,
@@ -5910,6 +5952,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
     return PlaybackPreloadCoordinator.buildPlaybackSource(
       resolvedSource: resolvedSource,
       httpProxyUrl: _preloadHttpProxyUrl,
+      playerCore: _playbackSourceCoreKind,
     );
   }
 
@@ -6515,6 +6558,102 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
     }
   }
 
+  bool _controllerHasKnownVideoOutput(VideoPlayerController controller) {
+    final size = controller.value.size;
+    return size.width > 0 && size.height > 0;
+  }
+
+  void _maybeSurfaceControllerRuntimeError(VideoPlayerController controller) {
+    final message = controller.value.errorDescription.trim();
+    if (message.isEmpty) return;
+    final nextError = message.startsWith('VLC: ') ? message : 'VLC: $message';
+    if (_playError == nextError) return;
+    _playError = nextError;
+  }
+
+  bool _isLikelyIosVlcStartupBlackScreen(VideoPlayerController controller) {
+    if (!_isIos || !controller.value.isInitialized) return false;
+    if (_controllerHasKnownVideoOutput(controller)) return false;
+    if (controller.value.hasError) return true;
+    if (controller.value.isPlaying) return true;
+    if (controller.value.position > Duration.zero) return true;
+    return !controller.value.isBuffering;
+  }
+
+  void _scheduleIosStartupRecovery({
+    required int initSession,
+    required VideoPlayerController controller,
+  }) {
+    if (!_isIos) return;
+    _iosVlcStartupRecoveryTimer?.cancel();
+    _iosVlcStartupRecoveryTimer = Timer(
+      _kIosVlcStartupRecoveryDelay,
+      () {
+        // ignore: unawaited_futures
+        _recoverIosStartupBlackScreen(
+          initSession: initSession,
+          controller: controller,
+        );
+      },
+    );
+  }
+
+  Future<void> _recoverIosStartupBlackScreen({
+    required int initSession,
+    required VideoPlayerController controller,
+  }) async {
+    if (!mounted || initSession != _initSession) return;
+    if (_controller != controller) return;
+
+    _maybeSurfaceControllerRuntimeError(controller);
+    if (_playError != null) return;
+
+    if (_controllerHasKnownVideoOutput(controller)) {
+      _iosVlcStartupRecoveryTimer?.cancel();
+      _iosVlcStartupRecoveryTimer = null;
+      return;
+    }
+    if (!_isLikelyIosVlcStartupBlackScreen(controller)) return;
+
+    AppDiagnosticsLogger.instance.warn(
+      'player_network_vlc',
+      'Recovering iOS VLC startup black screen',
+      data: <String, Object?>{
+        'itemId': widget.itemId,
+        'positionMs': controller.value.position.inMilliseconds,
+        'isPlaying': controller.value.isPlaying,
+        'isBuffering': controller.value.isBuffering,
+        'recoveryAttempted': _iosVlcStartupRecoveryTried,
+      },
+    );
+
+    if (_iosVlcStartupRecoveryTried) {
+      if (!mounted || initSession != _initSession) return;
+      setState(() {
+        _playError = 'iOS VLC 已启动，但没有拿到视频画面。';
+      });
+      return;
+    }
+
+    _iosVlcStartupRecoveryTried = true;
+    try {
+      await _reopenStreamWithViewType(_viewType, force: true);
+    } catch (e) {
+      AppDiagnosticsLogger.instance.error(
+        'player_network_vlc',
+        'iOS VLC startup recovery failed',
+        data: <String, Object?>{
+          'itemId': widget.itemId,
+        },
+        error: e,
+      );
+      if (!mounted || initSession != _initSession) return;
+      setState(() {
+        _playError = 'iOS VLC 重建播放链路失败：$e';
+      });
+    }
+  }
+
   String _audioTrackTitle(vp_platform.VideoAudioTrack t) {
     final label = (t.label ?? '').trim();
     if (label.isNotEmpty) return label;
@@ -6701,7 +6840,11 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
   @override
   Widget build(BuildContext context) {
     final controller = _controller;
-    final isReady = controller != null && controller.value.isInitialized;
+    final isReady = controller != null &&
+        controller.value.isInitialized &&
+        (!_isIos ||
+            _controllerHasKnownVideoOutput(controller) ||
+            _playError != null);
     final controlsEnabled = isReady && !_loading && _playError == null;
     final enableBlur = !widget.isTv && widget.appState.enableBlurEffects;
 
@@ -7561,6 +7704,28 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
                               _buildMobileSidePanelOverlay(
                                 context: context,
                                 controlsEnabled: controlsEnabled,
+                              ),
+                            if (_playError != null)
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  child: ColoredBox(
+                                    color: Colors.black87,
+                                    child: Center(
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 24,
+                                        ),
+                                        child: Text(
+                                          _playError!,
+                                          style: const TextStyle(
+                                            color: Colors.redAccent,
+                                          ),
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
                               ),
                             if (!isReady)
                               const Positioned.fill(

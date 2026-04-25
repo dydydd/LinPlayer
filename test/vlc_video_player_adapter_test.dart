@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_vlc_player/flutter_vlc_player.dart';
 
 import 'package:lin_player/services/playback/vlc_video_player_adapter.dart';
 
@@ -9,7 +10,10 @@ void main() {
         <String, String>{
           'User-Agent': 'LinPlayer/1.0',
           'Referer': 'https://ref.example/',
+          'Origin': 'https://origin.example/',
           'Cookie': 'sid=abc; theme=dark',
+          'Authorization': 'Bearer abc',
+          'X-Emby-Token': 'secret-token',
         },
       );
 
@@ -19,8 +23,11 @@ void main() {
         containsAll(<String>[
           ':http-user-agent=LinPlayer/1.0',
           '--http-referrer=https://ref.example/',
+          ':http-origin=https://origin.example/',
           '--http-forward-cookies',
           ':http-cookie=sid=abc; theme=dark',
+          ':http-header=Authorization: Bearer abc',
+          ':http-header=X-Emby-Token: secret-token',
         ]),
       );
     });
@@ -37,6 +44,11 @@ void main() {
         controller.debugSource,
         'https://media.example/items/1/master.m3u8?api_key=secret-token',
       );
+    });
+
+    test('uses conservative iOS network hardware acceleration policy', () {
+      expect(resolveVlcNetworkHwAcc(isIos: true), HwAcc.disabled);
+      expect(resolveVlcNetworkHwAcc(isIos: false), HwAcc.auto);
     });
 
     test('keeps existing api_key query untouched', () {

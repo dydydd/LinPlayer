@@ -318,9 +318,11 @@ void main() {
     expect(prepared.playbackSource, isNotNull);
     expect(
       Uri.tryParse(prepared.playbackSource!.url)?.host,
-      '127.0.0.1',
+      'media.example.com',
     );
-    expect(prepared.playbackSource!.httpHeaders, isEmpty);
+    expect(prepared.playbackSource!.httpHeaders, const <String, String>{
+      'X-Test': '1',
+    });
     expect(prepared.matchesHttpProxyUrl(null), isTrue);
     expect(
       prepared.matchesPlayback(
@@ -342,6 +344,41 @@ void main() {
       ),
       isFalse,
     );
+  });
+
+  test(
+      'PlaybackPreloadCoordinator.buildPlaybackSource keeps VLC playback direct while MPV still uses loopback proxy',
+      () async {
+    final resolvedSource = ResolvedPlaybackSource(
+      itemId: 'item-direct-vlc',
+      playSessionId: 'ps-direct-vlc',
+      mediaSourceId: 'ms-direct-vlc',
+      url:
+          'https://media.example.com/Videos/item-direct-vlc/stream.mp4?api_key=token-123',
+      httpHeaders: const <String, String>{'X-Test': '1'},
+      isExternal: false,
+      mediaTypeHint: ResolvedPlaybackMediaType.file,
+      fromStrm: false,
+      redirectChain: const <String>[
+        'https://media.example.com/Videos/item-direct-vlc/stream.mp4?api_key=token-123',
+      ],
+    );
+
+    final vlcPlaybackSource =
+        await PlaybackPreloadCoordinator.buildPlaybackSource(
+      resolvedSource: resolvedSource,
+      playerCore: PlaybackSourcePlayerCoreKind.vlc,
+    );
+    final mpvPlaybackSource =
+        await PlaybackPreloadCoordinator.buildPlaybackSource(
+      resolvedSource: resolvedSource,
+      playerCore: PlaybackSourcePlayerCoreKind.mpv,
+    );
+
+    expect(vlcPlaybackSource.url, resolvedSource.url);
+    expect(vlcPlaybackSource.httpHeaders, resolvedSource.httpHeaders);
+    expect(Uri.tryParse(mpvPlaybackSource.url)?.host, '127.0.0.1');
+    expect(mpvPlaybackSource.httpHeaders, isEmpty);
   });
 
   test(
