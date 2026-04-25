@@ -9,7 +9,7 @@ private protocol VLCPlayerHostedViewDelegate: AnyObject {
 }
 
 final class VLCPlayerHostedView: UIView {
-    weak var readinessDelegate: VLCPlayerHostedViewDelegate?
+    fileprivate weak var readinessDelegate: VLCPlayerHostedViewDelegate?
 
     weak var player: VLCMediaPlayer? {
         didSet {
