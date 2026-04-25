@@ -555,8 +555,7 @@ void main() {
     expect(keyDifferentMedia!.fingerprint, isNot(keyA.fingerprint));
   });
 
-  test('buildResolvedPlaybackCacheKey isolates AVPlayer playback pipeline',
-      () {
+  test('buildResolvedPlaybackCacheKey isolates AVPlayer playback pipeline', () {
     final shared = ResolvedPlaybackSource(
       itemId: 'item-avplayer-cache',
       playSessionId: 'ps-avplayer-cache',
@@ -938,6 +937,104 @@ void main() {
         closeTo(((7689250423 * 8) / 3000).round(), 1),
       );
     });
+
+    test(
+      'AVPlayer keeps direct playback for H265/HEVC/AV1 but transcodes unknown codecs',
+      () async {
+        final adapter = _FakeAdapter(
+          playbackInfo: PlaybackInfoResult(
+            playSessionId: 'play-avplayer-direct',
+            mediaSourceId: 'ms-avplayer-direct',
+            mediaSources: const <Map<String, dynamic>>[
+              <String, dynamic>{
+                'Id': 'ms-avplayer-direct',
+                'Container': 'mp4',
+                'VideoCodec': 'av1',
+                'DirectStreamUrl': '/emby/Videos/item-avplayer/direct-av1.mp4',
+                'TranscodingUrl': '/emby/Videos/item-avplayer/master-av1.m3u8',
+                'MediaStreams': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'Type': 'Video',
+                    'Codec': 'av1',
+                    'Height': 1080,
+                  },
+                ],
+              },
+              <String, dynamic>{
+                'Id': 'ms-avplayer-transcode',
+                'Container': 'mp4',
+                'VideoCodec': 'mpeg2video',
+                'DirectStreamUrl':
+                    '/emby/Videos/item-avplayer/direct-mpeg2.mp4',
+                'TranscodingUrl':
+                    '/emby/Videos/item-avplayer/master-mpeg2.m3u8',
+                'MediaStreams': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'Type': 'Video',
+                    'Codec': 'mpeg2video',
+                    'Height': 1080,
+                  },
+                ],
+              },
+            ],
+          ),
+          streamHeaders: const <String, String>{'X-Test': 'stream'},
+        );
+
+        final directResult = await PlaybackSourceBuilder.build(
+          PlaybackSourceBuildRequest(
+            adapter: adapter,
+            auth: auth,
+            itemId: 'item-avplayer',
+            playerCore: PlaybackSourcePlayerCoreKind.avplayer,
+            selectedMediaSourceId: 'ms-avplayer-direct',
+            resolveExternalSource: false,
+          ),
+        );
+
+        final transcodeResult = await PlaybackSourceBuilder.build(
+          PlaybackSourceBuildRequest(
+            adapter: adapter,
+            auth: auth,
+            itemId: 'item-avplayer',
+            playerCore: PlaybackSourcePlayerCoreKind.avplayer,
+            selectedMediaSourceId: 'ms-avplayer-transcode',
+            resolveExternalSource: false,
+          ),
+        );
+
+        final directUri = Uri.parse(directResult.resolvedSource.url);
+        final transcodeUri = Uri.parse(transcodeResult.resolvedSource.url);
+        expect(
+          adapter.fetchPlaybackInfoProfiles,
+          <PlaybackInfoProfileKind>[
+            PlaybackInfoProfileKind.avplayer,
+            PlaybackInfoProfileKind.avplayer,
+          ],
+        );
+        expect(directUri.path, '/emby/Videos/item-avplayer/direct-av1.mp4');
+        expect(
+          directResult.resolvedSource.mediaTypeHint,
+          ResolvedPlaybackMediaType.file,
+        );
+        expect(
+          directResult.resolvedSource.httpHeaders,
+          const <String, String>{'X-Test': 'stream'},
+        );
+        expect(
+          transcodeUri.path,
+          '/emby/Videos/item-avplayer/master-mpeg2.m3u8',
+        );
+        expect(
+          transcodeResult.resolvedSource.mediaTypeHint,
+          ResolvedPlaybackMediaType.hls,
+        );
+        expect(
+          transcodeResult.resolvedSource.httpHeaders,
+          const <String, String>{'X-Test': 'stream'},
+        );
+      },
+    );
 
     test('body-link resolution strips sensitive headers on cross-origin target',
         () async {

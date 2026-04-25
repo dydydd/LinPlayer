@@ -57,6 +57,7 @@ void main() {
         .cast<Map>()
         .firstWhere((e) => (e['Type'] as String?) == 'Video');
     expect(video['Container'], 'mov,mp4,m4v');
+    expect(video['VideoCodec'], 'h264,h265,hevc,av1');
   });
 
   test('fetchPlaybackInfo uses Exo device profile when requested', () async {

@@ -190,7 +190,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _startMobileVolumeSync();
-    if (_isIos || (_isAndroid && !DeviceType.isTv)) {
+    if (_isAndroid && !DeviceType.isTv) {
       _viewType = VideoViewType.textureView;
     }
     _danmakuEnabled = widget.appState.danmakuEnabled;
@@ -2748,8 +2748,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
         children: const [
           MobilePlayerOptionTile(
             title: '字幕轨切换暂不支持',
-            subtitle:
-                'AVPlayer 本地页现在走独立播放链路，不再复用 Android Exo 的字幕控制接口。',
+            subtitle: 'AVPlayer 本地页现在走独立播放链路，不再复用 Android Exo 的字幕控制接口。',
           ),
         ],
       );
@@ -3563,9 +3562,10 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     }
 
     try {
-      // Use platform view on Android to avoid color issues with some HDR/Dolby Vision sources.
-      // (Texture-based rendering may show green/purple tint on certain P8 files.)
-      final viewType = _isAndroid ? _viewType : VideoViewType.textureView;
+      // Keep Android on the selectable path for HDR/DV trade-offs.
+      // AVPlayer on iOS stays on platformView by default; the texture path is
+      // more prone to "audio but no picture" regressions on some streams.
+      final viewType = _viewType;
 
       VideoPlayerController? controller;
       Object? lastError;
@@ -3643,6 +3643,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
               'headers':
                   AppDiagnosticsLogger.summarizeHeaderKeys(c.httpHeaders),
               'network': isHttpUrl,
+              'viewType': viewType.name,
             },
           );
           break;

@@ -132,12 +132,57 @@ class PlaybackSourceBuilder {
       return applyQueryPrefs(resolved);
     }
 
+    String normalizedMediaSourceField(String key) {
+      return (mediaSource?[key]?.toString() ?? '').trim().toLowerCase();
+    }
+
+    String normalizedVideoCodec() {
+      final mediaSourceCodec = normalizedMediaSourceField('VideoCodec');
+      if (mediaSourceCodec.isNotEmpty) return mediaSourceCodec;
+      final videos =
+          streamsOfType(mediaSource ?? const <String, dynamic>{}, 'Video');
+      final first = videos.isNotEmpty ? videos.first : null;
+      return (first?['Codec']?.toString() ?? '').trim().toLowerCase();
+    }
+
+    bool isAvPlayerSafeDirectVideoCodec(String codec) {
+      if (codec.isEmpty) return false;
+      return codec.contains('h264') ||
+          codec.contains('avc') ||
+          codec.contains('h265') ||
+          codec.contains('h.265') ||
+          codec.contains('hevc') ||
+          codec.contains('hev1') ||
+          codec.contains('hvc1') ||
+          codec.contains('x265') ||
+          codec.contains('av1');
+    }
+
     final directStreamUrl =
         (mediaSource?['DirectStreamUrl'] as String?)?.trim();
     final transcodingUrl = (mediaSource?['TranscodingUrl'] as String?)?.trim();
+    final shouldPreferAvPlayerTranscoding =
+        request.playerCore == PlaybackSourcePlayerCoreKind.avplayer &&
+            request.allowTranscoding &&
+            transcodingUrl != null &&
+            transcodingUrl.isNotEmpty &&
+            (() {
+              final container = normalizedMediaSourceField('Container');
+              if (container.isNotEmpty &&
+                  container != 'mov' &&
+                  container != 'mp4' &&
+                  container != 'm4v') {
+                return true;
+              }
+              return !isAvPlayerSafeDirectVideoCodec(normalizedVideoCodec());
+            })();
+    final preferredAvPlayerTranscodingUrl =
+        shouldPreferAvPlayerTranscoding ? transcodingUrl : null;
 
     String url;
-    if (directStreamUrl != null && directStreamUrl.isNotEmpty) {
+    if (preferredAvPlayerTranscodingUrl != null) {
+      url = resolve(preferredAvPlayerTranscodingUrl);
+    } else if (directStreamUrl != null && directStreamUrl.isNotEmpty) {
       url = resolve(directStreamUrl);
     } else if (request.allowTranscoding &&
         transcodingUrl != null &&

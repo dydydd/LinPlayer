@@ -1610,7 +1610,8 @@ class EmbyApi {
     final prefersPostFirst = switch (profile) {
       PlaybackInfoProfileKind.avplayer ||
       PlaybackInfoProfileKind.exo ||
-      PlaybackInfoProfileKind.vlc => true,
+      PlaybackInfoProfileKind.vlc =>
+        true,
       PlaybackInfoProfileKind.defaultProfile => false,
     };
     final deviceProfile = switch (profile) {
@@ -1621,6 +1622,7 @@ class EmbyApi {
             {
               "Container": "mov,mp4,m4v",
               "Type": "Video",
+              "VideoCodec": "h264,h265,hevc,av1",
               "AudioCodec": "aac,ac3,eac3,mp3,alac",
             },
             {

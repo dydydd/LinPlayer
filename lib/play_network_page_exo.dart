@@ -373,7 +373,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _startMobileVolumeSync();
-    if (_isIos || (_isAndroid && !widget.isTv)) {
+    if (_isAndroid && !widget.isTv) {
       _viewType = VideoViewType.textureView;
     }
     _serverAccess =
@@ -3848,7 +3848,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         children: const [
           MobilePlayerOptionTile(
             title: '字幕轨切换暂不支持',
-            subtitle: 'AVPlayer 现在走独立播放链路，不再复用 Android Exo 的字幕控制接口。请在播放前选择字幕，或切换到 MPV / VLC。',
+            subtitle:
+                'AVPlayer 现在走独立播放链路，不再复用 Android Exo 的字幕控制接口。请在播放前选择字幕，或切换到 MPV / VLC。',
           ),
         ],
       );
@@ -5810,8 +5811,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       final controller = VideoPlayerController.networkUrl(
         Uri.parse(playbackSource.url),
         httpHeaders: playbackSource.httpHeaders,
-        // Use platform view on Android to avoid color issues with some HDR/Dolby Vision sources.
-        // (Texture-based rendering may show green/purple tint on certain P8 files.)
+        // Keep Android on the selectable path for HDR/DV trade-offs.
+        // AVPlayer on iOS stays on platformView by default; the texture path is
+        // more prone to "audio but no picture" regressions on some streams.
         viewType: _viewType,
       );
       _controller = controller;
@@ -5828,6 +5830,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           'initMs': controllerInitializeStopwatch.elapsedMilliseconds,
           'startupElapsedMs': startupStopwatch.elapsedMilliseconds,
           'usesLoopbackProxy': usesLoopbackProxy,
+          'viewType': _viewType.name,
+          'videoWidth': controller.value.size.width,
+          'videoHeight': controller.value.size.height,
         },
       );
       _startDeferredStartupPreloadWarmup(
