@@ -265,7 +265,7 @@ class LinEmbyAdapter implements MediaServerAdapter {
   Future<PlaybackInfoResult> fetchPlaybackInfo(
     ServerAuthSession auth, {
     required String itemId,
-    bool exoPlayer = false,
+    PlaybackInfoProfileKind profile = PlaybackInfoProfileKind.defaultProfile,
   }) {
     return _apiFor(auth).fetchPlaybackInfo(
       token: auth.token,
@@ -273,7 +273,7 @@ class LinEmbyAdapter implements MediaServerAdapter {
       userId: auth.userId,
       deviceId: deviceId,
       itemId: itemId,
-      exoPlayer: exoPlayer,
+      profile: profile,
     );
   }
 

@@ -100,6 +100,33 @@ void main() {
     );
   });
 
+  test('PlaybackSourceBuildRequest only enables transcoding by default for EXO',
+      () {
+    final adapter = _NoopAdapter();
+    final exoRequest = PlaybackSourceBuildRequest(
+      adapter: adapter,
+      auth: auth,
+      itemId: 'item-exo',
+      playerCore: PlaybackSourcePlayerCoreKind.exo,
+    );
+    final vlcRequest = PlaybackSourceBuildRequest(
+      adapter: adapter,
+      auth: auth,
+      itemId: 'item-vlc',
+      playerCore: PlaybackSourcePlayerCoreKind.vlc,
+    );
+    final mpvRequest = PlaybackSourceBuildRequest(
+      adapter: adapter,
+      auth: auth,
+      itemId: 'item-mpv',
+      playerCore: PlaybackSourcePlayerCoreKind.mpv,
+    );
+
+    expect(exoRequest.allowTranscoding, isTrue);
+    expect(vlcRequest.allowTranscoding, isFalse);
+    expect(mpvRequest.allowTranscoding, isFalse);
+  });
+
   test('PlaybackPreloadCoordinator defers startup warmup for aligned handoff',
       () {
     final prepared = PlaybackPreloadCoordinator.prepareResolved(
@@ -234,6 +261,76 @@ void main() {
         selectedMediaSourceId: 'ms-handoff',
         audioStreamIndex: 2,
         subtitleStreamIndex: 5,
+      ),
+      isFalse,
+    );
+  });
+
+  test(
+      'PlaybackPreloadCoordinator.prepareItem keeps VLC playback handoff metadata and avoids EXO playback info',
+      () async {
+    final adapter = _FakeAdapter(
+      playbackInfo: PlaybackInfoResult(
+        playSessionId: 'ps-vlc-handoff',
+        mediaSourceId: 'ms-vlc-handoff',
+        mediaSources: <dynamic>[
+          <String, dynamic>{
+            'Id': 'ms-vlc-handoff',
+            'Path': '/Videos/item-vlc-handoff/stream.mp4',
+            'Bitrate': 6000000,
+            'MediaStreams': <dynamic>[],
+          },
+        ],
+      ),
+      streamHeaders: const <String, String>{'X-Test': '1'},
+    );
+
+    final prepared = await PlaybackPreloadCoordinator.prepareItem(
+      PlaybackPreloadBuildRequest(
+        access: ServerAccess(adapter: adapter, auth: auth),
+        appState: AppState(),
+        itemId: 'item-vlc-handoff',
+        playerCore: PlaybackSourcePlayerCoreKind.vlc,
+        targetKind: PlaybackPreloadTargetKind.currentItem,
+        triggerSource: 'detail_current',
+        selectedMediaSourceId: 'ms-vlc-handoff',
+        audioStreamIndex: 1,
+        subtitleStreamIndex: 4,
+      ),
+    );
+
+    expect(
+      adapter.fetchPlaybackInfoProfiles,
+      <PlaybackInfoProfileKind>[PlaybackInfoProfileKind.vlc],
+    );
+    expect(prepared.playerCore, PlaybackSourcePlayerCoreKind.vlc);
+    expect(prepared.effectivePlaySessionId, 'ps-vlc-handoff');
+    expect(prepared.selectedMediaSourceId, 'ms-vlc-handoff');
+    expect(prepared.mediaSources, hasLength(1));
+    expect(prepared.playbackSource, isNotNull);
+    expect(
+      Uri.tryParse(prepared.playbackSource!.url)?.host,
+      '127.0.0.1',
+    );
+    expect(prepared.playbackSource!.httpHeaders, isEmpty);
+    expect(prepared.matchesHttpProxyUrl(null), isTrue);
+    expect(
+      prepared.matchesPlayback(
+        itemId: 'item-vlc-handoff',
+        playerCore: PlaybackSourcePlayerCoreKind.vlc,
+        selectedMediaSourceId: 'ms-vlc-handoff',
+        audioStreamIndex: 1,
+        subtitleStreamIndex: 4,
+      ),
+      isTrue,
+    );
+    expect(
+      prepared.matchesPlayback(
+        itemId: 'item-vlc-handoff',
+        playerCore: PlaybackSourcePlayerCoreKind.exo,
+        selectedMediaSourceId: 'ms-vlc-handoff',
+        audioStreamIndex: 1,
+        subtitleStreamIndex: 4,
       ),
       isFalse,
     );
@@ -2939,6 +3036,8 @@ class _FakeAdapter extends Fake implements MediaServerAdapter {
 
   final PlaybackInfoResult playbackInfo;
   final Map<String, String> streamHeaders;
+  final List<PlaybackInfoProfileKind> fetchPlaybackInfoProfiles =
+      <PlaybackInfoProfileKind>[];
 
   @override
   MediaServerType get serverType => MediaServerType.emby;
@@ -2954,10 +3053,15 @@ class _FakeAdapter extends Fake implements MediaServerAdapter {
   Future<PlaybackInfoResult> fetchPlaybackInfo(
     ServerAuthSession auth, {
     required String itemId,
-    bool exoPlayer = false,
+    PlaybackInfoProfileKind profile = PlaybackInfoProfileKind.defaultProfile,
   }) async {
+    fetchPlaybackInfoProfiles.add(profile);
     return playbackInfo;
   }
+}
+
+class _NoopAdapter extends Fake implements MediaServerAdapter {
+  _NoopAdapter();
 }
 
 String? _headerValue(Map<String, String> headers, String name) {

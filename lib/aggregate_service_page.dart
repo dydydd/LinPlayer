@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:lin_player_player/lin_player_player.dart';
+import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
@@ -1839,7 +1841,9 @@ class _AggregateWorkDetailPageState extends State<_AggregateWorkDetailPage> {
     final info = await access.adapter.fetchPlaybackInfo(
       access.auth,
       itemId: itemId,
-      exoPlayer: false,
+      profile: playbackInfoProfileKindForPlayerCore(
+        normalizePlayerCoreForPlatform(widget.appState.playerCore),
+      ),
     );
     final rawSources = info.mediaSources.cast<Map<String, dynamic>>();
     final sources =

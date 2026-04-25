@@ -45,7 +45,7 @@ void main() {
       userId: 'u1',
       deviceId: 'd1',
       itemId: 'i1',
-      exoPlayer: true,
+      profile: PlaybackInfoProfileKind.exo,
     );
 
     expect(postedProfile, isNotNull);
@@ -60,5 +60,64 @@ void main() {
         .cast<Map>()
         .firstWhere((e) => (e['Type'] as String?) == 'Video');
     expect(video['AudioCodec'], 'aac,mp3');
+  });
+
+  test('fetchPlaybackInfo uses dedicated VLC device profile and POSTs first',
+      () async {
+    final methods = <String>[];
+    Map<String, dynamic>? postedProfile;
+
+    final client = MockClient((req) async {
+      methods.add(req.method);
+      final url = req.url.toString();
+      if (url == 'https://example.com/emby/Items/i1/PlaybackInfo') {
+        final body = jsonDecode(req.body) as Map<String, dynamic>;
+        postedProfile = body['DeviceProfile'] as Map<String, dynamic>?;
+        return http.Response(
+          jsonEncode({
+            'PlaySessionId': 's1',
+            'MediaSources': [
+              {'Id': 'ms1'}
+            ],
+          }),
+          200,
+          headers: const {'content-type': 'application/json'},
+        );
+      }
+      return http.Response('no', 500);
+    });
+
+    final api = EmbyApi(
+      hostOrUrl: 'https://example.com',
+      preferredScheme: 'https',
+      client: client,
+    );
+
+    await api.fetchPlaybackInfo(
+      token: 't1',
+      baseUrl: 'https://example.com',
+      userId: 'u1',
+      deviceId: 'd1',
+      itemId: 'i1',
+      profile: PlaybackInfoProfileKind.vlc,
+    );
+
+    expect(methods, isNotEmpty);
+    expect(methods.first, 'POST');
+    expect(postedProfile, isNotNull);
+    expect(postedProfile!['Name'], 'LinPlayer-VLC');
+    final transcode = postedProfile!['TranscodingProfiles'] as List?;
+    expect(transcode, isNotNull);
+    expect(transcode, isEmpty);
+
+    final direct = postedProfile!['DirectPlayProfiles'] as List?;
+    expect(direct, isNotNull);
+    final video = direct!
+        .cast<Map>()
+        .firstWhere((e) => (e['Type'] as String?) == 'Video');
+    expect(
+      (video['Container'] as String?)?.contains('m2ts'),
+      isTrue,
+    );
   });
 }

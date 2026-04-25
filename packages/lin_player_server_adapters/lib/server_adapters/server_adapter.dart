@@ -117,7 +117,7 @@ abstract class MediaServerAdapter {
   Future<PlaybackInfoResult> fetchPlaybackInfo(
     ServerAuthSession auth, {
     required String itemId,
-    bool exoPlayer = false,
+    PlaybackInfoProfileKind profile = PlaybackInfoProfileKind.defaultProfile,
   });
 
   Future<List<ChapterInfo>> fetchChapters(

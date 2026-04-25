@@ -20,7 +20,7 @@ class PlaybackSourceBuilder {
     final info = await request.adapter.fetchPlaybackInfo(
       request.auth,
       itemId: request.itemId,
-      exoPlayer: request.playerCore == PlaybackSourcePlayerCoreKind.exo,
+      profile: playbackInfoProfileKindForPlaybackSourceCore(request.playerCore),
     );
     final sources = info.mediaSources
         .cast<Map<String, dynamic>>()

@@ -236,11 +236,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
   String? get _userId => widget.server?.userId ?? widget.appState.userId;
 
   PlaybackSourcePlayerCoreKind get _moviePlaybackCoreKind {
-    final useNativeCore =
-        playerCoreUsesNativeVideoPlayer(widget.appState.playerCore);
-    return useNativeCore
-        ? PlaybackSourcePlayerCoreKind.exo
-        : PlaybackSourcePlayerCoreKind.mpv;
+    return playbackSourcePlayerCoreKindForPlayerCore(
+      normalizePlayerCoreForPlatform(widget.appState.playerCore),
+    );
   }
 
   bool get _preferBuiltInProxyForMpvPreload =>
@@ -633,8 +631,13 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       int? selectedSubtitleStreamIndex = _selectedSubtitleStreamIndex;
       if (!isSeries) {
         try {
-          playInfo = await access.adapter
-              .fetchPlaybackInfo(access.auth, itemId: widget.itemId);
+          playInfo = await access.adapter.fetchPlaybackInfo(
+            access.auth,
+            itemId: widget.itemId,
+            profile: playbackInfoProfileKindForPlaybackSourceCore(
+              _moviePlaybackCoreKind,
+            ),
+          );
           final sources = playInfo.mediaSources.cast<Map<String, dynamic>>();
           if (sources.isNotEmpty) {
             final validSelection = selectedMediaSourceId != null &&
@@ -5694,11 +5697,9 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   }
 
   PlaybackSourcePlayerCoreKind get _episodePlaybackCoreKind {
-    final useNativeCore =
-        playerCoreUsesNativeVideoPlayer(widget.appState.playerCore);
-    return useNativeCore
-        ? PlaybackSourcePlayerCoreKind.exo
-        : PlaybackSourcePlayerCoreKind.mpv;
+    return playbackSourcePlayerCoreKindForPlayerCore(
+      normalizePlayerCoreForPlatform(widget.appState.playerCore),
+    );
   }
 
   bool get _preferBuiltInProxyForMpvPreload =>
@@ -6031,8 +6032,13 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
           ),
         );
       }
-      final info = await access.adapter
-          .fetchPlaybackInfo(access.auth, itemId: episodeId);
+      final info = await access.adapter.fetchPlaybackInfo(
+        access.auth,
+        itemId: episodeId,
+        profile: playbackInfoProfileKindForPlaybackSourceCore(
+          _episodePlaybackCoreKind,
+        ),
+      );
       if (!mounted || seq != _loadSeq) return;
       final sources = info.mediaSources.cast<Map<String, dynamic>>();
       final preferred = sources.isEmpty

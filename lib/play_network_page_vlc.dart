@@ -268,6 +268,8 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
   bool get _supportsVlcCore => _isIos;
   bool get _usesSystemVolumeGestures => _isIos;
   bool get _shouldPersistMobilePlayerVolume => _isAndroid;
+  PlaybackSourcePlayerCoreKind get _playbackSourceCoreKind =>
+      PlaybackSourcePlayerCoreKind.vlc;
 
   bool get _isPlaying => _controller?.value.isPlaying ?? false;
 
@@ -280,7 +282,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
     if (prepared == null) return null;
     if (!prepared.matchesPlayback(
       itemId: widget.itemId,
-      playerCore: PlaybackSourcePlayerCoreKind.exo,
+      playerCore: _playbackSourceCoreKind,
       selectedMediaSourceId: _selectedMediaSourceId,
       audioStreamIndex: _selectedAudioStreamIndex,
       subtitleStreamIndex: _selectedSubtitleStreamIndex,
@@ -295,7 +297,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
     if (prepared == null) return null;
     if (!prepared.matchesPlayback(
       itemId: itemId,
-      playerCore: PlaybackSourcePlayerCoreKind.exo,
+      playerCore: _playbackSourceCoreKind,
       selectedMediaSourceId: _selectedMediaSourceId,
       audioStreamIndex: _selectedAudioStreamIndex,
       subtitleStreamIndex: _selectedSubtitleStreamIndex,
@@ -1983,7 +1985,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
         triggerSource: triggerSource,
         resolvedSource: resolvedSource,
         startPosition: effectiveStart,
-        playerCore: PlaybackSourcePlayerCoreKind.exo,
+        playerCore: _playbackSourceCoreKind,
         httpProxyUrl: _preloadHttpProxyUrl,
         ownerKey: _preloadOwnerKey,
         scopeKey: 'playback_current',
@@ -2169,7 +2171,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
           access: access,
           appState: widget.appState,
           itemId: nextId.trim(),
-          playerCore: PlaybackSourcePlayerCoreKind.exo,
+          playerCore: _playbackSourceCoreKind,
           targetKind: PlaybackPreloadTargetKind.nextItem,
           triggerSource: 'playback_next',
           selectedMediaSourceId: _selectedMediaSourceId,
@@ -3348,7 +3350,9 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
     final info = await access.adapter.fetchPlaybackInfo(
       access.auth,
       itemId: widget.itemId,
-      exoPlayer: true,
+      profile: playbackInfoProfileKindForPlaybackSourceCore(
+        _playbackSourceCoreKind,
+      ),
     );
     final sources = List<Map<String, dynamic>>.from(
       info.mediaSources.cast<Map<String, dynamic>>(),
@@ -5446,7 +5450,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
       PlaybackPreloadCoordinator.cancelOwner(_preloadOwnerKey);
     }
     _preloadOwnerKey =
-        PlaybackPreloadCoordinator.createOwnerToken('playback_exo');
+        PlaybackPreloadCoordinator.createOwnerToken('playback_vlc');
 
     final prev = _controller;
     _controller = null;
@@ -5892,7 +5896,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
         adapter: access.adapter,
         auth: access.auth,
         itemId: widget.itemId,
-        playerCore: PlaybackSourcePlayerCoreKind.exo,
+        playerCore: _playbackSourceCoreKind,
         selectedMediaSourceId: _selectedMediaSourceId,
         preferredMediaSourceIndex: _preferredMediaSourceIndex(),
         audioStreamIndex: _selectedAudioStreamIndex,

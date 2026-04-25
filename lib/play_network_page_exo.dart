@@ -3509,7 +3509,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     final info = await access.adapter.fetchPlaybackInfo(
       access.auth,
       itemId: widget.itemId,
-      exoPlayer: true,
+      profile: PlaybackInfoProfileKind.exo,
     );
     final sources = List<Map<String, dynamic>>.from(
       info.mediaSources.cast<Map<String, dynamic>>(),

@@ -4,7 +4,34 @@ import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 
 enum PlaybackSourcePlayerCoreKind {
   mpv,
+  vlc,
   exo,
+}
+
+PlaybackSourcePlayerCoreKind playbackSourcePlayerCoreKindForPlayerCore(
+  PlayerCore core,
+) {
+  return switch (core) {
+    PlayerCore.vlc => PlaybackSourcePlayerCoreKind.vlc,
+    PlayerCore.avplayer || PlayerCore.exo => PlaybackSourcePlayerCoreKind.exo,
+    PlayerCore.mpv => PlaybackSourcePlayerCoreKind.mpv,
+  };
+}
+
+PlaybackInfoProfileKind playbackInfoProfileKindForPlaybackSourceCore(
+  PlaybackSourcePlayerCoreKind core,
+) {
+  return switch (core) {
+    PlaybackSourcePlayerCoreKind.vlc => PlaybackInfoProfileKind.vlc,
+    PlaybackSourcePlayerCoreKind.exo => PlaybackInfoProfileKind.exo,
+    PlaybackSourcePlayerCoreKind.mpv => PlaybackInfoProfileKind.defaultProfile,
+  };
+}
+
+PlaybackInfoProfileKind playbackInfoProfileKindForPlayerCore(PlayerCore core) {
+  return playbackInfoProfileKindForPlaybackSourceCore(
+    playbackSourcePlayerCoreKindForPlayerCore(core),
+  );
 }
 
 enum ResolvedPlaybackMediaType {
@@ -127,8 +154,7 @@ class ResolvedPlaybackSource {
       httpStatusHint: identical(httpStatusHint, _unset)
           ? this.httpStatusHint
           : httpStatusHint as int?,
-      bitrate:
-          identical(bitrate, _unset) ? this.bitrate : bitrate as int?,
+      bitrate: identical(bitrate, _unset) ? this.bitrate : bitrate as int?,
       sizeBytes:
           identical(sizeBytes, _unset) ? this.sizeBytes : sizeBytes as int?,
       sourcePath: identical(sourcePath, _unset)

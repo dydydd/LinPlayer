@@ -84,7 +84,9 @@ class UhdEmbyLikeAdapter extends LinEmbyAdapter {
     }
 
     final normalizedPath = segments.isEmpty ? '' : '/${segments.join('/')}';
-    return uri.replace(path: normalizedPath, query: null, fragment: null).toString();
+    return uri
+        .replace(path: normalizedPath, query: null, fragment: null)
+        .toString();
   }
 
   static String _urlJoin(String baseUrl, String path) {
@@ -338,7 +340,7 @@ class UhdEmbyLikeAdapter extends LinEmbyAdapter {
   Future<PlaybackInfoResult> fetchPlaybackInfo(
     ServerAuthSession auth, {
     required String itemId,
-    bool exoPlayer = false,
+    PlaybackInfoProfileKind profile = PlaybackInfoProfileKind.defaultProfile,
   }) async {
     MediaItem? detail;
     try {
@@ -353,7 +355,7 @@ class UhdEmbyLikeAdapter extends LinEmbyAdapter {
       final info = await super.fetchPlaybackInfo(
         auth,
         itemId: itemId,
-        exoPlayer: exoPlayer,
+        profile: profile,
       );
 
       final patched = <dynamic>[];
@@ -396,4 +398,3 @@ class UhdEmbyLikeAdapter extends LinEmbyAdapter {
     }
   }
 }
-

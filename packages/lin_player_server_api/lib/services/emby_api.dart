@@ -52,6 +52,12 @@ class AuthResult {
       this.apiPrefixUsed = 'emby'});
 }
 
+enum PlaybackInfoProfileKind {
+  defaultProfile,
+  vlc,
+  exo,
+}
+
 class _AuthSocketFailure implements Exception {
   const _AuthSocketFailure(this.message);
 
@@ -1592,47 +1598,73 @@ class EmbyApi {
     required String userId,
     required String deviceId,
     required String itemId,
-    bool exoPlayer = false,
+    PlaybackInfoProfileKind profile = PlaybackInfoProfileKind.defaultProfile,
   }) async {
-    final profileName = exoPlayer ? '$clientName-Exo' : clientName;
-    final deviceProfile = exoPlayer
-        ? {
-            "Name": profileName,
-            "MaxStreamingBitrate": 120000000,
-            "DirectPlayProfiles": [
-              {
-                "Container": "mp4,mkv,mov,avi,ts,flv,webm",
-                "Type": "Video",
-                "AudioCodec": "aac,mp3",
-              },
-              {
-                "Container": "mp3,aac,m4a",
-                "Type": "Audio",
-                "AudioCodec": "aac,mp3",
-              },
-            ],
-            "TranscodingProfiles": [
-              {
-                "Container": "ts",
-                "Type": "Video",
-                "Protocol": "hls",
-                "VideoCodec": "h264",
-                "AudioCodec": "aac",
-                "Context": "Streaming",
-              },
-            ],
-            "DeviceId": deviceId,
-          }
-        : {
-            "Name": profileName,
-            "MaxStreamingBitrate": 120000000,
-            "DirectPlayProfiles": [
-              {"Container": "mp4,mkv,mov,avi,ts,flv,webm", "Type": "Video"},
-              {"Container": "mp3,aac,flac,wav,ogg", "Type": "Audio"}
-            ],
-            "TranscodingProfiles": [],
-            "DeviceId": deviceId,
-          };
+    final profileName = switch (profile) {
+      PlaybackInfoProfileKind.exo => '$clientName-Exo',
+      PlaybackInfoProfileKind.vlc => '$clientName-VLC',
+      PlaybackInfoProfileKind.defaultProfile => clientName,
+    };
+    final prefersPostFirst = switch (profile) {
+      PlaybackInfoProfileKind.exo || PlaybackInfoProfileKind.vlc => true,
+      PlaybackInfoProfileKind.defaultProfile => false,
+    };
+    final deviceProfile = switch (profile) {
+      PlaybackInfoProfileKind.exo => <String, dynamic>{
+          "Name": profileName,
+          "MaxStreamingBitrate": 120000000,
+          "DirectPlayProfiles": [
+            {
+              "Container": "mp4,mkv,mov,avi,ts,flv,webm",
+              "Type": "Video",
+              "AudioCodec": "aac,mp3",
+            },
+            {
+              "Container": "mp3,aac,m4a",
+              "Type": "Audio",
+              "AudioCodec": "aac,mp3",
+            },
+          ],
+          "TranscodingProfiles": [
+            {
+              "Container": "ts",
+              "Type": "Video",
+              "Protocol": "hls",
+              "VideoCodec": "h264",
+              "AudioCodec": "aac",
+              "Context": "Streaming",
+            },
+          ],
+          "DeviceId": deviceId,
+        },
+      PlaybackInfoProfileKind.vlc => <String, dynamic>{
+          "Name": profileName,
+          "MaxStreamingBitrate": 120000000,
+          "DirectPlayProfiles": [
+            {
+              "Container":
+                  "3gp,avi,flv,m2ts,m4v,mkv,mov,mp4,mpeg,mpg,mts,ts,webm,wmv",
+              "Type": "Video",
+            },
+            {
+              "Container": "aac,alac,flac,m4a,mp3,ogg,opus,wav,wma",
+              "Type": "Audio",
+            },
+          ],
+          "TranscodingProfiles": [],
+          "DeviceId": deviceId,
+        },
+      PlaybackInfoProfileKind.defaultProfile => <String, dynamic>{
+          "Name": profileName,
+          "MaxStreamingBitrate": 120000000,
+          "DirectPlayProfiles": [
+            {"Container": "mp4,mkv,mov,avi,ts,flv,webm", "Type": "Video"},
+            {"Container": "mp3,aac,flac,wav,ogg", "Type": "Audio"},
+          ],
+          "TranscodingProfiles": [],
+          "DeviceId": deviceId,
+        },
+    };
 
     Future<http.Response> postReq() => _client.post(
           _apiUri(baseUrl, 'Items/$itemId/PlaybackInfo', token: token),
@@ -1657,17 +1689,22 @@ class EmbyApi {
               _jsonHeaders(token: token, userId: userId, deviceId: deviceId),
         );
 
-    // For ExoPlayer we must POST with DeviceProfile, otherwise the server may
-    // return a direct-play URL for an audio codec Exo can't decode (video-only).
-    http.Response resp = exoPlayer ? await postReq() : await getReq();
-    if (exoPlayer && resp.statusCode != 200) {
-      // Some servers/proxies only allow GET on this endpoint.
-      resp = await getReq();
-      if (resp.statusCode >= 500 || resp.statusCode == 404) {
-        resp = await postReq();
+    // Exo needs a posted profile to avoid unsupported direct-play results.
+    // VLC also prefers an explicit posted profile so the server resolves media
+    // sources for the dedicated VLC pipeline instead of the generic default.
+    http.Response resp = prefersPostFirst ? await postReq() : await getReq();
+    if (prefersPostFirst) {
+      if (resp.statusCode != 200) {
+        final getResp = await getReq();
+        if (getResp.statusCode == 200) {
+          resp = getResp;
+        } else if (getResp.statusCode >= 500 || getResp.statusCode == 404) {
+          resp = await postReq();
+        } else {
+          resp = getResp;
+        }
       }
-    } else if (!exoPlayer &&
-        (resp.statusCode >= 500 || resp.statusCode == 404)) {
+    } else if (resp.statusCode >= 500 || resp.statusCode == 404) {
       resp = await postReq();
     }
     if (resp.statusCode != 200) {
