@@ -49,15 +49,16 @@ void main() {
     expect(postedProfile!['Name'], 'LinPlayer-AVPlayer');
     final transcode = postedProfile!['TranscodingProfiles'] as List?;
     expect(transcode, isNotNull);
-    expect(transcode, isNotEmpty);
+    expect(transcode, isEmpty);
 
     final direct = postedProfile!['DirectPlayProfiles'] as List?;
     expect(direct, isNotNull);
     final video = direct!
         .cast<Map>()
         .firstWhere((e) => (e['Type'] as String?) == 'Video');
-    expect(video['Container'], 'mov,mp4,m4v');
-    expect(video['VideoCodec'], 'h264,h265,hevc,av1');
+    expect((video['Container'] as String?)?.contains('mkv'), isTrue);
+    expect((video['Container'] as String?)?.contains('mp4'), isTrue);
+    expect(video.containsKey('VideoCodec'), isFalse);
   });
 
   test('fetchPlaybackInfo uses Exo device profile when requested', () async {
@@ -105,14 +106,15 @@ void main() {
     expect(postedProfile!['Name'], 'LinPlayer-Exo');
     final transcode = postedProfile!['TranscodingProfiles'] as List?;
     expect(transcode, isNotNull);
-    expect(transcode, isNotEmpty);
+    expect(transcode, isEmpty);
 
     final direct = postedProfile!['DirectPlayProfiles'] as List?;
     expect(direct, isNotNull);
     final video = direct!
         .cast<Map>()
         .firstWhere((e) => (e['Type'] as String?) == 'Video');
-    expect(video['AudioCodec'], 'aac,mp3');
+    expect((video['Container'] as String?)?.contains('mkv'), isTrue);
+    expect(video.containsKey('AudioCodec'), isFalse);
   });
 
   test('fetchPlaybackInfo uses dedicated VLC device profile and POSTs first',

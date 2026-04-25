@@ -88,13 +88,13 @@ class _VlcPlayerScreenState extends State<VlcPlayerScreen>
   DateTime? _lastAutoOrientationApplyAt;
   bool _remoteEnabled = false;
   final FocusNode _tvSurfaceFocusNode =
-      FocusNode(debugLabel: 'exo_player_tv_surface');
+      FocusNode(debugLabel: 'vlc_player_tv_surface');
   final FocusNode _tvPlayPauseFocusNode =
-      FocusNode(debugLabel: 'exo_player_tv_play_pause');
+      FocusNode(debugLabel: 'vlc_player_tv_play_pause');
 
   VideoViewType _viewType = VideoViewType.platformView;
 
-  // Subtitle options (EXO).
+  // Subtitle options (Android track API).
   double _subtitleDelaySeconds = 0.0;
   double _subtitleFontSize = 18.0;
   int _subtitlePositionStep = 5; // 0..20, maps to padding-bottom in 5px steps.
@@ -3234,7 +3234,7 @@ class _VlcPlayerScreenState extends State<VlcPlayerScreen>
         await LocalHttpStreamProxy.wrapCandidates(resolved.candidates);
     final looksLikeStrm = resolved.inputWasStrm;
     AppDiagnosticsLogger.instance.info(
-      'player_local_exo',
+      'player_local_vlc',
       'Resolved local playback candidates',
       data: <String, Object?>{
         'fileName': file.name,
@@ -3247,7 +3247,7 @@ class _VlcPlayerScreenState extends State<VlcPlayerScreen>
     );
     if (candidates.isEmpty) {
       AppDiagnosticsLogger.instance.warn(
-        'player_local_exo',
+        'player_local_vlc',
         'No playable candidates for local file',
         data: <String, Object?>{
           'fileName': file.name,
@@ -3261,7 +3261,7 @@ class _VlcPlayerScreenState extends State<VlcPlayerScreen>
     final source = candidates.first.url;
     if (source.isEmpty) {
       AppDiagnosticsLogger.instance.warn(
-        'player_local_exo',
+        'player_local_vlc',
         'First local playback candidate is empty',
         data: <String, Object?>{
           'fileName': file.name,
@@ -3343,7 +3343,7 @@ class _VlcPlayerScreenState extends State<VlcPlayerScreen>
             uri.host.trim().isNotEmpty;
 
         AppDiagnosticsLogger.instance.info(
-          'player_local_exo',
+          'player_local_vlc',
           'Trying local playback candidate',
           data: <String, Object?>{
             'fileName': file.name,
@@ -3401,7 +3401,7 @@ class _VlcPlayerScreenState extends State<VlcPlayerScreen>
             await controller.play();
           }
           AppDiagnosticsLogger.instance.info(
-            'player_local_exo',
+            'player_local_vlc',
             'Selected local playback candidate',
             data: <String, Object?>{
               'fileName': file.name,
@@ -3415,7 +3415,7 @@ class _VlcPlayerScreenState extends State<VlcPlayerScreen>
         } catch (e) {
           lastError = e;
           AppDiagnosticsLogger.instance.warn(
-            'player_local_exo',
+            'player_local_vlc',
             'Local playback candidate failed',
             data: <String, Object?>{
               'fileName': file.name,
@@ -3442,7 +3442,7 @@ class _VlcPlayerScreenState extends State<VlcPlayerScreen>
                 : (resolved.error?.message ?? 'STRM 播放失败'))
             : (details.isNotEmpty ? details : '播放失败');
         AppDiagnosticsLogger.instance.warn(
-          'player_local_exo',
+          'player_local_vlc',
           'All local playback candidates failed',
           data: <String, Object?>{
             'fileName': file.name,
@@ -3545,7 +3545,7 @@ class _VlcPlayerScreenState extends State<VlcPlayerScreen>
       if (mounted) setState(() {});
     } catch (e) {
       AppDiagnosticsLogger.instance.error(
-        'player_local_exo',
+        'player_local_vlc',
         'Unhandled local playback error',
         data: <String, Object?>{
           'fileName': file.name,

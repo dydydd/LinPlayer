@@ -159,25 +159,25 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
   bool _isScrubbing = false;
   bool _remoteEnabled = false;
   final FocusNode _tvSurfaceFocusNode =
-      FocusNode(debugLabel: 'network_exo_player_tv_surface');
+      FocusNode(debugLabel: 'network_vlc_player_tv_surface');
   final FocusNode _tvPlayPauseFocusNode =
-      FocusNode(debugLabel: 'network_exo_player_tv_play_pause');
+      FocusNode(debugLabel: 'network_vlc_player_tv_play_pause');
   final FocusNode _tvEpisodeSelectedFocusNode =
-      FocusNode(debugLabel: 'network_exo_player_tv_episode_selected');
+      FocusNode(debugLabel: 'network_vlc_player_tv_episode_selected');
   final FocusNode _tvEpisodeFallbackFocusNode =
-      FocusNode(debugLabel: 'network_exo_player_tv_episode_fallback');
+      FocusNode(debugLabel: 'network_vlc_player_tv_episode_fallback');
   final FocusNode _tvSubtitleSelectedFocusNode =
-      FocusNode(debugLabel: 'network_exo_player_tv_subtitle_selected');
+      FocusNode(debugLabel: 'network_vlc_player_tv_subtitle_selected');
   final FocusNode _tvSubtitleFallbackFocusNode =
-      FocusNode(debugLabel: 'network_exo_player_tv_subtitle_fallback');
+      FocusNode(debugLabel: 'network_vlc_player_tv_subtitle_fallback');
   final FocusNode _tvAudioSelectedFocusNode =
-      FocusNode(debugLabel: 'network_exo_player_tv_audio_selected');
+      FocusNode(debugLabel: 'network_vlc_player_tv_audio_selected');
   final FocusNode _tvAudioFallbackFocusNode =
-      FocusNode(debugLabel: 'network_exo_player_tv_audio_fallback');
+      FocusNode(debugLabel: 'network_vlc_player_tv_audio_fallback');
   final FocusNode _tvCoreMpvFocusNode =
-      FocusNode(debugLabel: 'network_exo_player_tv_core_mpv');
-  final FocusNode _tvCoreExoFocusNode =
-      FocusNode(debugLabel: 'network_exo_player_tv_core_exo');
+      FocusNode(debugLabel: 'network_vlc_player_tv_core_mpv');
+  final FocusNode _tvCoreVlcFocusNode =
+      FocusNode(debugLabel: 'network_vlc_player_tv_core_vlc');
 
   int _tvBottomPanelIndex =
       0; // 0=playback, 1=episodes, 2=subtitles, 3=audio, 4=core
@@ -197,7 +197,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
   static const int _playbackRouteHistoryLimit = 5;
   final List<String> _playbackRouteHistory = <String>[];
 
-  // Subtitle options (EXO).
+  // Subtitle options (Android track API).
   final double _subtitleDelaySeconds = 0.0;
   final double _subtitleFontSize = 18.0;
   final int _subtitlePositionStep =
@@ -548,7 +548,7 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
     _tvAudioSelectedFocusNode.dispose();
     _tvAudioFallbackFocusNode.dispose();
     _tvCoreMpvFocusNode.dispose();
-    _tvCoreExoFocusNode.dispose();
+    _tvCoreVlcFocusNode.dispose();
     super.dispose();
   }
 
@@ -4616,14 +4616,12 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
   }
 
   Widget _buildTvCorePanel({required bool enabled}) {
-    final canUseExo =
-        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    final selectedCore =
+        normalizePlayerCoreForPlatform(widget.appState.playerCore);
+    final mpvSelected = selectedCore == PlayerCore.mpv;
+    final vlcSelected = selectedCore == PlayerCore.vlc;
 
-    final selectedCore = widget.appState.playerCore;
-    final mpvSelected = selectedCore == PlayerCore.mpv || !canUseExo;
-    final exoSelected = selectedCore == PlayerCore.exo && canUseExo;
-
-    final focusNode = mpvSelected ? _tvCoreExoFocusNode : _tvCoreMpvFocusNode;
+    final focusNode = mpvSelected ? _tvCoreVlcFocusNode : _tvCoreMpvFocusNode;
     _requestTvBottomPanelFocusIfNeeded(4, focusNode);
 
     return SingleChildScrollView(
@@ -4642,14 +4640,14 @@ class _VlcPlayNetworkPageState extends State<VlcPlayNetworkPage>
           const SizedBox(width: 10),
           _buildTvChip(
             autofocus: mpvSelected,
-            selected: exoSelected,
-            label: canUseExo ? 'Exo' : 'Exo（仅 Android）',
-            icon: Icons.flash_on_outlined,
-            focusNode: _tvCoreExoFocusNode,
-            onPressed: !enabled || !canUseExo || exoSelected
+            selected: vlcSelected,
+            label: PlayerCore.vlc.label,
+            icon: playerCoreIcon(PlayerCore.vlc),
+            focusNode: _tvCoreVlcFocusNode,
+            onPressed: !enabled || vlcSelected
                 ? null
                 : () {
-                    unawaited(widget.appState.setPlayerCore(PlayerCore.exo));
+                    unawaited(widget.appState.setPlayerCore(PlayerCore.vlc));
                     setState(() {});
                   },
           ),

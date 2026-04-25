@@ -164,8 +164,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       FocusNode(debugLabel: 'network_player_tv_audio_fallback');
   final FocusNode _tvCoreMpvFocusNode =
       FocusNode(debugLabel: 'network_player_tv_core_mpv');
-  final FocusNode _tvCoreExoFocusNode =
-      FocusNode(debugLabel: 'network_player_tv_core_exo');
+  final FocusNode _tvCoreAltCoreFocusNode =
+      FocusNode(debugLabel: 'network_player_tv_core_alt');
 
   int _tvBottomPanelIndex =
       0; // 0=playback, 1=episodes, 2=subtitles, 3=audio, 4=core
@@ -4534,7 +4534,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _tvAudioSelectedFocusNode.dispose();
     _tvAudioFallbackFocusNode.dispose();
     _tvCoreMpvFocusNode.dispose();
-    _tvCoreExoFocusNode.dispose();
+    _tvCoreAltCoreFocusNode.dispose();
     _playerService.dispose();
     super.dispose();
   }
@@ -5414,14 +5414,21 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   }
 
   Widget _buildTvCorePanel({required bool enabled}) {
-    final canUseExo =
-        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    final selectedCore =
+        normalizePlayerCoreForPlatform(widget.appState.playerCore);
+    PlayerCore? alternateCore;
+    for (final core in playerCoresForPlatform()) {
+      if (core != PlayerCore.mpv) {
+        alternateCore = core;
+        break;
+      }
+    }
+    final hasAlternateCore = alternateCore != null;
+    final mpvSelected = selectedCore == PlayerCore.mpv || !hasAlternateCore;
+    final alternateSelected = hasAlternateCore && selectedCore == alternateCore;
 
-    final selectedCore = widget.appState.playerCore;
-    final mpvSelected = selectedCore == PlayerCore.mpv || !canUseExo;
-    final exoSelected = selectedCore == PlayerCore.exo && canUseExo;
-
-    final focusNode = mpvSelected ? _tvCoreMpvFocusNode : _tvCoreExoFocusNode;
+    final focusNode =
+        mpvSelected ? _tvCoreMpvFocusNode : _tvCoreAltCoreFocusNode;
     _requestTvBottomPanelFocusIfNeeded(4, focusNode);
 
     return SingleChildScrollView(
@@ -5429,7 +5436,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       child: Row(
         children: [
           _buildTvChip(
-            autofocus: !canUseExo || mpvSelected,
+            autofocus: !hasAlternateCore || mpvSelected,
             selected: mpvSelected,
             label: 'mpv',
             icon: Icons.movie_outlined,
@@ -5444,14 +5451,17 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
           ),
           const SizedBox(width: 10),
           _buildTvChip(
-            autofocus: canUseExo && !mpvSelected,
-            selected: exoSelected,
-            label: canUseExo ? 'Exo' : 'Exo（仅 Android）',
-            icon: Icons.flash_on_outlined,
-            focusNode: _tvCoreExoFocusNode,
-            onPressed: !enabled || !canUseExo || exoSelected
+            autofocus: hasAlternateCore && !mpvSelected,
+            selected: alternateSelected,
+            label: hasAlternateCore ? alternateCore.label : '无其他内核',
+            icon: playerCoreIcon(alternateCore ?? PlayerCore.mpv),
+            focusNode: _tvCoreAltCoreFocusNode,
+            onPressed: !enabled || !hasAlternateCore || alternateSelected
                 ? null
-                : () => unawaited(_switchCore()),
+                : () {
+                    unawaited(widget.appState.setPlayerCore(alternateCore!));
+                    setState(() {});
+                  },
           ),
         ],
       ),
@@ -6095,14 +6105,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         ),
       ),
     );
-  }
-
-  Future<void> _switchCore() async {
-    final current = normalizePlayerCoreForPlatform(widget.appState.playerCore);
-    final candidates =
-        playerCoresForPlatform().where((core) => core != current);
-    final next = candidates.isEmpty ? current : candidates.first;
-    await _switchToPlayerCore(next);
   }
 
   Future<List<Map<String, dynamic>>> _ensureMediaSourcesLoaded({

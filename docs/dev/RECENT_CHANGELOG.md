@@ -50,7 +50,7 @@
 涉及 commit：`f130f22`、`a4effbe`、`6ec8227`、`d3a125c`、`041b21f`、`45067fd`、`c0c8687`、`a2403e4`、`c5079ee`
 
 - TV 端内容浏览页继续推进，`Bangumi` / `TMDB` 页面与对应 API 适配层持续调整，首页也跟着更新。
-- 播放前预加载与详情页跳转链路增强，`play_network_page`、`play_network_page_exo`、`show_detail_page`、`stream_preload_service` 都有联动修改。
+- 播放前预加载与详情页跳转链路增强，`play_network_page`、`play_network_page_native`、`show_detail_page`、`stream_preload_service` 都有联动修改。
 - CI / 发布流程有一轮整理，更新了 `build-all.yml`、`release-latest.yml`、`retry.sh` 和相关构建配置。
 - 下载页版本信息在这一天有多次同步。
 
@@ -59,7 +59,7 @@
 涉及 commit：`17cf16c`、`4e6db36`、`67e8fb4`、`a6f62ff`、`d5a282c`、`4a813cc`、`cb4acad`、`9cf91ce`、`08a5554`、`77d5a6b`、`c803dd4`
 
 - 首页聚合能力大幅扩展，接入了 `Bangumi`、`TMDB`、`IMDb` 相关页面与 API，TV 场景下的首页内容源明显增强。
-- `play_network_page` / `play_network_page_exo` 在这一天多次迭代，播放入口、参数传递和页面结构都有较大调整。
+- `play_network_page` / `play_network_page_native` 在这一天多次迭代，播放入口、参数传递和页面结构都有较大调整。
 - 设置页与全局状态继续扩展，补充了代理、TV 遥控、服务页相关状态与入口。
 - CI 构建配置也有同步修改。
 
@@ -77,5 +77,5 @@
 
 - `legacy/tv-legacy` 播放器重构是当天主线，引入或补强了 `PlayerCore`、`PlayerCoreType`、`PlayerCores`、`VlcPlayerCore`、`IjkPlayerCore`、`PlayerTrack`、`PlaybackSession` 等核心抽象。
 - TV 端 `Emby` 导航和详情页补齐，覆盖 `ItemDetailActivity`、`ShowDetailActivity`、`EpisodeDetailActivity` 以及季、集、详情相关数据模型与布局资源。
-- `PlayerActivity` 的 HUD / 详情布局多次迭代，Flutter 主线里的 `play_network_page`、`play_network_page_exo`、`show_detail_page` 也做了联动适配。
+- `PlayerActivity` 的 HUD / 详情布局多次迭代，Flutter 主线里的 `play_network_page`、`play_network_page_native`、`show_detail_page` 也做了联动适配。
 - 弹幕渲染相关的 `danmaku_stage.dart` 有单独整理。

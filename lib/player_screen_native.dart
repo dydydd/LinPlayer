@@ -31,8 +31,8 @@ import 'widgets/danmaku_manual_search_dialog.dart';
 import 'widgets/list_picker_dialog.dart';
 import 'widgets/mobile_player_status_bars.dart';
 
-class ExoPlayerScreen extends StatefulWidget {
-  const ExoPlayerScreen({
+class NativePlayerScreen extends StatefulWidget {
+  const NativePlayerScreen({
     super.key,
     required this.appState,
     this.startFullScreen = false,
@@ -42,10 +42,10 @@ class ExoPlayerScreen extends StatefulWidget {
   final bool startFullScreen;
 
   @override
-  State<ExoPlayerScreen> createState() => _ExoPlayerScreenState();
+  State<NativePlayerScreen> createState() => _NativePlayerScreenState();
 }
 
-class _ExoPlayerScreenState extends State<ExoPlayerScreen>
+class _NativePlayerScreenState extends State<NativePlayerScreen>
     with WidgetsBindingObserver, RouteAware {
   static const List<String> _kPickableExtensions = <String>[
     '3gp',
@@ -88,13 +88,13 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   DateTime? _lastAutoOrientationApplyAt;
   bool _remoteEnabled = false;
   final FocusNode _tvSurfaceFocusNode =
-      FocusNode(debugLabel: 'exo_player_tv_surface');
+      FocusNode(debugLabel: 'native_player_tv_surface');
   final FocusNode _tvPlayPauseFocusNode =
-      FocusNode(debugLabel: 'exo_player_tv_play_pause');
+      FocusNode(debugLabel: 'native_player_tv_play_pause');
 
   VideoViewType _viewType = VideoViewType.platformView;
 
-  // Subtitle options (EXO).
+  // Subtitle options (Android track API).
   double _subtitleDelaySeconds = 0.0;
   double _subtitleFontSize = 18.0;
   int _subtitlePositionStep = 5; // 0..20, maps to padding-bottom in 5px steps.

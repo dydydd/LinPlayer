@@ -128,9 +128,9 @@
 建议接入文件：
 
 - `lib/play_network_page.dart`
-- `lib/play_network_page_exo.dart`
+- `lib/play_network_page_native.dart`
 - 可选：`lib/player_screen.dart`
-- 可选：`lib/player_screen_exo.dart`
+- 可选：`lib/player_screen_native.dart`
 
 职责：
 
@@ -612,7 +612,7 @@ AI 翻译实现建议兼容：
 落点：
 
 - `lib/play_network_page.dart`
-- `lib/play_network_page_exo.dart`
+- `lib/play_network_page_native.dart`
 
 任务：
 
@@ -675,7 +675,7 @@ AI 翻译实现建议兼容：
 ### 13.4 播放页接入
 
 - `lib/play_network_page.dart`
-- `lib/play_network_page_exo.dart`
+- `lib/play_network_page_native.dart`
 
 任务：
 

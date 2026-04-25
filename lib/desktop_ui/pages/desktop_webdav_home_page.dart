@@ -4,7 +4,7 @@ import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 
 import '../../player_screen.dart';
-import '../../player_screen_exo.dart';
+import '../../player_screen_native.dart';
 import '../../services/app_back_intent.dart';
 import '../../settings_page.dart';
 import '../../webdav_browser_page.dart';
@@ -48,7 +48,7 @@ class _DesktopWebDavHomePageState extends State<DesktopWebDavHomePage> {
       else
         WebDavBrowserPage(appState: appState, server: server),
       useExoCore
-          ? ExoPlayerScreen(appState: appState)
+          ? NativePlayerScreen(appState: appState)
           : PlayerScreen(appState: appState),
       SettingsPage(appState: appState),
     ];

@@ -13,7 +13,7 @@ import 'package:lin_player_ui/lin_player_ui.dart';
 import '../../aggregate_service_page.dart';
 import '../../library_items_page.dart';
 import '../../player_screen.dart';
-import '../../player_screen_exo.dart';
+import '../../player_screen_native.dart';
 import '../../search_page.dart';
 import '../../server_page.dart';
 import '../../server_adapters/server_access.dart';
@@ -182,7 +182,7 @@ class _DesktopHomePageState extends State<DesktopHomePage> with RouteAware {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => useExoCore
-            ? ExoPlayerScreen(appState: widget.appState)
+            ? NativePlayerScreen(appState: widget.appState)
             : PlayerScreen(appState: widget.appState),
       ),
     );

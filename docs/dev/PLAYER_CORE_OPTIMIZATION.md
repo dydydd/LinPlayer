@@ -32,8 +32,8 @@
 ### 2.2 Exo 路径
 
 - 页面：
-  - `lib/player_screen_exo.dart`
-  - `lib/play_network_page_exo.dart`
+  - `lib/player_screen_native.dart`
+  - `lib/play_network_page_native.dart`
 - patched 依赖：
   - `packages/video_player_android_patched`
 
@@ -166,7 +166,7 @@
 
 - `show_detail_page.dart`
 - `play_network_page.dart`
-- `play_network_page_exo.dart`
+- `play_network_page_native.dart`
 - `AppState` 中补“自动选内核策略”偏好
 
 #### P0.2 Exo 字幕渲染重做

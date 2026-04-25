@@ -4,7 +4,7 @@ import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 
 import '../../player_screen.dart';
-import '../../player_screen_exo.dart';
+import '../../player_screen_native.dart';
 import '../../server_page.dart';
 import '../../services/app_back_intent.dart';
 import '../../settings_page.dart';
@@ -82,7 +82,7 @@ class _DesktopServerPageState extends State<DesktopServerPage> {
                   : const SizedBox.shrink(),
               _built[1]
                   ? (useExoCore
-                      ? ExoPlayerScreen(appState: widget.appState)
+                      ? NativePlayerScreen(appState: widget.appState)
                       : PlayerScreen(appState: widget.appState))
                   : const SizedBox.shrink(),
               _built[2]

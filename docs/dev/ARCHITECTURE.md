@@ -78,7 +78,7 @@ Legacy TV Activity(XML/View)
 - 详情页：`lib/show_detail_page.dart`
 - 播放页：
   - MPV：`lib/player_screen.dart`、`lib/play_network_page.dart`
-  - Exo：`lib/player_screen_exo.dart`、`lib/play_network_page_exo.dart`
+  - Native（AVPlayer / Exo 共享）：`lib/player_screen_native.dart`、`lib/play_network_page_native.dart`
 - WebDAV：首页壳与浏览器：`lib/webdav_home_page.dart`、`lib/webdav_browser_page.dart`
 - 聚合检索：`lib/aggregate_service_page.dart`
 

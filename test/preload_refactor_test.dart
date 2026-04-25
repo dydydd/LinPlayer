@@ -129,8 +129,8 @@ void main() {
       playerCore: PlaybackSourcePlayerCoreKind.mpv,
     );
 
-    expect(avplayerRequest.allowTranscoding, isTrue);
-    expect(exoRequest.allowTranscoding, isTrue);
+    expect(avplayerRequest.allowTranscoding, isFalse);
+    expect(exoRequest.allowTranscoding, isFalse);
     expect(vlcRequest.allowTranscoding, isFalse);
     expect(mpvRequest.allowTranscoding, isFalse);
   });
@@ -939,7 +939,7 @@ void main() {
     });
 
     test(
-      'AVPlayer keeps direct playback for H265/HEVC/AV1 but transcodes unknown codecs',
+      'AVPlayer prefers direct stream and static stream over server transcode',
       () async {
         final adapter = _FakeAdapter(
           playbackInfo: PlaybackInfoResult(
@@ -976,6 +976,19 @@ void main() {
                   },
                 ],
               },
+              <String, dynamic>{
+                'Id': 'ms-avplayer-static',
+                'Container': 'mkv',
+                'TranscodingUrl':
+                    '/emby/Videos/item-avplayer/master-static.m3u8',
+                'MediaStreams': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'Type': 'Video',
+                    'Codec': 'vp9',
+                    'Height': 1080,
+                  },
+                ],
+              },
             ],
           ),
           streamHeaders: const <String, String>{'X-Test': 'stream'},
@@ -1003,11 +1016,24 @@ void main() {
           ),
         );
 
+        final staticResult = await PlaybackSourceBuilder.build(
+          PlaybackSourceBuildRequest(
+            adapter: adapter,
+            auth: auth,
+            itemId: 'item-avplayer',
+            playerCore: PlaybackSourcePlayerCoreKind.avplayer,
+            selectedMediaSourceId: 'ms-avplayer-static',
+            resolveExternalSource: false,
+          ),
+        );
+
         final directUri = Uri.parse(directResult.resolvedSource.url);
         final transcodeUri = Uri.parse(transcodeResult.resolvedSource.url);
+        final staticUri = Uri.parse(staticResult.resolvedSource.url);
         expect(
           adapter.fetchPlaybackInfoProfiles,
           <PlaybackInfoProfileKind>[
+            PlaybackInfoProfileKind.avplayer,
             PlaybackInfoProfileKind.avplayer,
             PlaybackInfoProfileKind.avplayer,
           ],
@@ -1023,14 +1049,26 @@ void main() {
         );
         expect(
           transcodeUri.path,
-          '/emby/Videos/item-avplayer/master-mpeg2.m3u8',
+          '/emby/Videos/item-avplayer/direct-mpeg2.mp4',
         );
         expect(
           transcodeResult.resolvedSource.mediaTypeHint,
-          ResolvedPlaybackMediaType.hls,
+          ResolvedPlaybackMediaType.file,
         );
         expect(
           transcodeResult.resolvedSource.httpHeaders,
+          const <String, String>{'X-Test': 'stream'},
+        );
+        expect(staticUri.path, '/emby/Videos/item-avplayer/stream');
+        expect(
+            staticUri.queryParameters['MediaSourceId'], 'ms-avplayer-static');
+        expect(staticUri.queryParameters['static'], 'true');
+        expect(
+          staticResult.resolvedSource.mediaTypeHint,
+          ResolvedPlaybackMediaType.file,
+        );
+        expect(
+          staticResult.resolvedSource.httpHeaders,
           const <String, String>{'X-Test': 'stream'},
         );
       },

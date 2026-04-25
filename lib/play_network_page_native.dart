@@ -38,8 +38,8 @@ import 'widgets/danmaku_manual_search_dialog.dart';
 import 'widgets/mobile_player_status_bars.dart';
 import 'widgets/series_skip_config_dialog.dart';
 
-class ExoPlayNetworkPage extends StatefulWidget {
-  const ExoPlayNetworkPage({
+class NativePlayNetworkPage extends StatefulWidget {
+  const NativePlayNetworkPage({
     super.key,
     required this.title,
     required this.itemId,
@@ -69,10 +69,10 @@ class ExoPlayNetworkPage extends StatefulWidget {
   final PreparedPlaybackPreload? preparedPreload;
 
   @override
-  State<ExoPlayNetworkPage> createState() => _ExoPlayNetworkPageState();
+  State<NativePlayNetworkPage> createState() => _NativePlayNetworkPageState();
 }
 
-class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
+class _NativePlayNetworkPageState extends State<NativePlayNetworkPage>
     with WidgetsBindingObserver, RouteAware {
   static const String _kLocalPlaybackProgressPrefix =
       'networkPlaybackProgress_v1:';
@@ -159,25 +159,25 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   bool _isScrubbing = false;
   bool _remoteEnabled = false;
   final FocusNode _tvSurfaceFocusNode =
-      FocusNode(debugLabel: 'network_exo_player_tv_surface');
+      FocusNode(debugLabel: 'network_native_player_tv_surface');
   final FocusNode _tvPlayPauseFocusNode =
-      FocusNode(debugLabel: 'network_exo_player_tv_play_pause');
+      FocusNode(debugLabel: 'network_native_player_tv_play_pause');
   final FocusNode _tvEpisodeSelectedFocusNode =
-      FocusNode(debugLabel: 'network_exo_player_tv_episode_selected');
+      FocusNode(debugLabel: 'network_native_player_tv_episode_selected');
   final FocusNode _tvEpisodeFallbackFocusNode =
-      FocusNode(debugLabel: 'network_exo_player_tv_episode_fallback');
+      FocusNode(debugLabel: 'network_native_player_tv_episode_fallback');
   final FocusNode _tvSubtitleSelectedFocusNode =
-      FocusNode(debugLabel: 'network_exo_player_tv_subtitle_selected');
+      FocusNode(debugLabel: 'network_native_player_tv_subtitle_selected');
   final FocusNode _tvSubtitleFallbackFocusNode =
-      FocusNode(debugLabel: 'network_exo_player_tv_subtitle_fallback');
+      FocusNode(debugLabel: 'network_native_player_tv_subtitle_fallback');
   final FocusNode _tvAudioSelectedFocusNode =
-      FocusNode(debugLabel: 'network_exo_player_tv_audio_selected');
+      FocusNode(debugLabel: 'network_native_player_tv_audio_selected');
   final FocusNode _tvAudioFallbackFocusNode =
-      FocusNode(debugLabel: 'network_exo_player_tv_audio_fallback');
+      FocusNode(debugLabel: 'network_native_player_tv_audio_fallback');
   final FocusNode _tvCoreMpvFocusNode =
-      FocusNode(debugLabel: 'network_exo_player_tv_core_mpv');
-  final FocusNode _tvCoreExoFocusNode =
-      FocusNode(debugLabel: 'network_exo_player_tv_core_exo');
+      FocusNode(debugLabel: 'network_native_player_tv_core_mpv');
+  final FocusNode _tvCoreNativeFocusNode =
+      FocusNode(debugLabel: 'network_native_player_tv_core_native');
 
   int _tvBottomPanelIndex =
       0; // 0=playback, 1=episodes, 2=subtitles, 3=audio, 4=core
@@ -197,7 +197,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   static const int _playbackRouteHistoryLimit = 5;
   final List<String> _playbackRouteHistory = <String>[];
 
-  // Subtitle options (EXO).
+  // Subtitle options (Android track API).
   final double _subtitleDelaySeconds = 0.0;
   final double _subtitleFontSize = 18.0;
   final int _subtitlePositionStep =
@@ -578,7 +578,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _tvAudioSelectedFocusNode.dispose();
     _tvAudioFallbackFocusNode.dispose();
     _tvCoreMpvFocusNode.dispose();
-    _tvCoreExoFocusNode.dispose();
+    _tvCoreNativeFocusNode.dispose();
     super.dispose();
   }
 
@@ -1494,7 +1494,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       PlaybackTransitionGuard.buildPlayerReplacementRoute(
-        builder: (_) => ExoPlayNetworkPage(
+        builder: (_) => NativePlayNetworkPage(
           title: episode.name,
           itemId: episode.id,
           appState: widget.appState,
@@ -2704,7 +2704,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     return _resolvedStreamHeaders;
   }
 
-  vp_android.VideoPlayerInstanceApi _exoApiForController(
+  vp_android.VideoPlayerInstanceApi _androidTrackApiForController(
     VideoPlayerController controller,
   ) {
     return vp_android.VideoPlayerInstanceApi(
@@ -2750,7 +2750,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     }
 
     try {
-      final api = _exoApiForController(controller);
+      final api = _androidTrackApiForController(controller);
       final source = path.isNotEmpty ? path : file.name;
       await api.addSubtitleSource(
         source,
@@ -2834,7 +2834,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         .toList(growable: false);
     if (externalSubtitleStreams.isEmpty) return;
 
-    final api = _exoApiForController(controller);
+    final api = _androidTrackApiForController(controller);
     final existingSignatures = <String>{};
 
     try {
@@ -3559,7 +3559,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     if (controller == null || !controller.value.isInitialized) {
       return const <vp_android.ExoPlayerSubtitleTrackData>[];
     }
-    final api = _exoApiForController(controller);
+    final api = _androidTrackApiForController(controller);
     final data = await api.getSubtitleTracks();
     return data.exoPlayerTracks ??
         const <vp_android.ExoPlayerSubtitleTrackData>[];
@@ -3889,7 +3889,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                   ? null
                   : () {
                       unawaited(() async {
-                        final api = _exoApiForController(controller);
+                        final api = _androidTrackApiForController(controller);
                         await api.deselectSubtitleTrack();
                         _selectedSubtitleStreamIndex = -1;
                         _rememberSeriesSubtitleStreamIndex(
@@ -3917,7 +3917,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                     ? null
                     : () {
                         unawaited(() async {
-                          final api = _exoApiForController(controller);
+                          final api = _androidTrackApiForController(controller);
                           await api.selectSubtitleTrack(
                             track.groupIndex,
                             track.trackIndex,
@@ -4291,7 +4291,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       _tvSubtitleTracksError = null;
     });
     try {
-      final api = _exoApiForController(controller);
+      final api = _androidTrackApiForController(controller);
       final data = await api.getSubtitleTracks();
       if (!mounted) return;
       setState(() {
@@ -4318,7 +4318,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     if (!_isAndroid) return;
 
     try {
-      final api = _exoApiForController(controller);
+      final api = _androidTrackApiForController(controller);
       if (track == null) {
         await api.deselectSubtitleTrack();
         _selectedSubtitleStreamIndex = -1;
@@ -4826,14 +4826,13 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   }
 
   Widget _buildTvCorePanel({required bool enabled}) {
-    final canUseExo =
-        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    final selectedCore =
+        normalizePlayerCoreForPlatform(widget.appState.playerCore);
+    final mpvSelected = selectedCore == PlayerCore.mpv;
+    final nativeSelected = selectedCore == _nativeCore;
 
-    final selectedCore = widget.appState.playerCore;
-    final mpvSelected = selectedCore == PlayerCore.mpv || !canUseExo;
-    final exoSelected = selectedCore == PlayerCore.exo && canUseExo;
-
-    final focusNode = mpvSelected ? _tvCoreExoFocusNode : _tvCoreMpvFocusNode;
+    final focusNode =
+        mpvSelected ? _tvCoreNativeFocusNode : _tvCoreMpvFocusNode;
     _requestTvBottomPanelFocusIfNeeded(4, focusNode);
 
     return SingleChildScrollView(
@@ -4852,14 +4851,14 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           const SizedBox(width: 10),
           _buildTvChip(
             autofocus: mpvSelected,
-            selected: exoSelected,
-            label: canUseExo ? 'Exo' : 'Exo（仅 Android）',
-            icon: Icons.flash_on_outlined,
-            focusNode: _tvCoreExoFocusNode,
-            onPressed: !enabled || !canUseExo || exoSelected
+            selected: nativeSelected,
+            label: _nativeCore.label,
+            icon: playerCoreIcon(_nativeCore),
+            focusNode: _tvCoreNativeFocusNode,
+            onPressed: !enabled || nativeSelected
                 ? null
                 : () {
-                    unawaited(widget.appState.setPlayerCore(PlayerCore.exo));
+                    unawaited(widget.appState.setPlayerCore(_nativeCore));
                     setState(() {});
                   },
           ),
@@ -6778,7 +6777,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     if (!_isAndroid) return;
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) return;
-    final api = _exoApiForController(controller);
+    final api = _androidTrackApiForController(controller);
 
     try {
       await api.setSubtitleDelay((_subtitleDelaySeconds * 1000).round());
@@ -6802,7 +6801,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     final prefRaw = widget.appState.preferredSubtitleLang.trim();
     final shouldOff =
         _selectedSubtitleStreamIndex == -1 || isSubtitleOffPreference(prefRaw);
-    final api = _exoApiForController(controller);
+    final api = _androidTrackApiForController(controller);
 
     if (shouldOff) {
       try {
@@ -6902,7 +6901,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
     _subtitlePollInFlight = true;
     try {
-      final api = _exoApiForController(controller);
+      final api = _androidTrackApiForController(controller);
       final text = await api.getSubtitleText();
       if (!mounted) return;
       if (text != _subtitleText) {

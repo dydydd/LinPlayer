@@ -14,7 +14,7 @@ import '../server_adapters/server_access.dart';
 import '../library_page.dart';
 import '../library_items_page.dart';
 import '../play_network_page.dart';
-import '../play_network_page_exo.dart';
+import '../play_network_page_native.dart';
 import '../settings_page.dart';
 import '../services/app_back_intent.dart';
 import 'mock/desktop_ui_preview_page.dart';
@@ -1277,7 +1277,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
       buildDesktopPageRoute(
         transition: DesktopPageTransitionStyle.push,
         builder: (_) => useExoCore
-            ? ExoPlayNetworkPage(
+            ? NativePlayNetworkPage(
                 title: playable.name,
                 itemId: playable.id,
                 appState: widget.appState,

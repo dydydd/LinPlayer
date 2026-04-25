@@ -12,7 +12,7 @@
 
 - `lib/show_detail_page.dart`
 - `lib/play_network_page.dart`
-- `lib/play_network_page_exo.dart`
+- `lib/play_network_page_native.dart`
 - `packages/lin_player_state/lib/app_state.dart`
 - `lib/settings_page.dart`
 
@@ -34,7 +34,7 @@
 
 - `lib/show_detail_page.dart`
 - `lib/play_network_page.dart`
-- `lib/play_network_page_exo.dart`
+- `lib/play_network_page_native.dart`
 - `lib/services/preload/playback_preload_coordinator.dart`
 - `lib/services/stream_proxy/local_http_stream_proxy.dart`
 - `packages/lin_player_player/lib/src/preload/stream_preload_service.dart`
@@ -138,7 +138,7 @@
 而且这两条逻辑同时存在于：
 
 - `play_network_page.dart`（MPV 路径）
-- `play_network_page_exo.dart`（Exo 路径）
+- `play_network_page_native.dart`（原生播放器共享路径）
 
 这点很重要，说明预加载已经不是“详情页单点增强”，而是同时覆盖了“从详情页进入”和“非详情页直接播放”两类主流程。
 

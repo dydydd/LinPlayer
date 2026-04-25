@@ -132,86 +132,70 @@ class PlaybackSourceBuilder {
       return applyQueryPrefs(resolved);
     }
 
-    String normalizedMediaSourceField(String key) {
-      return (mediaSource?[key]?.toString() ?? '').trim().toLowerCase();
+    String buildStaticStreamUrl(String mediaSourceId) {
+      final streamUri = Uri.parse(
+        _apiUrlWithPrefix(
+            base, auth.apiPrefix, 'Videos/${request.itemId}/stream'),
+      ).replace(
+        queryParameters: {
+          'static': 'true',
+          if (mediaSourceId.isNotEmpty) 'MediaSourceId': mediaSourceId,
+          if (info.playSessionId.trim().isNotEmpty)
+            'PlaySessionId': info.playSessionId.trim(),
+          if (userId.isNotEmpty) 'UserId': userId,
+          if (request.adapter.deviceId.trim().isNotEmpty)
+            'DeviceId': request.adapter.deviceId.trim(),
+          if (token.isNotEmpty) 'api_key': token,
+          if (request.audioStreamIndex != null)
+            'AudioStreamIndex': request.audioStreamIndex.toString(),
+          if (request.subtitleStreamIndex != null &&
+              request.subtitleStreamIndex! >= 0)
+            'SubtitleStreamIndex': request.subtitleStreamIndex.toString(),
+        },
+      );
+      return streamUri.toString();
     }
 
-    String normalizedVideoCodec() {
-      final mediaSourceCodec = normalizedMediaSourceField('VideoCodec');
-      if (mediaSourceCodec.isNotEmpty) return mediaSourceCodec;
-      final videos =
-          streamsOfType(mediaSource ?? const <String, dynamic>{}, 'Video');
-      final first = videos.isNotEmpty ? videos.first : null;
-      return (first?['Codec']?.toString() ?? '').trim().toLowerCase();
-    }
-
-    bool isAvPlayerSafeDirectVideoCodec(String codec) {
-      if (codec.isEmpty) return false;
-      return codec.contains('h264') ||
-          codec.contains('avc') ||
-          codec.contains('h265') ||
-          codec.contains('h.265') ||
-          codec.contains('hevc') ||
-          codec.contains('hev1') ||
-          codec.contains('hvc1') ||
-          codec.contains('x265') ||
-          codec.contains('av1');
+    String? resolveSourcePathUrl() {
+      final pathUri = (sourcePath == null || sourcePath.isEmpty)
+          ? null
+          : Uri.tryParse(sourcePath);
+      if (pathUri == null || pathUri.scheme.isEmpty) return null;
+      if (pathUri.host.isNotEmpty &&
+          (pathUri.scheme == 'http' || pathUri.scheme == 'https')) {
+        return shouldApplyServerParams(pathUri)
+            ? applyQueryPrefs(pathUri.toString())
+            : pathUri.toString();
+      }
+      return pathUri.toString();
     }
 
     final directStreamUrl =
         (mediaSource?['DirectStreamUrl'] as String?)?.trim();
     final transcodingUrl = (mediaSource?['TranscodingUrl'] as String?)?.trim();
-    final shouldPreferAvPlayerTranscoding =
-        request.playerCore == PlaybackSourcePlayerCoreKind.avplayer &&
-            request.allowTranscoding &&
-            transcodingUrl != null &&
-            transcodingUrl.isNotEmpty &&
-            (() {
-              final container = normalizedMediaSourceField('Container');
-              if (container.isNotEmpty &&
-                  container != 'mov' &&
-                  container != 'mp4' &&
-                  container != 'm4v') {
-                return true;
-              }
-              return !isAvPlayerSafeDirectVideoCodec(normalizedVideoCodec());
-            })();
-    final preferredAvPlayerTranscodingUrl =
-        shouldPreferAvPlayerTranscoding ? transcodingUrl : null;
+    final mediaSourceId =
+        ((mediaSource?['Id']?.toString() ?? info.mediaSourceId).trim());
+    final directStreamCandidate =
+        (directStreamUrl != null && directStreamUrl.isNotEmpty)
+            ? resolve(directStreamUrl)
+            : null;
+    final sourcePathCandidate = resolveSourcePathUrl();
+    final staticStreamCandidate = buildStaticStreamUrl(mediaSourceId);
 
     String url;
-    if (preferredAvPlayerTranscodingUrl != null) {
-      url = resolve(preferredAvPlayerTranscodingUrl);
-    } else if (directStreamUrl != null && directStreamUrl.isNotEmpty) {
-      url = resolve(directStreamUrl);
+    if (directStreamCandidate != null) {
+      url = directStreamCandidate;
+    } else if (sourcePathCandidate != null) {
+      url = sourcePathCandidate;
+    } else if (mediaSourceId.isNotEmpty) {
+      url = staticStreamCandidate;
     } else if (request.allowTranscoding &&
         transcodingUrl != null &&
         transcodingUrl.isNotEmpty) {
+      // Server transcoding is now an explicit opt-in fallback only.
       url = resolve(transcodingUrl);
     } else {
-      final pathUri = (sourcePath == null || sourcePath.isEmpty)
-          ? null
-          : Uri.tryParse(sourcePath);
-      if (pathUri != null && pathUri.scheme.isNotEmpty) {
-        if (pathUri.host.isNotEmpty &&
-            (pathUri.scheme == 'http' || pathUri.scheme == 'https')) {
-          url = shouldApplyServerParams(pathUri)
-              ? applyQueryPrefs(pathUri.toString())
-              : pathUri.toString();
-        } else {
-          url = pathUri.toString();
-        }
-      } else {
-        final mediaSourceId =
-            (mediaSource?['Id']?.toString() ?? info.mediaSourceId).trim();
-        final path =
-            'Videos/${request.itemId}/stream?static=true&MediaSourceId=$mediaSourceId'
-            '&PlaySessionId=${Uri.encodeQueryComponent(info.playSessionId)}'
-            '&UserId=${Uri.encodeQueryComponent(userId)}'
-            '&DeviceId=${Uri.encodeQueryComponent(request.adapter.deviceId)}'
-            '${token.isEmpty ? '' : '&api_key=${Uri.encodeQueryComponent(token)}'}';
-        url = applyQueryPrefs(_apiUrlWithPrefix(base, auth.apiPrefix, path));
-      }
+      url = staticStreamCandidate;
     }
 
     final resolvedUri = Uri.tryParse(url);
@@ -223,8 +207,6 @@ class PlaybackSourceBuilder {
     final headers = isExternal
         ? const <String, String>{}
         : request.adapter.buildStreamHeaders(auth);
-    final mediaSourceId =
-        ((mediaSource?['Id']?.toString() ?? info.mediaSourceId).trim());
     return ResolvedPlaybackSource(
       itemId: request.itemId.trim(),
       playSessionId: info.playSessionId.trim(),

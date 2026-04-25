@@ -25,8 +25,7 @@ PlaybackInfoProfileKind playbackInfoProfileKindForPlaybackSourceCore(
 ) {
   return switch (core) {
     PlaybackSourcePlayerCoreKind.vlc => PlaybackInfoProfileKind.vlc,
-    PlaybackSourcePlayerCoreKind.avplayer =>
-      PlaybackInfoProfileKind.avplayer,
+    PlaybackSourcePlayerCoreKind.avplayer => PlaybackInfoProfileKind.avplayer,
     PlaybackSourcePlayerCoreKind.exo => PlaybackInfoProfileKind.exo,
     PlaybackSourcePlayerCoreKind.mpv => PlaybackInfoProfileKind.defaultProfile,
   };
@@ -39,7 +38,8 @@ String? playbackPipelineForPlaybackSourceCore(
     PlaybackSourcePlayerCoreKind.avplayer => 'avplayer',
     PlaybackSourcePlayerCoreKind.exo ||
     PlaybackSourcePlayerCoreKind.mpv ||
-    PlaybackSourcePlayerCoreKind.vlc => null,
+    PlaybackSourcePlayerCoreKind.vlc =>
+      null,
   };
 }
 
@@ -73,10 +73,7 @@ class PlaybackSourceBuildRequest {
     this.seriesId,
     this.serverId,
     bool? allowTranscoding,
-  }) : allowTranscoding =
-            allowTranscoding ??
-            playerCore == PlaybackSourcePlayerCoreKind.avplayer ||
-            playerCore == PlaybackSourcePlayerCoreKind.exo;
+  }) : allowTranscoding = allowTranscoding ?? false;
 
   final MediaServerAdapter adapter;
   final ServerAuthSession auth;

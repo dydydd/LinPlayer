@@ -1614,33 +1614,25 @@ class EmbyApi {
         true,
       PlaybackInfoProfileKind.defaultProfile => false,
     };
+    const passthroughVideoContainers =
+        '3gp,avi,flv,m2ts,m4v,mkv,mov,mp4,mpeg,mpg,mts,ts,webm,wmv';
+    const passthroughAudioContainers =
+        'aac,ac3,eac3,alac,flac,m4a,mp3,ogg,opus,wav,wma';
     final deviceProfile = switch (profile) {
       PlaybackInfoProfileKind.avplayer => <String, dynamic>{
           "Name": profileName,
           "MaxStreamingBitrate": 120000000,
           "DirectPlayProfiles": [
             {
-              "Container": "mov,mp4,m4v",
+              "Container": passthroughVideoContainers,
               "Type": "Video",
-              "VideoCodec": "h264,h265,hevc,av1",
-              "AudioCodec": "aac,ac3,eac3,mp3,alac",
             },
             {
-              "Container": "aac,ac3,eac3,alac,m4a,mp3,wav",
+              "Container": passthroughAudioContainers,
               "Type": "Audio",
-              "AudioCodec": "aac,ac3,eac3,alac,mp3",
             },
           ],
-          "TranscodingProfiles": [
-            {
-              "Container": "ts",
-              "Type": "Video",
-              "Protocol": "hls",
-              "VideoCodec": "h264",
-              "AudioCodec": "aac",
-              "Context": "Streaming",
-            },
-          ],
+          "TranscodingProfiles": [],
           "DeviceId": deviceId,
         },
       PlaybackInfoProfileKind.exo => <String, dynamic>{
@@ -1648,26 +1640,15 @@ class EmbyApi {
           "MaxStreamingBitrate": 120000000,
           "DirectPlayProfiles": [
             {
-              "Container": "mp4,mkv,mov,avi,ts,flv,webm",
+              "Container": passthroughVideoContainers,
               "Type": "Video",
-              "AudioCodec": "aac,mp3",
             },
             {
-              "Container": "mp3,aac,m4a",
+              "Container": passthroughAudioContainers,
               "Type": "Audio",
-              "AudioCodec": "aac,mp3",
             },
           ],
-          "TranscodingProfiles": [
-            {
-              "Container": "ts",
-              "Type": "Video",
-              "Protocol": "hls",
-              "VideoCodec": "h264",
-              "AudioCodec": "aac",
-              "Context": "Streaming",
-            },
-          ],
+          "TranscodingProfiles": [],
           "DeviceId": deviceId,
         },
       PlaybackInfoProfileKind.vlc => <String, dynamic>{
