@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_vlc_player/src/enums/playing_state.dart';
@@ -9,6 +10,69 @@ import 'package:flutter_vlc_player/src/vlc_player_platform.dart'
     as vlc_platform;
 import 'package:flutter_vlc_player/src/vlc_player_value.dart';
 import 'package:flutter_vlc_player_platform_interface/flutter_vlc_player_platform_interface.dart';
+
+@visibleForTesting
+String describeVlcPlatformError(Object obj) {
+  if (obj is PlatformException) {
+    final message = (obj.message ?? '').trim();
+    final details = _describeVlcPlatformErrorDetails(obj.details);
+    final parts = <String>[
+      if (message.isNotEmpty) message else obj.code.trim(),
+      if (details.isNotEmpty) details,
+    ];
+    if (parts.isNotEmpty) {
+      return parts.join(' | ');
+    }
+  }
+
+  final fallback = obj.toString().trim();
+  return fallback.isEmpty ? VlcPlayerValue.unknownError : fallback;
+}
+
+String _describeVlcPlatformErrorDetails(Object? details) {
+  if (details == null) return '';
+  if (details is String) return details.trim();
+
+  if (details is Map) {
+    const preferredKeys = <String>[
+      'reason',
+      'state',
+      'positionMs',
+      'durationMs',
+      'videoWidth',
+      'videoHeight',
+      'viewReady',
+      'drawableBound',
+    ];
+    final parts = <String>[];
+    for (final key in preferredKeys) {
+      final value = _describeVlcPlatformErrorValue(details[key]);
+      if (value.isEmpty) continue;
+      parts.add('$key=$value');
+    }
+    if (parts.isNotEmpty) {
+      return parts.join(', ');
+    }
+  }
+
+  return details.toString().trim();
+}
+
+String _describeVlcPlatformErrorValue(Object? value) {
+  if (value == null) return '';
+  if (value is List) {
+    final items =
+        value
+            .map((item) => item?.toString().trim() ?? '')
+            .where((item) => item.isNotEmpty)
+            .toList();
+    if (items.isEmpty) return '';
+    return items.length <= 2
+        ? items.join(' / ')
+        : items.sublist(items.length - 2).join(' / ');
+  }
+  return value.toString().trim();
+}
 
 /// Controls a platform vlc player, and provides updates when the state is
 /// changing.
@@ -308,7 +372,7 @@ class VlcPlayerController extends ValueNotifier<VlcPlayerValue> {
     }
 
     void errorListener(Object obj) {
-      value = VlcPlayerValue.erroneous(obj.toString());
+      value = VlcPlayerValue.erroneous(describeVlcPlatformError(obj));
       if (!initializingCompleter.isCompleted) {
         initializingCompleter.completeError(obj);
       }

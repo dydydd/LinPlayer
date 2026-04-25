@@ -4,21 +4,34 @@ import Foundation
 import MobileVLCKit
 import UIKit
 
+private protocol VLCPlayerHostedViewDelegate: AnyObject {
+    func hostedViewReadinessDidChange(_ hostedView: VLCPlayerHostedView)
+}
+
 final class VLCPlayerHostedView: UIView {
+    weak var readinessDelegate: VLCPlayerHostedViewDelegate?
+
     weak var player: VLCMediaPlayer? {
         didSet {
             attachDrawableIfNeeded(forceRebind: true)
+            notifyReadinessDelegate()
         }
+    }
+
+    var isReadyForPlayback: Bool {
+        window != nil && bounds.width > 0 && bounds.height > 0
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         attachDrawableIfNeeded()
+        notifyReadinessDelegate()
     }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
         attachDrawableIfNeeded(forceRebind: true)
+        notifyReadinessDelegate()
     }
 
     func attachDrawableIfNeeded(forceRebind: Bool = false) {
@@ -37,9 +50,13 @@ final class VLCPlayerHostedView: UIView {
         }
         player.drawable = self
     }
+
+    private func notifyReadinessDelegate() {
+        readinessDelegate?.hostedViewReadinessDidChange(self)
+    }
 }
 
-public class VLCViewController: NSObject, FlutterPlatformView {
+public class VLCViewController: NSObject, FlutterPlatformView, VLCPlayerHostedViewDelegate {
     private let hostedView: VLCPlayerHostedView
     private let vlcMediaPlayer: VLCMediaPlayer
     private let mediaEventChannel: FlutterEventChannel
@@ -56,6 +73,12 @@ public class VLCViewController: NSObject, FlutterPlatformView {
     private var requestedVideoScale: Float
     private var requestedAspectRatio: String?
     private var aspectRatioCString: UnsafeMutablePointer<Int8>?
+    private var pendingAutoPlay = false
+    private var startupRecoveryAttempted = false
+    private var startupValidationWorkItem: DispatchWorkItem?
+    private var lastKnownVideoSize = CGSize.zero
+    private var lastKnownState: VLCMediaPlayerState = .stopped
+    private var lastRuntimeErrorSignature: String?
     private var isDisposed = false
 
     public func view() -> UIView {
@@ -93,6 +116,7 @@ public class VLCViewController: NSObject, FlutterPlatformView {
         mediaEventChannel.setStreamHandler(mediaEventChannelHandler)
         rendererEventChannel.setStreamHandler(rendererEventChannelHandler)
 
+        hostedView.readinessDelegate = self
         hostedView.player = mediaPlayer
         mediaPlayer.delegate = mediaEventChannelHandler
 
@@ -103,18 +127,17 @@ public class VLCViewController: NSObject, FlutterPlatformView {
         guard !isDisposed else {
             return
         }
-        refreshDrawableBinding(forceRebind: true)
-        applyPendingSeekIfNeeded()
-        vlcMediaPlayer.play()
-        schedulePendingSeekReapply()
-        schedulePlaybackSpeedApply()
-        refreshDrawableBinding()
+        pendingAutoPlay = true
+        mediaEventChannelHandler.emitOpeningEvent()
+        startPlaybackIfReady(reason: "play")
     }
 
     public func pause() {
         guard !isDisposed else {
             return
         }
+        pendingAutoPlay = false
+        cancelStartupValidation()
         vlcMediaPlayer.pause()
     }
 
@@ -122,7 +145,9 @@ public class VLCViewController: NSObject, FlutterPlatformView {
         guard !isDisposed else {
             return
         }
+        pendingAutoPlay = false
         pendingSeekPosition = nil
+        cancelStartupValidation()
         vlcMediaPlayer.stop()
     }
 
@@ -376,6 +401,7 @@ public class VLCViewController: NSObject, FlutterPlatformView {
         stopRendererScanning()
         mediaEventChannel.setStreamHandler(nil)
         rendererEventChannel.setStreamHandler(nil)
+        cancelStartupValidation()
         vlcMediaPlayer.stop()
         vlcMediaPlayer.delegate = nil
         vlcMediaPlayer.drawable = nil
@@ -399,6 +425,9 @@ public class VLCViewController: NSObject, FlutterPlatformView {
         }
 
         stopRendererScanning()
+        cancelStartupValidation()
+        resetStartupDiagnostics()
+        pendingAutoPlay = autoPlay
         pendingSeekPosition = nil
         vlcMediaPlayer.stop()
         vlcMediaPlayer.media = nil
@@ -416,7 +445,8 @@ public class VLCViewController: NSObject, FlutterPlatformView {
 
         if autoPlay {
             DispatchQueue.main.async { [weak self] in
-                self?.play()
+                self?.mediaEventChannelHandler.emitOpeningEvent()
+                self?.startPlaybackIfReady(reason: "set-media")
             }
         }
     }
@@ -425,9 +455,23 @@ public class VLCViewController: NSObject, FlutterPlatformView {
         guard !isDisposed, player === vlcMediaPlayer else {
             return
         }
+        lastKnownState = player?.state ?? .stopped
+        noteVideoOutput(player?.videoSize ?? .zero)
         switch player?.state {
         case .opening, .buffering, .playing:
             applyPendingSeekIfNeeded()
+            scheduleStartupValidation(reason: "state-\(describeState(player?.state))")
+        case .paused, .stopped, .ended:
+            cancelStartupValidation()
+        case .error:
+            cancelStartupValidation()
+            emitRuntimeError(
+                code: "vlc_state_error",
+                message: "iOS VLC entered an error state.",
+                additionalDetails: [
+                    "reason": "media-player-state-error",
+                ]
+            )
         default:
             break
         }
@@ -437,11 +481,30 @@ public class VLCViewController: NSObject, FlutterPlatformView {
     }
 
     func handleMediaPlayerTimeChanged(_ position: Int64) {
+        noteVideoOutput(vlcMediaPlayer.videoSize)
+        if hasKnownVideoOutput {
+            cancelStartupValidation()
+        }
         guard let pendingSeekPosition else {
             return
         }
         if abs(position - pendingSeekPosition) <= 1500 {
             self.pendingSeekPosition = nil
+        }
+    }
+
+    func hostedViewReadinessDidChange(_ hostedView: VLCPlayerHostedView) {
+        guard !isDisposed else {
+            return
+        }
+        if hostedView.isReadyForPlayback {
+            refreshDrawableBinding(forceRebind: true)
+            if pendingAutoPlay {
+                startPlaybackIfReady(reason: "surface-ready")
+            }
+            if vlcMediaPlayer.isPlaying {
+                scheduleStartupValidation(reason: "surface-rebound")
+            }
         }
     }
 
@@ -577,6 +640,28 @@ public class VLCViewController: NSObject, FlutterPlatformView {
         vlcMediaPlayer.time = VLCTime(number: NSNumber(value: pendingSeekPosition))
     }
 
+    private var isHostedViewReadyForPlayback: Bool {
+        hostedView.isReadyForPlayback
+    }
+
+    private var hasKnownVideoOutput: Bool {
+        lastKnownVideoSize.width > 0 && lastKnownVideoSize.height > 0
+    }
+
+    private func noteVideoOutput(_ size: CGSize) {
+        if size.width > 0, size.height > 0 {
+            lastKnownVideoSize = size
+            lastRuntimeErrorSignature = nil
+        }
+    }
+
+    private func resetStartupDiagnostics() {
+        lastKnownVideoSize = .zero
+        lastKnownState = .stopped
+        startupRecoveryAttempted = false
+        lastRuntimeErrorSignature = nil
+    }
+
     private func schedulePendingSeekReapply() {
         guard pendingSeekPosition != nil else {
             return
@@ -598,6 +683,28 @@ public class VLCViewController: NSObject, FlutterPlatformView {
         }
     }
 
+    private func startPlaybackIfReady(reason: String) {
+        guard !isDisposed else {
+            return
+        }
+        refreshDrawableBinding(forceRebind: true)
+        guard vlcMediaPlayer.media != nil else {
+            return
+        }
+        guard isHostedViewReadyForPlayback else {
+            return
+        }
+
+        startupRecoveryAttempted = false
+        pendingAutoPlay = false
+        applyPendingSeekIfNeeded()
+        vlcMediaPlayer.play()
+        schedulePendingSeekReapply()
+        schedulePlaybackSpeedApply()
+        refreshDrawableBinding()
+        scheduleStartupValidation(reason: reason)
+    }
+
     private func refreshDrawableBinding(forceRebind: Bool = false) {
         guard !isDisposed else {
             return
@@ -613,6 +720,118 @@ public class VLCViewController: NSObject, FlutterPlatformView {
         }
     }
 
+    private func cancelStartupValidation() {
+        startupValidationWorkItem?.cancel()
+        startupValidationWorkItem = nil
+    }
+
+    private func scheduleStartupValidation(reason: String) {
+        guard !isDisposed, vlcMediaPlayer.media != nil else {
+            return
+        }
+        guard isHostedViewReadyForPlayback else {
+            return
+        }
+        cancelStartupValidation()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.validateStartupState(reason: reason)
+        }
+        startupValidationWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: workItem)
+    }
+
+    private func validateStartupState(reason: String) {
+        guard !isDisposed, vlcMediaPlayer.media != nil else {
+            return
+        }
+        guard isHostedViewReadyForPlayback else {
+            return
+        }
+
+        noteVideoOutput(vlcMediaPlayer.videoSize)
+        if hasKnownVideoOutput {
+            cancelStartupValidation()
+            return
+        }
+
+        switch vlcMediaPlayer.state {
+        case .opening, .buffering, .playing:
+            break
+        default:
+            return
+        }
+
+        if !startupRecoveryAttempted {
+            startupRecoveryAttempted = true
+            refreshDrawableBinding(forceRebind: true)
+            if !vlcMediaPlayer.isPlaying {
+                vlcMediaPlayer.play()
+            }
+            schedulePendingSeekReapply()
+            schedulePlaybackSpeedApply()
+            scheduleStartupValidation(reason: "native-rebind")
+            return
+        }
+
+        emitRuntimeError(
+            code: "vlc_startup_black_screen",
+            message: "iOS VLC started but did not produce video output.",
+            additionalDetails: [
+                "reason": reason,
+            ]
+        )
+    }
+
+    private func emitRuntimeError(
+        code: String,
+        message: String,
+        additionalDetails: [String: Any] = [:]
+    ) {
+        var details: [String: Any] = [
+            "state": describeState(lastKnownState),
+            "positionMs": vlcMediaPlayer.time.value?.int64Value ?? 0,
+            "durationMs": vlcMediaPlayer.media?.length.value?.int64Value ?? 0,
+            "videoWidth": Int64(lastKnownVideoSize.width.rounded()),
+            "videoHeight": Int64(lastKnownVideoSize.height.rounded()),
+            "viewReady": isHostedViewReadyForPlayback,
+            "drawableBound": vlcMediaPlayer.drawable != nil,
+        ]
+        for (key, value) in additionalDetails {
+            details[key] = value
+        }
+        let signature = "\(code)|\(message)|\(details["state"] ?? "")|\(details["reason"] ?? "")"
+        if lastRuntimeErrorSignature == signature {
+            return
+        }
+        lastRuntimeErrorSignature = signature
+        mediaEventChannelHandler.emitError(code: code, message: message, details: details)
+    }
+
+    private func describeState(_ state: VLCMediaPlayerState?) -> String {
+        switch state {
+        case .opening:
+            return "opening"
+        case .buffering:
+            return "buffering"
+        case .playing:
+            return "playing"
+        case .paused:
+            return "paused"
+        case .stopped:
+            return "stopped"
+        case .ended:
+            return "ended"
+        case .error:
+            return "error"
+        case .esAdded:
+            return "esAdded"
+        case .none:
+            return "unknown"
+        @unknown default:
+            return "unknown"
+        }
+    }
+
     private func scheduleOnMain(delay: TimeInterval, _ action: @escaping () -> Void) {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self, !self.isDisposed else {
@@ -625,14 +844,23 @@ public class VLCViewController: NSObject, FlutterPlatformView {
     @objc private func handleApplicationDidBecomeActive() {
         refreshDrawableBinding(forceRebind: true)
         applyPersistentPlayerState(allowDeferredPlaybackSpeed: true)
+        if pendingAutoPlay || vlcMediaPlayer.isPlaying {
+            scheduleStartupValidation(reason: "app-did-become-active")
+        }
     }
 
     @objc private func handleApplicationWillEnterForeground() {
         refreshDrawableBinding(forceRebind: true)
         applyPersistentPlayerState(allowDeferredPlaybackSpeed: true)
+        if pendingAutoPlay {
+            startPlaybackIfReady(reason: "app-will-enter-foreground")
+        } else if vlcMediaPlayer.isPlaying {
+            scheduleStartupValidation(reason: "app-will-enter-foreground")
+        }
     }
 
     @objc private func handleApplicationDidEnterBackground() {
+        cancelStartupValidation()
         vlcMediaPlayer.drawable = nil
     }
 }
@@ -686,6 +914,16 @@ final class VLCPlayerEventStreamHandler: NSObject, FlutterStreamHandler, VLCMedi
         return nil
     }
 
+    func emitOpeningEvent() {
+        mediaEventSink?([
+            "event": "opening",
+        ])
+    }
+
+    func emitError(code: String, message: String, details: [String: Any]) {
+        mediaEventSink?(FlutterError(code: code, message: message, details: details))
+    }
+
     func mediaPlayerStateChanged(_ aNotification: Notification) {
         guard let player = aNotification.object as? VLCMediaPlayer else {
             return
@@ -718,9 +956,7 @@ final class VLCPlayerEventStreamHandler: NSObject, FlutterStreamHandler, VLCMedi
         case .buffering:
             mediaEventSink(eventPayload(event: "buffering", player: player))
         case .error:
-            mediaEventSink([
-                "event": "error",
-            ])
+            break
         case .esAdded:
             break
         @unknown default:
