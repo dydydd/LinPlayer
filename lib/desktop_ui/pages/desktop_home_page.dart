@@ -5,18 +5,16 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
 
 import '../../aggregate_service_page.dart';
 import '../../library_items_page.dart';
-import '../../player_screen.dart';
-import '../../player_screen_native.dart';
 import '../../search_page.dart';
 import '../../server_page.dart';
 import '../../server_adapters/server_access.dart';
+import '../../services/playback/player_core_pages.dart';
 import '../../settings_page.dart';
 import '../../show_detail_page.dart';
 import '../../plugins/plugin_slot_area.dart';
@@ -176,14 +174,9 @@ class _DesktopHomePageState extends State<DesktopHomePage> with RouteAware {
   }
 
   Future<void> _openLocalPlayer() async {
-    final useExoCore = !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android &&
-        widget.appState.playerCore == PlayerCore.exo;
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => useExoCore
-            ? NativePlayerScreen(appState: widget.appState)
-            : PlayerScreen(appState: widget.appState),
+        builder: (_) => buildLocalPlayerScreen(appState: widget.appState),
       ),
     );
   }

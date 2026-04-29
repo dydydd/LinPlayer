@@ -5423,9 +5423,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         break;
       }
     }
-    final hasAlternateCore = alternateCore != null;
+    final nextCore = alternateCore;
+    final hasAlternateCore = nextCore != null;
     final mpvSelected = selectedCore == PlayerCore.mpv || !hasAlternateCore;
-    final alternateSelected = hasAlternateCore && selectedCore == alternateCore;
 
     final focusNode =
         mpvSelected ? _tvCoreMpvFocusNode : _tvCoreAltCoreFocusNode;
@@ -5449,20 +5449,22 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                     setState(() {});
                   },
           ),
-          const SizedBox(width: 10),
-          _buildTvChip(
-            autofocus: hasAlternateCore && !mpvSelected,
-            selected: alternateSelected,
-            label: hasAlternateCore ? alternateCore.label : '无其他内核',
-            icon: playerCoreIcon(alternateCore ?? PlayerCore.mpv),
-            focusNode: _tvCoreAltCoreFocusNode,
-            onPressed: !enabled || !hasAlternateCore || alternateSelected
-                ? null
-                : () {
-                    unawaited(widget.appState.setPlayerCore(alternateCore!));
-                    setState(() {});
-                  },
-          ),
+          if (nextCore != null) ...[
+            const SizedBox(width: 10),
+            _buildTvChip(
+              autofocus: !mpvSelected,
+              selected: selectedCore == nextCore,
+              label: nextCore.label,
+              icon: playerCoreIcon(nextCore),
+              focusNode: _tvCoreAltCoreFocusNode,
+              onPressed: !enabled || selectedCore == nextCore
+                  ? null
+                  : () {
+                      unawaited(widget.appState.setPlayerCore(nextCore));
+                      setState(() {});
+                    },
+            ),
+          ],
         ],
       ),
     );
@@ -7952,8 +7954,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       children: [
         if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) ...[
           MobilePlayerOptionTile(
-            title: 'iOS 内核优先级',
-            subtitle: '默认优先 AVPlayer，其次 MPV，最后 VLC。遇到兼容问题时可随时切换。',
+            title: 'iOS 播放内核',
+            subtitle: 'iOS 端已移除 AVPlayer 和 VLC，仅保留 MPV 内核。',
             leading: const Icon(
               Icons.auto_awesome_rounded,
               color: Colors.white,

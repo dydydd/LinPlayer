@@ -91,7 +91,7 @@ PlayerCore playerCoreFromId(String? id) {
 }
 
 bool playerCoreUsesNativeVideoPlayer(PlayerCore core) {
-  return core == PlayerCore.exo || core == PlayerCore.avplayer;
+  return core == PlayerCore.exo;
 }
 
 bool playerCoreIsSupportedOnPlatform(
@@ -108,9 +108,7 @@ bool playerCoreIsSupportedOnPlatform(
     case TargetPlatform.android:
       return core == PlayerCore.mpv || core == PlayerCore.exo;
     case TargetPlatform.iOS:
-      return core == PlayerCore.avplayer ||
-          core == PlayerCore.mpv ||
-          core == PlayerCore.vlc;
+      return core == PlayerCore.mpv;
     case TargetPlatform.macOS:
     case TargetPlatform.windows:
     case TargetPlatform.linux:
@@ -132,11 +130,7 @@ List<PlayerCore> playerCoresForPlatform({
     case TargetPlatform.android:
       return const <PlayerCore>[PlayerCore.mpv, PlayerCore.exo];
     case TargetPlatform.iOS:
-      return const <PlayerCore>[
-        PlayerCore.avplayer,
-        PlayerCore.mpv,
-        PlayerCore.vlc,
-      ];
+      return const <PlayerCore>[PlayerCore.mpv];
     case TargetPlatform.macOS:
     case TargetPlatform.windows:
     case TargetPlatform.linux:

@@ -7091,8 +7091,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       children: [
         if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) ...[
           MobilePlayerOptionTile(
-            title: 'iOS 内核优先级',
-            subtitle: '默认优先 AVPlayer，其次 MPV，最后 VLC。切换后会保留当前播放队列与进度。',
+            title: 'iOS 播放内核',
+            subtitle: 'iOS 端已移除 AVPlayer 和 VLC，仅保留 MPV 内核。',
             leading: const Icon(
               Icons.auto_awesome_rounded,
               color: Colors.white,

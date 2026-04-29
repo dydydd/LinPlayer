@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lin_player_core/state/media_server_type.dart';
-import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
@@ -13,10 +12,9 @@ import 'package:lin_player_ui/lin_player_ui.dart';
 import '../server_adapters/server_access.dart';
 import '../library_page.dart';
 import '../library_items_page.dart';
-import '../play_network_page.dart';
-import '../play_network_page_native.dart';
 import '../settings_page.dart';
 import '../services/app_back_intent.dart';
+import '../services/playback/player_core_pages.dart';
 import 'mock/desktop_ui_preview_page.dart';
 import 'models/desktop_ui_language.dart';
 import 'pages/desktop_detail_page.dart';
@@ -1269,28 +1267,17 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     final start = playable.playbackPositionTicks > 0
         ? _ticksToDuration(playable.playbackPositionTicks)
         : null;
-    final useExoCore = !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android &&
-        widget.appState.playerCore == PlayerCore.exo;
 
     await Navigator.of(context).push(
       buildDesktopPageRoute(
         transition: DesktopPageTransitionStyle.push,
-        builder: (_) => useExoCore
-            ? NativePlayNetworkPage(
-                title: playable.name,
-                itemId: playable.id,
-                appState: widget.appState,
-                server: vm.server,
-                startPosition: start,
-              )
-            : PlayNetworkPage(
-                title: playable.name,
-                itemId: playable.id,
-                appState: widget.appState,
-                server: vm.server,
-                startPosition: start,
-              ),
+        builder: (_) => buildNetworkPlayerPage(
+          title: playable.name,
+          itemId: playable.id,
+          appState: widget.appState,
+          server: vm.server,
+          startPosition: start,
+        ),
       ),
     );
 

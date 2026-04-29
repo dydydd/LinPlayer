@@ -1,12 +1,9 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 
-import '../../player_screen.dart';
-import '../../player_screen_native.dart';
 import '../../server_page.dart';
 import '../../services/app_back_intent.dart';
+import '../../services/playback/player_core_pages.dart';
 import '../../settings_page.dart';
 import '../widgets/desktop_cinematic_shell.dart';
 
@@ -46,10 +43,6 @@ class _DesktopServerPageState extends State<DesktopServerPage> {
 
   @override
   Widget build(BuildContext context) {
-    final useExoCore = !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android &&
-        widget.appState.playerCore == PlayerCore.exo;
-
     return Actions(
       actions: <Type, Action<Intent>>{
         AppBackIntent: CallbackAction<AppBackIntent>(
@@ -81,9 +74,7 @@ class _DesktopServerPageState extends State<DesktopServerPage> {
                     )
                   : const SizedBox.shrink(),
               _built[1]
-                  ? (useExoCore
-                      ? NativePlayerScreen(appState: widget.appState)
-                      : PlayerScreen(appState: widget.appState))
+                  ? buildLocalPlayerScreen(appState: widget.appState)
                   : const SizedBox.shrink(),
               _built[2]
                   ? SettingsPage(appState: widget.appState)

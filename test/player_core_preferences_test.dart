@@ -4,32 +4,44 @@ import 'package:lin_player_prefs/lin_player_prefs.dart';
 
 void main() {
   group('player core platform rules', () {
-    test('iOS defaults to AVPlayer and exposes AVPlayer, MPV, VLC', () {
+    test('iOS keeps MPV only', () {
       expect(
         playerCoresForPlatform(platform: TargetPlatform.iOS, isWeb: false),
-        const <PlayerCore>[
-          PlayerCore.avplayer,
-          PlayerCore.mpv,
-          PlayerCore.vlc,
-        ],
+        const <PlayerCore>[PlayerCore.mpv],
       );
       expect(
         defaultPlayerCoreForPlatform(
           platform: TargetPlatform.iOS,
           isWeb: false,
         ),
-        PlayerCore.avplayer,
+        PlayerCore.mpv,
       );
     });
 
-    test('iOS normalizes unsupported EXO back to AVPlayer', () {
+    test('iOS normalizes removed native cores back to MPV', () {
       expect(
         normalizePlayerCoreForPlatform(
           PlayerCore.exo,
           platform: TargetPlatform.iOS,
           isWeb: false,
         ),
-        PlayerCore.avplayer,
+        PlayerCore.mpv,
+      );
+      expect(
+        normalizePlayerCoreForPlatform(
+          PlayerCore.avplayer,
+          platform: TargetPlatform.iOS,
+          isWeb: false,
+        ),
+        PlayerCore.mpv,
+      );
+      expect(
+        normalizePlayerCoreForPlatform(
+          PlayerCore.vlc,
+          platform: TargetPlatform.iOS,
+          isWeb: false,
+        ),
+        PlayerCore.mpv,
       );
     });
 
