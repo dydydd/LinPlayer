@@ -520,10 +520,12 @@ class _LinPlayerAppState extends State<LinPlayerApp>
                 style.backgroundIntensity > 0 &&
                 (style.background != AppBackgroundKind.none ||
                     style.pattern != AppPatternKind.none);
+            final usesDesktopWorkspaceBackground = DesktopShell.isDesktopTarget;
 
-            final backgroundIntensity = (!hasBackdrop || isTv)
-                ? 0.0
-                : (appState.enableBlurEffects ? 1.0 : 0.65);
+            final backgroundIntensity =
+                (!hasBackdrop || isTv || usesDesktopWorkspaceBackground)
+                    ? 0.0
+                    : (appState.enableBlurEffects ? 1.0 : 0.65);
 
             final tvBackgroundEnabled =
                 isTv && appState.tvBackgroundMode != TvBackgroundMode.none;

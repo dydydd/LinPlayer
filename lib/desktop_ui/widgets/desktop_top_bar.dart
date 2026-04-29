@@ -15,6 +15,7 @@ class DesktopTopBar extends StatelessWidget {
     required this.searchController,
     required this.onSearchSubmitted,
     required this.onSearchChanged,
+    this.enableBlur = true,
     this.movieCount,
     this.seriesCount,
     this.statsLoading = false,
@@ -37,6 +38,7 @@ class DesktopTopBar extends StatelessWidget {
   final TextEditingController searchController;
   final ValueChanged<String> onSearchSubmitted;
   final ValueChanged<String> onSearchChanged;
+  final bool enableBlur;
   final int? movieCount;
   final int? seriesCount;
   final bool statsLoading;
@@ -75,12 +77,13 @@ class DesktopTopBar extends StatelessWidget {
       child: Stack(
         fit: StackFit.passthrough,
         children: [
-          Positioned.fill(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-              child: const SizedBox.expand(),
+          if (enableBlur)
+            Positioned.fill(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                child: const SizedBox.expand(),
+              ),
             ),
-          ),
           DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(

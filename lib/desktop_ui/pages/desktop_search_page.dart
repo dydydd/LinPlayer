@@ -385,12 +385,11 @@ class _DesktopSearchPageState extends State<DesktopSearchPage> {
         ? servers
             .where((server) => server.lastErrorCode == null)
             .where((server) {
-              final baseUrl = server.baseUrl.trim();
-              final token = server.token.trim();
-              final userId = server.userId.trim();
-              return baseUrl.isNotEmpty && token.isNotEmpty && userId.isNotEmpty;
-            })
-            .toList(growable: false)
+            final baseUrl = server.baseUrl.trim();
+            final token = server.token.trim();
+            final userId = server.userId.trim();
+            return baseUrl.isNotEmpty && token.isNotEmpty && userId.isNotEmpty;
+          }).toList(growable: false)
         : (() {
             final active = widget.appState.activeServer;
             return active == null
@@ -772,6 +771,7 @@ class _DesktopSearchPageState extends State<DesktopSearchPage> {
   @override
   Widget build(BuildContext context) {
     final desktopTheme = DesktopThemeExtension.of(context);
+    final enableBlur = widget.appState.enableBlurEffects;
     final query = widget.query.trim();
     final groups = _sortedGroups(_groups);
 
@@ -905,12 +905,13 @@ class _DesktopSearchPageState extends State<DesktopSearchPage> {
       child: Stack(
         fit: StackFit.passthrough,
         children: [
-          Positioned.fill(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-              child: const SizedBox.expand(),
+          if (enableBlur)
+            Positioned.fill(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                child: const SizedBox.expand(),
+              ),
             ),
-          ),
           DecoratedBox(
             decoration: BoxDecoration(
               color: desktopTheme.surface.withValues(alpha: 0.66),
@@ -926,69 +927,71 @@ class _DesktopSearchPageState extends State<DesktopSearchPage> {
                     children: [
                       Expanded(
                         child: Text(
-                        query.isEmpty
-                            ? _t(zh: '聚合搜索', en: 'Aggregate Search')
-                            : _t(zh: '“$query”的结果', en: 'Results for "$query"'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: desktopTheme.textPrimary,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    if (query.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 10),
-                        child: Text(
-                          _t(
-                              zh: '共 ${_groups.length} 部',
-                              en: '${_groups.length} works'),
+                          query.isEmpty
+                              ? _t(zh: '聚合搜索', en: 'Aggregate Search')
+                              : _t(
+                                  zh: '“$query”的结果',
+                                  en: 'Results for "$query"'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: desktopTheme.textMuted,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
+                            color: desktopTheme.textPrimary,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
                       ),
-                    _buildAggregateToggleButton(desktopTheme),
-                    const SizedBox(width: 10),
-                    _buildFilterButton(desktopTheme, query.isNotEmpty),
-                  ],
-                ),
-              ),
-              if (showServerErrors)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 0, 18, 8),
-                  child: Tooltip(
-                    message: _serverErrors.entries
-                        .map((e) => '${e.key}: ${e.value}')
-                        .join('\\n'),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.warning_amber_rounded,
-                          size: 16,
-                          color: Color(0xFFFFC36D),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
+                      if (query.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 10),
                           child: Text(
-                            serverErrorText,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                            _t(
+                                zh: '共 ${_groups.length} 部',
+                                en: '${_groups.length} works'),
                             style: TextStyle(
                               color: desktopTheme.textMuted,
-                              fontSize: 12.5,
+                              fontSize: 13,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
                         ),
-                      ],
-                    ),
+                      _buildAggregateToggleButton(desktopTheme),
+                      const SizedBox(width: 10),
+                      _buildFilterButton(desktopTheme, query.isNotEmpty),
+                    ],
                   ),
                 ),
+                if (showServerErrors)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 0, 18, 8),
+                    child: Tooltip(
+                      message: _serverErrors.entries
+                          .map((e) => '${e.key}: ${e.value}')
+                          .join('\\n'),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.warning_amber_rounded,
+                            size: 16,
+                            color: Color(0xFFFFC36D),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              serverErrorText,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: desktopTheme.textMuted,
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: 4),
                 Expanded(
                   child: Stack(

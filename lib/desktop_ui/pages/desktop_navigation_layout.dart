@@ -1,30 +1,34 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/desktop_theme_extension.dart';
 
 class DesktopNavigationLayout extends StatelessWidget {
+  static const double _kTopBarHeight = 70.0;
+  static const double _kTopBarGap = 28.0;
+
   const DesktopNavigationLayout({
     super.key,
     required this.sidebar,
     required this.topBar,
     required this.content,
+    required this.topBarVisibilityListenable,
     this.backgroundStartColor,
     this.backgroundEndColor,
     this.sidebarVisible = false,
     this.onDismissSidebar,
     this.sidebarWidth = 264,
-    this.topBarVisibility = 1.0,
   });
 
   final Widget sidebar;
   final Widget topBar;
   final Widget content;
+  final ValueListenable<double> topBarVisibilityListenable;
   final Color? backgroundStartColor;
   final Color? backgroundEndColor;
   final bool sidebarVisible;
   final VoidCallback? onDismissSidebar;
   final double sidebarWidth;
-  final double topBarVisibility;
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +38,6 @@ class DesktopNavigationLayout extends StatelessWidget {
         backgroundEndColor ?? desktopTheme.backgroundGradientEnd;
     final showSidebar = sidebarVisible && sidebarWidth > 0;
     const horizontalPadding = 0.0;
-    final topBarTarget = topBarVisibility.clamp(0.0, 1.0).toDouble();
 
     return Stack(
       children: [
@@ -52,46 +55,49 @@ class DesktopNavigationLayout extends StatelessWidget {
           child: const SizedBox.expand(),
         ),
         SafeArea(
-          child: Column(
-            children: [
-              ClipRect(
-                child: AnimatedAlign(
-                  alignment: Alignment.topCenter,
-                  heightFactor: topBarTarget,
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOutCubic,
-                  child: AnimatedOpacity(
-                    opacity: topBarTarget,
-                    duration: const Duration(milliseconds: 180),
-                    curve: Curves.easeOutCubic,
-                    child: IgnorePointer(
-                      ignoring: topBarTarget < 0.05,
+          child: ValueListenableBuilder<double>(
+            valueListenable: topBarVisibilityListenable,
+            builder: (context, value, _) {
+              final topBarTarget = value.clamp(0.0, 1.0).toDouble();
+              final topBarArea = _kTopBarHeight + _kTopBarGap;
+              final contentOffsetY = topBarArea * topBarTarget;
+              final topBarOffsetY = -topBarArea * (1.0 - topBarTarget);
+
+              return Stack(
+                clipBehavior: Clip.hardEdge,
+                children: [
+                  Positioned.fill(
+                    child: Transform.translate(
+                      offset: Offset(0, contentOffsetY),
                       child: Padding(
                         padding: EdgeInsets.fromLTRB(
-                            horizontalPadding, 0, horizontalPadding, 0),
-                        child: topBar,
+                          horizontalPadding,
+                          0,
+                          horizontalPadding,
+                          24,
+                        ),
+                        child: content,
                       ),
                     ),
                   ),
-                ),
-              ),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                curve: Curves.easeOutCubic,
-                height: 28 * topBarTarget,
-              ),
-              Expanded(
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    horizontalPadding,
-                    0,
-                    horizontalPadding,
-                    24,
+                  Positioned(
+                    top: 0,
+                    left: horizontalPadding,
+                    right: horizontalPadding,
+                    child: IgnorePointer(
+                      ignoring: topBarTarget < 0.05,
+                      child: Opacity(
+                        opacity: topBarTarget,
+                        child: Transform.translate(
+                          offset: Offset(0, topBarOffsetY),
+                          child: RepaintBoundary(child: topBar),
+                        ),
+                      ),
+                    ),
                   ),
-                  child: content,
-                ),
-              ),
-            ],
+                ],
+              );
+            },
           ),
         ),
         if (showSidebar)

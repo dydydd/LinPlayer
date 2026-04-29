@@ -28,8 +28,9 @@ class DesktopUnifiedBackground extends StatelessWidget {
         baseColor ?? baseColorForBrightness(Theme.of(context).brightness);
     final opacity =
         appState.desktopBackgroundOpacity.clamp(0.0, 1.0).toDouble();
-    final blur =
-        appState.desktopBackgroundBlurSigma.clamp(0.0, 30.0).toDouble();
+    final blur = appState.enableBlurEffects
+        ? appState.desktopBackgroundBlurSigma.clamp(0.0, 30.0).toDouble()
+        : 0.0;
     final image = _buildCustomImage(appState.desktopBackgroundImage);
 
     Widget? overlay = image;
@@ -49,7 +50,10 @@ class DesktopUnifiedBackground extends StatelessWidget {
       fit: StackFit.expand,
       children: [
         ColoredBox(color: resolvedBaseColor),
-        if (overlay != null) Positioned.fill(child: overlay),
+        if (overlay != null)
+          Positioned.fill(
+            child: RepaintBoundary(child: overlay),
+          ),
       ],
     );
   }

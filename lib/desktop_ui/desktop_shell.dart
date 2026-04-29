@@ -116,6 +116,9 @@ class _DesktopWorkspace extends StatefulWidget {
 
 class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
   static const double _kTopBarFadeDistance = 220.0;
+  static const Duration _kSectionTransitionDuration = Duration(
+    milliseconds: 240,
+  );
 
   _DesktopSection _section = _DesktopSection.library;
   final List<_DesktopSection> _sectionStack = <_DesktopSection>[
@@ -133,7 +136,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
   MediaStats? _mediaStats;
   bool _loadingMediaStats = false;
   int _mediaStatsRequestVersion = 0;
-  double _topBarVisibility = 1.0;
+  final ValueNotifier<double> _topBarVisibility = ValueNotifier<double>(1.0);
   _DesktopSectionTransition _sectionTransition = _DesktopSectionTransition.fade;
 
   @override
@@ -145,6 +148,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
   @override
   void dispose() {
     _searchController.dispose();
+    _topBarVisibility.dispose();
     _detailViewModel?.dispose();
     super.dispose();
   }
@@ -181,15 +185,15 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     }
 
     _hideSidebar();
-    if (_section != _DesktopSection.library || _topBarVisibility < 1.0) {
+    if (_section != _DesktopSection.library || _topBarVisibility.value < 1.0) {
       setState(() {
         _sectionTransition = _DesktopSectionTransition.fade;
         _sectionStack
           ..clear()
           ..add(_DesktopSection.library);
         _section = _DesktopSection.library;
-        _topBarVisibility = 1.0;
       });
+      _resetTopBarVisibility();
     }
     _detailStack.clear();
     _libraryItemsBackTarget = null;
@@ -1029,8 +1033,8 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
         ..clear()
         ..add(_DesktopSection.library);
       _section = _DesktopSection.library;
-      _topBarVisibility = 1.0;
     });
+    _resetTopBarVisibility();
   }
 
   void _toggleSidebar() {
@@ -1111,8 +1115,8 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
           _sectionTransition = _DesktopSectionTransition.pull;
           _sectionStack.removeLast();
           _section = _sectionStack.last;
-          _topBarVisibility = 1.0;
         });
+        _resetTopBarVisibility();
       }
       await _openLibraryItems(target.parentId, target.title);
       return;
@@ -1124,8 +1128,8 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
         _sectionTransition = _DesktopSectionTransition.pull;
         _sectionStack.removeLast();
         _section = _sectionStack.last;
-        _topBarVisibility = 1.0;
       });
+      _resetTopBarVisibility();
       if (leavingDetail) {
         _detailViewModel?.dispose();
         _detailViewModel = null;
@@ -1194,8 +1198,8 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
         _sectionStack.add(_DesktopSection.detail);
       }
       _section = _DesktopSection.detail;
-      _topBarVisibility = 1.0;
     });
+    _resetTopBarVisibility();
     unawaited(next.load(forceRefresh: true));
   }
 
@@ -1573,19 +1577,23 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
         _sectionStack.add(_DesktopSection.search);
       }
       _section = _DesktopSection.search;
-      _topBarVisibility = 1.0;
     });
+    _resetTopBarVisibility();
   }
 
   void _setTopBarVisibility(double value) {
     final next = value.clamp(0.0, 1.0).toDouble();
-    if ((next - _topBarVisibility).abs() <= 0.001 || !mounted) return;
-    setState(() => _topBarVisibility = next);
+    if (!mounted || (next - _topBarVisibility.value).abs() <= 0.001) return;
+    _topBarVisibility.value = next;
+  }
+
+  void _resetTopBarVisibility() {
+    _setTopBarVisibility(1.0);
   }
 
   void _updateTopBarVisibilityByScrollDelta(double delta) {
     if (delta.abs() < 0.1) return;
-    final next = _topBarVisibility - (delta / _kTopBarFadeDistance);
+    final next = _topBarVisibility.value - (delta / _kTopBarFadeDistance);
     _setTopBarVisibility(next);
   }
 
@@ -1793,6 +1801,9 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
                 ),
           };
           final sidebarServers = _buildSidebarServers();
+          final contentView = _buildContent();
+          final contentKey =
+              contentView.key ?? ValueKey<String>('section-${_section.name}');
 
           return ColoredBox(
             color: baseBackground,
@@ -1844,6 +1855,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
                             movieCount: _mediaStats?.movieCount,
                             seriesCount: _mediaStats?.seriesCount,
                             statsLoading: _loadingMediaStats,
+                            enableBlur: widget.appState.enableBlurEffects,
                             language: _uiLanguage,
                             showSearch: _section != _DesktopSection.library,
                             homeTab: _homeTab,
@@ -1865,16 +1877,29 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
                             ),
                           ),
                           content: AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 360),
+                            duration: _kSectionTransitionDuration,
                             switchInCurve: Curves.easeOutCubic,
                             switchOutCurve: Curves.easeInCubic,
+                            layoutBuilder: (currentChild, previousChildren) {
+                              return Stack(
+                                fit: StackFit.expand,
+                                children: <Widget>[
+                                  ...previousChildren,
+                                  if (currentChild != null) currentChild,
+                                ],
+                              );
+                            },
                             transitionBuilder: _buildContentTransition,
-                            child: NotificationListener<ScrollNotification>(
-                              onNotification: _handleContentScrollNotification,
-                              child: _buildContent(),
+                            child: RepaintBoundary(
+                              key: contentKey,
+                              child: NotificationListener<ScrollNotification>(
+                                onNotification:
+                                    _handleContentScrollNotification,
+                                child: contentView,
+                              ),
                             ),
                           ),
-                          topBarVisibility: _topBarVisibility,
+                          topBarVisibilityListenable: _topBarVisibility,
                         ),
                       ),
                     ),

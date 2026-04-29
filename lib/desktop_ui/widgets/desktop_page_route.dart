@@ -12,7 +12,7 @@ enum DesktopPageTransitionStyle {
 Route<T> buildDesktopPageRoute<T>({
   required WidgetBuilder builder,
   DesktopPageTransitionStyle transition = DesktopPageTransitionStyle.push,
-  Duration duration = const Duration(milliseconds: 320),
+  Duration duration = const Duration(milliseconds: 240),
   RouteSettings? settings,
 }) {
   return PageRouteBuilder<T>(
@@ -26,30 +26,31 @@ Route<T> buildDesktopPageRoute<T>({
         curve: Curves.easeOutCubic,
         reverseCurve: Curves.easeInCubic,
       );
+      final transitionChild = RepaintBoundary(child: child);
 
       switch (transition) {
         case DesktopPageTransitionStyle.push:
           return FadeTransition(
-            opacity: Tween<double>(begin: 0.08, end: 1.0).animate(curved),
+            opacity: Tween<double>(begin: 0.16, end: 1.0).animate(curved),
             child: SlideTransition(
               position: Tween<Offset>(
-                begin: const Offset(0.05, 0),
+                begin: const Offset(0.032, 0),
                 end: Offset.zero,
               ).animate(curved),
-              child: child,
+              child: transitionChild,
             ),
           );
         case DesktopPageTransitionStyle.fade:
           return FadeTransition(
             opacity: curved,
-            child: child,
+            child: transitionChild,
           );
         case DesktopPageTransitionStyle.flip:
           return FadeTransition(
             opacity: Tween<double>(begin: 0.2, end: 1.0).animate(curved),
             child: AnimatedBuilder(
               animation: curved,
-              child: child,
+              child: transitionChild,
               builder: (context, child) {
                 final matrix = Matrix4.identity()
                   ..setEntry(3, 2, 0.0012)
@@ -66,8 +67,8 @@ Route<T> buildDesktopPageRoute<T>({
           return FadeTransition(
             opacity: Tween<double>(begin: 0.0, end: 1.0).animate(curved),
             child: ScaleTransition(
-              scale: Tween<double>(begin: 0.97, end: 1.0).animate(curved),
-              child: child,
+              scale: Tween<double>(begin: 0.982, end: 1.0).animate(curved),
+              child: transitionChild,
             ),
           );
       }
