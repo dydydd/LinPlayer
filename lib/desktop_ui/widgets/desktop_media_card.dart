@@ -5,7 +5,9 @@ import 'package:lin_player_ui/lin_player_ui.dart';
 
 import '../../server_adapters/server_access.dart';
 import '../theme/desktop_theme_extension.dart';
+import 'desktop_image_reveal.dart';
 import 'desktop_media_meta.dart';
+import 'desktop_shared_transition_coordinator.dart';
 
 class DesktopMediaCard extends StatefulWidget {
   const DesktopMediaCard({
@@ -54,6 +56,7 @@ class DesktopMediaCard extends StatefulWidget {
 class _DesktopMediaCardState extends State<DesktopMediaCard> {
   bool _hovered = false;
   bool _focused = false;
+  final GlobalKey _posterKey = GlobalKey();
 
   bool get _active => _hovered || _focused;
 
@@ -102,15 +105,31 @@ class _DesktopMediaCardState extends State<DesktopMediaCard> {
                   child: Material(
                     color: Colors.transparent,
                     child: InkWell(
-                      onTap: widget.onTap,
+                      onTap: widget.onTap == null
+                          ? null
+                          : () async {
+                              await DesktopSharedTransitionCoordinator.instance
+                                  .recordTapSource(
+                                itemId: widget.item.id,
+                                context: _posterKey.currentContext ?? context,
+                                imageUrls: imageUrls,
+                                fallbackLabel: title,
+                                aspectRatio: widget.imageAspectRatio,
+                              );
+                              if (!mounted) return;
+                              widget.onTap?.call();
+                            },
                       child: AspectRatio(
                         aspectRatio: widget.imageAspectRatio,
                         child: Stack(
                           fit: StackFit.expand,
                           children: [
-                            _CardImage(
-                              imageUrls: imageUrls,
-                              title: widget.item.name,
+                            RepaintBoundary(
+                              key: _posterKey,
+                              child: _CardImage(
+                                imageUrls: imageUrls,
+                                title: widget.item.name,
+                              ),
                             ),
                             if (widget.showBadge && badge.isNotEmpty)
                               Positioned(
@@ -360,7 +379,11 @@ class _CardImageState extends State<_CardImage> {
         imageUrl: imageUrl,
         cacheManager: CoverCacheManager.instance,
         httpHeaders: {'User-Agent': LinHttpClientFactory.userAgent},
-        fit: BoxFit.cover,
+        imageBuilder: (context, imageProvider) => DesktopImageReveal(
+          key: ValueKey<String>('reveal-$imageUrl'),
+          image: imageProvider,
+          fit: BoxFit.cover,
+        ),
         placeholder: (_, __) => const _ImageFallback(),
         errorWidget: (_, __, ___) {
           if (_currentIndex < candidates.length - 1) {

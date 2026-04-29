@@ -1,21 +1,3235 @@
-import 'package:flutter/material.dart';
-import 'package:lin_player_state/lin_player_state.dart';
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
-import '../../settings_page.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:lin_player_player/lin_player_player.dart';
+import 'package:lin_player_prefs/lin_player_prefs.dart';
+import 'package:lin_player_state/lin_player_state.dart';
+import 'package:lin_player_server_api/services/http_stream_proxy.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher_string.dart';
+
+import '../../danmaku_settings_page.dart';
+import '../../interaction_settings_page.dart';
+import '../../plugins/plugins_page.dart';
+import '../../server_text_import_sheet.dart';
+import '../../services/browsing_cache_service.dart';
+import '../../services/app_update_flow.dart';
+import '../../services/app_update_service.dart';
+import '../../services/app_diagnostics_report.dart';
+import '../../services/built_in_proxy/built_in_proxy_service.dart';
+import '../../tv/tv_focusable.dart';
 import '../theme/desktop_theme_scope.dart';
 
-class DesktopSettingsPage extends StatelessWidget {
-  const DesktopSettingsPage({
-    super.key,
-    required this.appState,
-  });
+class DesktopSettingsPage extends StatefulWidget {
+  const DesktopSettingsPage({super.key, required this.appState});
 
   final AppState appState;
 
   @override
+  State<DesktopSettingsPage> createState() => _DesktopSettingsPageState();
+}
+
+enum _BackupIoAction { file, clipboard }
+
+class _DesktopSettingsPageState extends State<DesktopSettingsPage> {
+  static const _donateUrl = 'https://afdian.com/a/zzzwannasleep';
+  static const _customSentinel = '__custom__';
+  static const _subtitleOff = 'off';
+  double? _mpvCacheDraftMb;
+  double? _bufferBackRatioDraft;
+  double? _markPlayedThresholdDraftPct;
+  double? _uiScaleDraft;
+  double? _tvBackgroundOpacityDraft;
+  double? _tvBackgroundBlurSigmaDraft;
+  double? _desktopBackgroundOpacityDraft;
+  double? _desktopBackgroundBlurSigmaDraft;
+  int? _coverCacheSizeBytes;
+  bool _checkingUpdate = false;
+  String _currentVersionFull = '';
+  final ScrollController _scrollController = ScrollController();
+  VoidCallback? _primaryFocusListener;
+  Timer? _focusEnsureTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPackageInfo();
+    _attachTvFocusAutoScroll();
+    unawaited(_refreshCoverCacheSize());
+  }
+
+  void _attachTvFocusAutoScroll() {
+    if (!DeviceType.isTv) return;
+
+    _primaryFocusListener = () {
+      if (!mounted) return;
+
+      final focusContext = FocusManager.instance.primaryFocus?.context;
+      if (focusContext == null) return;
+      if (focusContext.findAncestorStateOfType<_DesktopSettingsPageState>() !=
+          this) {
+        return;
+      }
+
+      _focusEnsureTimer?.cancel();
+      _focusEnsureTimer = Timer(const Duration(milliseconds: 10), () {
+        if (!mounted) return;
+        final ctx = FocusManager.instance.primaryFocus?.context;
+        if (ctx == null) return;
+        if (ctx.findAncestorStateOfType<_DesktopSettingsPageState>() != this) {
+          return;
+        }
+        Scrollable.ensureVisible(
+          ctx,
+          alignment: 0.5,
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+        );
+      });
+    };
+    FocusManager.instance.addListener(_primaryFocusListener!);
+  }
+
+  @override
+  void dispose() {
+    _focusEnsureTimer?.cancel();
+    if (_primaryFocusListener != null) {
+      FocusManager.instance.removeListener(_primaryFocusListener!);
+    }
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadPackageInfo() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(() {
+        _currentVersionFull = AppUpdateService.packageVersionFull(info);
+      });
+    } catch (_) {}
+  }
+
+  String _formatMb(int? bytes) {
+    if (bytes == null) return '--MB';
+    if (bytes <= 0) return '0MB';
+    final mb = bytes / (1024 * 1024);
+    final digits = mb < 10 ? 1 : 0;
+    return '${mb.toStringAsFixed(digits)}MB';
+  }
+
+  Future<void> _refreshCoverCacheSize() async {
+    if (kIsWeb) return;
+    try {
+      final bytes = await CoverCacheManager.instance.store.getCacheSize();
+      if (!mounted) return;
+      setState(() => _coverCacheSizeBytes = bytes);
+    } catch (_) {
+      // Best effort.
+    }
+  }
+
+  Future<void> _clearBrowsingCache(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('\u6e05\u7406\u6d4f\u89c8\u7f13\u5b58'),
+        content: const Text(
+          '\u5c06\u5220\u9664\u9996\u9875\u3001\u7ee7\u7eed\u89c2\u770b\u3001\u8be6\u60c5\u9875\u7b49\u5185\u5bb9\u7f13\u5b58\uff0c\u4e0b\u6b21\u6253\u5f00\u65f6\u4f1a\u91cd\u65b0\u52a0\u8f7d\u3002',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('\u53d6\u6d88'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('\u6e05\u7406'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await widget.appState.clearPersistedBrowsingCache();
+      await BrowsingCacheService.instance.clearAll();
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('\u5df2\u6e05\u7406\u6d4f\u89c8\u7f13\u5b58'),
+        ),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('\u6e05\u7406\u5931\u8d25\uff1a$e')),
+      );
+    }
+  }
+
+  Future<void> _openServerTextImport(BuildContext context) async {
+    await showModalBottomSheet<String?>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => ServerTextImportSheet(appState: widget.appState),
+    );
+  }
+
+  String _backupFileName() {
+    final now = DateTime.now();
+    String pad2(int v) => v.toString().padLeft(2, '0');
+    final y = now.year.toString().padLeft(4, '0');
+    final m = pad2(now.month);
+    final d = pad2(now.day);
+    final hh = pad2(now.hour);
+    final mm = pad2(now.minute);
+    final ss = pad2(now.second);
+    return 'linplayer_backup_$y$m${d}_$hh$mm$ss.json';
+  }
+
+  String _diagnosticsFileName() {
+    final now = DateTime.now();
+    String pad2(int v) => v.toString().padLeft(2, '0');
+    final y = now.year.toString().padLeft(4, '0');
+    final m = pad2(now.month);
+    final d = pad2(now.day);
+    final hh = pad2(now.hour);
+    final mm = pad2(now.minute);
+    final ss = pad2(now.second);
+    return 'linplayer_diagnostics_$y$m${d}_$hh$mm$ss.txt';
+  }
+
+  Future<String?> _saveTextFile({
+    required String dialogTitle,
+    required String fileName,
+    required String text,
+    required List<String> allowedExtensions,
+    required String fallbackExtension,
+  }) async {
+    final mobileBytes = (Platform.isAndroid || Platform.isIOS)
+        ? Uint8List.fromList(utf8.encode(text))
+        : null;
+    final path = await FilePicker.saveFile(
+      dialogTitle: dialogTitle,
+      fileName: fileName,
+      type: FileType.custom,
+      allowedExtensions: allowedExtensions,
+      bytes: mobileBytes,
+    );
+    if (path == null || path.trim().isEmpty) return null;
+
+    if (mobileBytes != null) {
+      return path;
+    }
+
+    final normalized = _ensureKnownFileExtension(
+      path,
+      allowedExtensions: allowedExtensions,
+      fallbackExtension: fallbackExtension,
+    );
+    await File(normalized).writeAsString(text, flush: true);
+    return normalized;
+  }
+
+  String _ensureKnownFileExtension(
+    String path, {
+    required List<String> allowedExtensions,
+    required String fallbackExtension,
+  }) {
+    final lowerPath = path.toLowerCase();
+    for (final extension in allowedExtensions) {
+      final normalizedExtension = extension.startsWith('.')
+          ? extension.toLowerCase()
+          : '.${extension.toLowerCase()}';
+      if (lowerPath.endsWith(normalizedExtension)) {
+        return path;
+      }
+    }
+    final normalizedFallback = fallbackExtension.startsWith('.')
+        ? fallbackExtension
+        : '.$fallbackExtension';
+    return '$path$normalizedFallback';
+  }
+
+  Future<T> _runWithBlockingDialog<T>(
+    BuildContext context,
+    Future<T> Function() action, {
+    required String title,
+    String subtitle = '请稍候…',
+  }) async {
+    final nav = Navigator.of(context);
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        title: Text(title),
+        content: Row(
+          children: [
+            const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Text(subtitle)),
+          ],
+        ),
+      ),
+    );
+    try {
+      return await action();
+    } finally {
+      if (context.mounted) nav.pop();
+    }
+  }
+
+  Future<BackupServerSecretMode?> _askBackupMode(BuildContext context) async {
+    BackupServerSecretMode selected = BackupServerSecretMode.password;
+    return showDialog<BackupServerSecretMode>(
+      context: context,
+      builder: (dctx) => StatefulBuilder(
+        builder: (dctx, setState) => AlertDialog(
+          title: const Text('导出方式'),
+          content: RadioGroup<BackupServerSecretMode>(
+            groupValue: selected,
+            onChanged: (v) =>
+                setState(() => selected = v ?? BackupServerSecretMode.password),
+            child: const Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                RadioListTile<BackupServerSecretMode>(
+                  value: BackupServerSecretMode.password,
+                  title: Text('账号迁移（不导出 token）'),
+                  subtitle: Text('导入时会重新登录，需联网；需要输入账号密码'),
+                ),
+                RadioListTile<BackupServerSecretMode>(
+                  value: BackupServerSecretMode.token,
+                  title: Text('会话迁移（导出 token）'),
+                  subtitle: Text('导入无需重新登录；适合离线迁移'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dctx).pop(),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dctx).pop(selected),
+              child: const Text('继续'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<String?> _askBackupPassphrase(
+    BuildContext context, {
+    required String title,
+    required bool confirm,
+  }) async {
+    final passCtrl = TextEditingController();
+    final confirmCtrl = TextEditingController();
+    bool show = false;
+    String? error;
+
+    try {
+      return await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dctx) => StatefulBuilder(
+          builder: (dctx, setState) => AlertDialog(
+            title: Text(title),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: passCtrl,
+                  obscureText: !show,
+                  decoration: InputDecoration(
+                    labelText: '备份密码',
+                    errorText: error,
+                    suffixIcon: IconButton(
+                      tooltip: show ? '隐藏' : '显示',
+                      icon: Icon(
+                        show
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                      ),
+                      onPressed: () => setState(() => show = !show),
+                    ),
+                  ),
+                ),
+                if (confirm) ...[
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: confirmCtrl,
+                    obscureText: !show,
+                    decoration: const InputDecoration(labelText: '确认备份密码'),
+                  ),
+                ],
+                const SizedBox(height: 10),
+                Text(
+                  '提示：备份密码越强，越不容易被暴力破解。',
+                  style: Theme.of(dctx).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(dctx).colorScheme.onSurfaceVariant,
+                      ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dctx).pop(),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final p = passCtrl.text;
+                  if (p.trim().length < 6) {
+                    setState(() => error = '备份密码至少 6 位');
+                    return;
+                  }
+                  if (confirm && p != confirmCtrl.text) {
+                    setState(() => error = '两次输入不一致');
+                    return;
+                  }
+                  Navigator.of(dctx).pop(p);
+                },
+                child: const Text('确定'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      passCtrl.dispose();
+      confirmCtrl.dispose();
+    }
+  }
+
+  Future<BackupServerLogin?> _askServerLoginForBackup(
+    BuildContext context,
+    ServerProfile server,
+  ) async {
+    final userCtrl = TextEditingController(text: server.username.trim());
+    final pwdCtrl = TextEditingController();
+    bool show = false;
+    String? error;
+
+    try {
+      return await showDialog<BackupServerLogin>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dctx) => StatefulBuilder(
+          builder: (dctx, setState) => AlertDialog(
+            title: Text('服务器：${server.name}'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  server.baseUrl,
+                  style: Theme.of(dctx).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(dctx).colorScheme.onSurfaceVariant,
+                      ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: userCtrl,
+                  decoration: InputDecoration(
+                    labelText: '用户名',
+                    errorText: error,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: pwdCtrl,
+                  obscureText: !show,
+                  decoration: InputDecoration(
+                    labelText: '密码（可为空）',
+                    suffixIcon: IconButton(
+                      tooltip: show ? '隐藏' : '显示',
+                      icon: Icon(
+                        show
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                      ),
+                      onPressed: () => setState(() => show = !show),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dctx).pop(),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final u = userCtrl.text.trim();
+                  if (u.isEmpty) {
+                    setState(() => error = '请输入用户名');
+                    return;
+                  }
+                  Navigator.of(dctx).pop(
+                    BackupServerLogin(username: u, password: pwdCtrl.text),
+                  );
+                },
+                child: const Text('确定'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      userCtrl.dispose();
+      pwdCtrl.dispose();
+    }
+  }
+
+  Future<Map<String, BackupServerLogin>?> _collectServerLogins(
+    BuildContext context,
+  ) async {
+    final result = <String, BackupServerLogin>{};
+    for (final server in widget.appState.servers) {
+      final login = await _askServerLoginForBackup(context, server);
+      if (login == null) return null;
+      result[server.id] = login;
+      if (login.username.trim() != server.username.trim()) {
+        // ignore: unawaited_futures
+        widget.appState.updateServerMeta(server.id, username: login.username);
+      }
+    }
+    return result;
+  }
+
+  int? _peekBackupVersion(String raw) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      final v = decoded['version'];
+      if (v is int) return v;
+      if (v is num) return v.round();
+      if (v is String) return int.tryParse(v.trim());
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _importBackupRaw(BuildContext context, String raw) async {
+    final version = _peekBackupVersion(raw);
+    if (version == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('导入失败：不是有效的备份文件')),
+      );
+      return;
+    }
+
+    String? passphrase;
+    if (version == 2) {
+      passphrase = await _askBackupPassphrase(
+        context,
+        title: '输入备份密码',
+        confirm: false,
+      );
+      if (passphrase == null) return;
+    } else if (version == 1) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (dctx) => AlertDialog(
+          title: const Text('旧版备份'),
+          content: const Text(
+            '检测到旧版备份（未加密，包含 token）。\n建议在原设备重新导出加密备份再导入。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dctx).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dctx).pop(true),
+              child: const Text('继续导入'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导入失败：不支持的备份版本：$version')),
+      );
+      return;
+    }
+
+    if (!context.mounted) return;
+
+    try {
+      await _runWithBlockingDialog(
+        context,
+        () async {
+          await widget.appState.importBackupJson(
+            raw,
+            passphrase: passphrase,
+          );
+          await _postImportApplySideEffects();
+        },
+        title: '正在导入备份',
+        subtitle: '解密/登录中…',
+      );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('导入成功')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导入失败：$e')),
+      );
+    }
+  }
+
+  Future<void> _exportPlainBackup(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('导出免密码备份'),
+        content: const Text(
+          '免密码备份不加密，文件会包含 token 等敏感信息。\n'
+          '任何拿到备份文件的人都可能直接登录你的服务器。\n\n'
+          '仅建议在自己设备之间离线传输（U 盘/局域网），不要上传网盘/聊天软件。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dctx).pop(true),
+            child: const Text('继续'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    if (!context.mounted) return;
+
+    final json = widget.appState.exportBackupJson(pretty: true);
+
+    final action = await showDialog<_BackupIoAction>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('导出免密码备份'),
+        content: const Text('选择导出方式：'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(_BackupIoAction.clipboard),
+            child: const Text('复制'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dctx).pop(_BackupIoAction.file),
+            child: const Text('保存为文件'),
+          ),
+        ],
+      ),
+    );
+
+    if (action == null) return;
+
+    try {
+      switch (action) {
+        case _BackupIoAction.clipboard:
+          await Clipboard.setData(ClipboardData(text: json));
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('已复制备份到剪贴板')),
+          );
+          return;
+        case _BackupIoAction.file:
+          final savedPath = await _saveTextFile(
+            dialogTitle: '保存备份文件',
+            fileName: _backupFileName(),
+            text: json,
+            allowedExtensions: const ['json'],
+            fallbackExtension: 'json',
+          );
+          if (savedPath == null) return;
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('已导出备份文件')),
+          );
+          return;
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导出失败：$e')),
+      );
+    }
+  }
+
+  Future<void> _exportEncryptedBackup(BuildContext context) async {
+    final mode = await _askBackupMode(context);
+    if (mode == null) return;
+    if (!context.mounted) return;
+
+    final passphrase = await _askBackupPassphrase(
+      context,
+      title: '设置备份密码',
+      confirm: true,
+    );
+    if (passphrase == null) return;
+    if (!context.mounted) return;
+
+    Map<String, BackupServerLogin>? logins;
+    if (mode == BackupServerSecretMode.password &&
+        widget.appState.servers.isNotEmpty) {
+      logins = await _collectServerLogins(context);
+      if (logins == null) return;
+      if (!context.mounted) return;
+    }
+
+    final action = await showDialog<_BackupIoAction>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('导出加密备份'),
+        content: const Text(
+          '将导出加密备份（包含全部设置与 Emby 服务器）。\n请妥善保存备份文件与备份密码。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(_BackupIoAction.clipboard),
+            child: const Text('复制'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dctx).pop(_BackupIoAction.file),
+            child: const Text('保存为文件'),
+          ),
+        ],
+      ),
+    );
+
+    if (action == null) return;
+    if (!context.mounted) return;
+
+    try {
+      final json = await _runWithBlockingDialog(
+        context,
+        () => widget.appState.exportEncryptedBackupJson(
+          passphrase: passphrase,
+          mode: mode,
+          serverLogins: logins,
+          pretty: true,
+        ),
+        title: '正在生成备份',
+        subtitle: '加密中…',
+      );
+
+      switch (action) {
+        case _BackupIoAction.clipboard:
+          await Clipboard.setData(ClipboardData(text: json));
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('已复制备份到剪贴板')),
+          );
+          return;
+        case _BackupIoAction.file:
+          final savedPath = await _saveTextFile(
+            dialogTitle: '保存备份文件',
+            fileName: _backupFileName(),
+            text: json,
+            allowedExtensions: const ['json'],
+            fallbackExtension: 'json',
+          );
+          if (savedPath == null) return;
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('已导出备份文件')),
+          );
+          return;
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导出失败：$e')),
+      );
+    }
+  }
+
+  Future<void> _importBackup(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('导入备份'),
+        content: const Text(
+          '将覆盖本机全部设置与 Emby 服务器列表。\n建议先导出备份再导入。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dctx).pop(true),
+            child: const Text('继续'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    if (!context.mounted) return;
+
+    final action = await showDialog<_BackupIoAction>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('选择导入方式'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(_BackupIoAction.clipboard),
+            child: const Text('从文本导入'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dctx).pop(_BackupIoAction.file),
+            child: const Text('从文件导入'),
+          ),
+        ],
+      ),
+    );
+    if (action == null) return;
+    if (!context.mounted) return;
+
+    switch (action) {
+      case _BackupIoAction.file:
+        await _importBackupFromFile(context);
+        return;
+      case _BackupIoAction.clipboard:
+        await _importBackupFromText(context);
+        return;
+    }
+  }
+
+  Future<void> _postImportApplySideEffects() async {
+    if (AppIconService.isSupported) {
+      await AppIconService.setIconId(widget.appState.appIconId);
+    }
+  }
+
+  Future<void> _importBackupFromFile(BuildContext context) async {
+    try {
+      final result = await FilePicker.pickFiles(
+        dialogTitle: '选择备份文件',
+        allowMultiple: false,
+        withData: false,
+        type: FileType.custom,
+        allowedExtensions: const ['json'],
+      );
+      final path = result?.files.single.path;
+      if (path == null || path.trim().isEmpty) return;
+
+      final raw = await File(path).readAsString();
+      if (!context.mounted) return;
+      await _importBackupRaw(context, raw);
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导入失败：$e')),
+      );
+    }
+  }
+
+  Future<void> _importBackupFromText(BuildContext context) async {
+    final ctrl = TextEditingController();
+    try {
+      final raw = await showDialog<String>(
+        context: context,
+        builder: (dctx) => AlertDialog(
+          title: const Text('从文本导入'),
+          content: TextField(
+            controller: ctrl,
+            maxLines: 12,
+            minLines: 6,
+            decoration: const InputDecoration(
+              hintText: '粘贴导出的 JSON 文本',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dctx).pop(),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dctx).pop(ctrl.text),
+              child: const Text('导入'),
+            ),
+          ],
+        ),
+      );
+      if (raw == null || raw.trim().isEmpty) return;
+
+      if (!context.mounted) return;
+      await _importBackupRaw(context, raw);
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导入失败：$e')),
+      );
+    } finally {
+      ctrl.dispose();
+    }
+  }
+
+  bool _isTv(BuildContext context) => DeviceType.isTv;
+
+  Widget _wrapDesktopSettingsBody({
+    required bool isDesktop,
+    required Widget child,
+  }) {
+    if (!isDesktop) return child;
+    return Scrollbar(
+      controller: _scrollController,
+      thumbVisibility: true,
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1760),
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopSettingsColumns({
+    required Widget appearanceSection,
+    required Widget playbackSection,
+    required Widget appSection,
+  }) {
+    const gap = 18.0;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+
+        if (width >= 1180) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: appearanceSection),
+              const SizedBox(width: gap),
+              Expanded(child: playbackSection),
+              const SizedBox(width: gap),
+              Expanded(child: appSection),
+            ],
+          );
+        }
+
+        if (width >= 860) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: appearanceSection),
+                  const SizedBox(width: gap),
+                  Expanded(child: playbackSection),
+                ],
+              ),
+              const SizedBox(height: gap),
+              appSection,
+            ],
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            appearanceSection,
+            const SizedBox(height: gap),
+            playbackSection,
+            const SizedBox(height: gap),
+            appSection,
+          ],
+        );
+      },
+    );
+  }
+
+  List<DropdownMenuItem<String>> _audioLangItems(String current) {
+    final base = <MapEntry<String, String>>[
+      const MapEntry('', '默认'),
+      const MapEntry('chi', '中文'),
+      const MapEntry('jpn', '日语'),
+      const MapEntry('eng', '英语'),
+      const MapEntry(_customSentinel, '自定义…'),
+    ];
+
+    final isKnown = base.any((e) => e.key == current);
+    final items = <DropdownMenuItem<String>>[
+      if (current.trim().isNotEmpty && !isKnown)
+        DropdownMenuItem(
+          value: current,
+          child: Text('自定义：$current'),
+        ),
+      ...base.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))),
+    ];
+    return items;
+  }
+
+  List<DropdownMenuItem<String>> _subtitleLangItems(String current) {
+    final base = <MapEntry<String, String>>[
+      const MapEntry('', '默认'),
+      const MapEntry(_subtitleOff, '关闭'),
+      const MapEntry('chi', '中文'),
+      const MapEntry('jpn', '日语'),
+      const MapEntry('eng', '英语'),
+      const MapEntry(_customSentinel, '自定义…'),
+    ];
+
+    final isKnown = base.any((e) => e.key == current);
+    final items = <DropdownMenuItem<String>>[
+      if (current.trim().isNotEmpty && !isKnown)
+        DropdownMenuItem(
+          value: current,
+          child: Text('自定义：$current'),
+        ),
+      ...base.map((e) => DropdownMenuItem(value: e.key, child: Text(e.value))),
+    ];
+    return items;
+  }
+
+  Future<String?> _askCustomLang(BuildContext context,
+      {required String title, String? initial}) {
+    final ctrl = TextEditingController(text: initial ?? '');
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: ctrl,
+          decoration: const InputDecoration(
+            hintText: '例如：chi / zho / jpn / eng / zh / en / ja',
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('取消')),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _playbackProxySubtitle(AppState appState) {
+    final url = appState.playbackProxyUrl.trim();
+    return appState.playbackProxyMode == PlaybackProxyMode.system
+        ? '系统代理'
+        : (url.isEmpty ? '自定义：未填写' : '自定义：$url');
+  }
+
+  Future<void> _editPlaybackProxy(
+      BuildContext context, AppState appState) async {
+    const supportedSchemes = ['http', 'https', 'socks5', 'socks4'];
+
+    PlaybackProxyMode mode = appState.playbackProxyMode;
+    String scheme = 'http';
+    final hostPortController = TextEditingController();
+    String? hostPortError;
+
+    final initialUrl = appState.playbackProxyUrl.trim();
+    final initialUri = Uri.tryParse(initialUrl);
+    if (initialUri != null &&
+        initialUri.host.trim().isNotEmpty &&
+        initialUri.port > 0) {
+      final s = initialUri.scheme.trim().toLowerCase();
+      if (supportedSchemes.contains(s)) {
+        scheme = s;
+      }
+      hostPortController.text = '${initialUri.host}:${initialUri.port}';
+    }
+
+    Uri? parseHostPort(String raw) {
+      final text = raw.trim();
+      if (text.isEmpty) return null;
+      if (text.contains('://')) return Uri.tryParse(text);
+      return Uri.tryParse('proxy://$text');
+    }
+
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (dctx) => StatefulBuilder(
+          builder: (dctx, setState) => AlertDialog(
+            title: const Text('播放代理'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  RadioGroup<PlaybackProxyMode>(
+                    groupValue: mode,
+                    onChanged: (v) => setState(() {
+                      mode = v ?? PlaybackProxyMode.system;
+                      hostPortError = null;
+                    }),
+                    child: const Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        RadioListTile<PlaybackProxyMode>(
+                          value: PlaybackProxyMode.system,
+                          title: Text('系统代理'),
+                          subtitle: Text('跟随系统/环境变量代理设置（默认）'),
+                        ),
+                        RadioListTile<PlaybackProxyMode>(
+                          value: PlaybackProxyMode.custom,
+                          title: Text('自定义代理'),
+                          subtitle: Text('适用于需要手动指定代理的网络环境'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (mode == PlaybackProxyMode.custom) ...[
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 4,
+                          child: DropdownButtonFormField<String>(
+                            initialValue: scheme,
+                            decoration: const InputDecoration(
+                              labelText: '类型',
+                              isDense: true,
+                            ),
+                            items: supportedSchemes
+                                .map(
+                                  (s) => DropdownMenuItem(
+                                    value: s,
+                                    child: Text(s.toUpperCase()),
+                                  ),
+                                )
+                                .toList(growable: false),
+                            onChanged: (v) {
+                              scheme = (v ?? scheme).trim().toLowerCase();
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 7,
+                          child: TextField(
+                            controller: hostPortController,
+                            decoration: InputDecoration(
+                              labelText: '地址',
+                              hintText: 'IP:端口（例如 127.0.0.1:7890）',
+                              errorText: hostPortError,
+                              isDense: true,
+                            ),
+                            autofocus: true,
+                            onChanged: (_) =>
+                                setState(() => hostPortError = null),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '说明：仅对桌面端 MPV 的网络播放生效（http/https）。局域网/localhost 默认直连。',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dctx).pop(),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  if (mode == PlaybackProxyMode.system) {
+                    await appState
+                        .setPlaybackProxyMode(PlaybackProxyMode.system);
+                    if (dctx.mounted) Navigator.of(dctx).pop();
+                    return;
+                  }
+
+                  final uri = parseHostPort(hostPortController.text);
+                  final host = uri?.host.trim() ?? '';
+                  final port = uri?.port ?? 0;
+                  if (host.isEmpty || port <= 0 || port > 65535) {
+                    setState(() => hostPortError = '请输入正确的 IP:端口');
+                    return;
+                  }
+
+                  final url = Uri(
+                    scheme: scheme,
+                    host: host,
+                    port: port,
+                  ).toString();
+                  await appState.setPlaybackProxyUrl(url);
+                  await appState.setPlaybackProxyMode(PlaybackProxyMode.custom);
+                  if (dctx.mounted) Navigator.of(dctx).pop();
+                },
+                child: const Text('保存'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      hostPortController.dispose();
+    }
+  }
+
+  Future<bool> _confirmEnableUnlimitedStreamCache(BuildContext context) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const _UnlimitedStreamCacheConfirmDialog(),
+    );
+    return ok == true;
+  }
+
+  Future<void> _checkUpdates(BuildContext context) async {
+    if (_checkingUpdate) return;
+    setState(() => _checkingUpdate = true);
+
+    try {
+      await AppUpdateFlow.manualCheck(context, appState: widget.appState);
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('检查更新失败：$e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _checkingUpdate = false);
+      }
+    }
+  }
+
+  Future<void> _pickTvBackgroundColor(BuildContext context) async {
+    const presets = <MapEntry<String, int>>[
+      MapEntry('深黑（默认）', 0xFF0B0B0B),
+      MapEntry('石墨灰', 0xFF141414),
+      MapEntry('深蓝', 0xFF0B1020),
+      MapEntry('深紫', 0xFF130B20),
+      MapEntry('墨绿', 0xFF0B2014),
+      MapEntry('深红', 0xFF200B0B),
+    ];
+
+    final selected = await showDialog<int>(
+      context: context,
+      builder: (dctx) => SimpleDialog(
+        title: const Text('选择背景颜色'),
+        children: presets
+            .map(
+              (p) => SimpleDialogOption(
+                onPressed: () => Navigator.of(dctx).pop(p.value),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 10,
+                      backgroundColor: Color(p.value),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(child: Text(p.key)),
+                  ],
+                ),
+              ),
+            )
+            .toList(growable: false),
+      ),
+    );
+
+    if (selected == null) return;
+    await widget.appState.setTvBackgroundColor(selected);
+  }
+
+  Future<void> _editTvBackgroundImage(BuildContext context) async {
+    final controller =
+        TextEditingController(text: widget.appState.tvBackgroundImage);
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('背景图片'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: controller,
+                decoration: const InputDecoration(
+                  hintText: '图片 URL 或本地路径',
+                ),
+              ),
+              const SizedBox(height: 12),
+              FilledButton.tonalIcon(
+                onPressed: () async {
+                  final result = await FilePicker.pickFiles(
+                    dialogTitle: '选择背景图片',
+                    allowMultiple: false,
+                    type: FileType.image,
+                    withData: false,
+                  );
+                  final path = result?.files.single.path;
+                  if (path == null || path.trim().isEmpty) return;
+                  controller.text = path.trim();
+                },
+                icon: const Icon(Icons.folder_open_outlined),
+                label: const Text('选择本地图片'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(null),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(''),
+            child: const Text('清空'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dctx).pop(controller.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null) return;
+    await widget.appState.setTvBackgroundImage(result);
+  }
+
+  Future<void> _editDesktopBackgroundImage(BuildContext context) async {
+    final controller =
+        TextEditingController(text: widget.appState.desktopBackgroundImage);
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('自定义背景图'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: controller,
+                decoration: const InputDecoration(
+                  hintText: '图片 URL 或本地路径',
+                ),
+              ),
+              const SizedBox(height: 12),
+              FilledButton.tonalIcon(
+                onPressed: () async {
+                  final navigator = Navigator.of(dctx);
+                  final result = await FilePicker.pickFiles(
+                    dialogTitle: '选择背景图片',
+                    allowMultiple: false,
+                    type: FileType.image,
+                    withData: false,
+                  );
+                  if (!navigator.mounted) return;
+                  final path = result?.files.single.path;
+                  if (path == null || path.trim().isEmpty) return;
+                  navigator.pop(path.trim());
+                },
+                icon: const Icon(Icons.folder_open_outlined),
+                label: const Text('选择本地图片'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(null),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(''),
+            child: const Text('清空'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dctx).pop(controller.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null) return;
+    await widget.appState.setDesktopBackgroundImage(result);
+  }
+
+  Future<void> _editTvBackgroundRandomApi(BuildContext context) async {
+    final defaultApi = widget.appState.tvBackgroundRandomApiUrl.trim().isEmpty
+        ? 'https://bing.img.run/rand.php'
+        : widget.appState.tvBackgroundRandomApiUrl.trim();
+    final controller = TextEditingController(text: defaultApi);
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('随机背景 API'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: controller,
+                decoration: const InputDecoration(
+                  hintText: '例如：https://bing.img.run/rand.php',
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '提示：URL 应直接返回图片（或 302 跳转到图片）。',
+                style: Theme.of(dctx).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(dctx).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(null),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dctx).pop(controller.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null) return;
+    final next =
+        result.trim().isEmpty ? 'https://bing.img.run/rand.php' : result;
+    await widget.appState.setTvBackgroundRandomApiUrl(next);
+    await widget.appState.bumpTvBackgroundRandomNonce();
+  }
+
+  Future<void> _exportDiagnosticsLog(BuildContext context) async {
+    final action = await showDialog<_BackupIoAction>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('导出诊断日志'),
+        content: const Text('建议先复现问题，再导出本次会话日志。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(_BackupIoAction.clipboard),
+            child: const Text('复制'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dctx).pop(_BackupIoAction.file),
+            child: const Text('保存为文件'),
+          ),
+        ],
+      ),
+    );
+    if (action == null) return;
+    if (!context.mounted) return;
+
+    try {
+      final text = await _runWithBlockingDialog(
+        context,
+        () async {
+          final extraSections = <String, String>{};
+          extraSections['Preload Cache Reuse Summary'] = [
+            StreamPreloadService.instance.buildStatusSummaryText(),
+            HttpStreamProxyServer.instance.buildReuseSummaryText(
+              maxFirstRequests: 12,
+            ),
+          ].where((section) => section.trim().isNotEmpty).join('\n\n');
+          extraSections['Preload Diagnostics'] =
+              StreamPreloadService.instance.buildDiagnosticsText(
+            maxEntries: 24,
+          );
+          extraSections['HTTP Stream Proxy Diagnostics'] =
+              HttpStreamProxyServer.instance.buildDiagnosticsText(
+            maxEntries: 40,
+          );
+          extraSections['HTTP Stream Active Downloads'] =
+              HttpStreamProxyServer.instance.buildActiveDownloadsText(
+            maxEntries: 12,
+          );
+          if (DeviceType.isTv) {
+            try {
+              extraSections['Built-in Proxy Diagnostics'] =
+                  await BuiltInProxyService.instance
+                      .buildDiagnosticsText(logLines: 120);
+            } catch (e) {
+              extraSections['Built-in Proxy Diagnostics'] = '获取失败：$e';
+            }
+          }
+          return AppDiagnosticsReportBuilder.build(
+            appState: widget.appState,
+            currentVersionFull: _currentVersionFull,
+            extraSections: extraSections.isEmpty ? null : extraSections,
+          );
+        },
+        title: '正在生成诊断日志',
+        subtitle: '收集应用日志中...',
+      );
+
+      switch (action) {
+        case _BackupIoAction.clipboard:
+          await Clipboard.setData(ClipboardData(text: text));
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('已复制诊断日志')),
+          );
+          return;
+        case _BackupIoAction.file:
+          final savedPath = await _saveTextFile(
+            dialogTitle: '保存诊断日志',
+            fileName: _diagnosticsFileName(),
+            text: text,
+            allowedExtensions: const ['txt', 'log'],
+            fallbackExtension: 'txt',
+          );
+          if (savedPath == null) return;
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('已导出诊断日志')),
+          );
+          return;
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导出诊断日志失败：$e')),
+      );
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final isTv = _isTv(context);
+    final isDesktop = !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.linux ||
+            defaultTargetPlatform == TargetPlatform.macOS);
+    final isDesktopBinaryTheme = !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.macOS);
     return DesktopThemeScope(
-      child: SettingsPage(appState: appState),
+      child: AnimatedBuilder(
+        animation: widget.appState,
+        builder: (context, _) {
+          final appConfig = AppConfigScope.of(context);
+          final appState = widget.appState;
+          final blurAllowed = !isTv;
+          final enableBlur = blurAllowed && appState.enableBlurEffects;
+          final trailingMaxWidth = (MediaQuery.sizeOf(context).width * 0.45)
+              .clamp(140.0, 260.0)
+              .toDouble();
+
+          Widget tvFocusRow(Widget child) {
+            if (!isTv) return child;
+            final scheme = Theme.of(context).colorScheme;
+            final isDark = scheme.brightness == Brightness.dark;
+            final uiScale = context.uiScale;
+            final radius = (18 * uiScale).clamp(14.0, 22.0);
+            return TvFocusFrame(
+              borderRadius: BorderRadius.circular(radius),
+              surfaceColor: Colors.transparent,
+              focusedSurfaceColor:
+                  scheme.primary.withValues(alpha: isDark ? 0.22 : 0.16),
+              borderColor: Colors.transparent,
+              focusedBorderColor: scheme.primary,
+              padding: EdgeInsets.zero,
+              focusScale: 1.03,
+              child: child,
+            );
+          }
+
+          return Scaffold(
+            appBar: GlassAppBar(
+              enableBlur: enableBlur,
+              child: AppBar(
+                title: const Text('设置'),
+                centerTitle: true,
+              ),
+            ),
+            body: _wrapDesktopSettingsBody(
+              isDesktop: isDesktop,
+              child: ListView(
+                controller: _scrollController,
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+                children: [
+                  _buildDesktopSettingsColumns(
+                    appearanceSection: _Section(
+                      title: '外观',
+                      subtitle:
+                          isTv ? '自定义背景 / UI 缩放 / 模糊与透明度' : '主题、缩放、背景与界面语言',
+                      enableBlur: enableBlur,
+                      child: Column(
+                        children: [
+                          if (isTv) ...[
+                            SegmentedButton<TvBackgroundMode>(
+                              segments: TvBackgroundMode.values
+                                  .map(
+                                    (m) => ButtonSegment(
+                                      value: m,
+                                      label: Text(m.label),
+                                    ),
+                                  )
+                                  .toList(growable: false),
+                              selected: {appState.tvBackgroundMode},
+                              onSelectionChanged: (s) {
+                                final next = s.first;
+                                // ignore: unawaited_futures
+                                appState.setTvBackgroundMode(next);
+                                if (next == TvBackgroundMode.randomApi) {
+                                  // ignore: unawaited_futures
+                                  appState.bumpTvBackgroundRandomNonce();
+                                }
+                              },
+                            ),
+                            const SizedBox(height: 10),
+                            Builder(
+                              builder: (context) {
+                                switch (appState.tvBackgroundMode) {
+                                  case TvBackgroundMode.none:
+                                    return const SizedBox.shrink();
+                                  case TvBackgroundMode.solidColor:
+                                    final v = appState.tvBackgroundColor
+                                        .toRadixString(16)
+                                        .padLeft(8, '0')
+                                        .toUpperCase();
+                                    return tvFocusRow(
+                                      ListTile(
+                                        contentPadding: EdgeInsets.zero,
+                                        leading: const Icon(
+                                            Icons.format_color_fill_outlined),
+                                        title: const Text('背景颜色'),
+                                        subtitle: Text('#$v'),
+                                        trailing: CircleAvatar(
+                                          radius: 12,
+                                          backgroundColor:
+                                              Color(appState.tvBackgroundColor),
+                                        ),
+                                        onTap: () =>
+                                            _pickTvBackgroundColor(context),
+                                      ),
+                                    );
+                                  case TvBackgroundMode.image:
+                                    final img =
+                                        appState.tvBackgroundImage.trim();
+                                    return tvFocusRow(
+                                      ListTile(
+                                        contentPadding: EdgeInsets.zero,
+                                        leading:
+                                            const Icon(Icons.image_outlined),
+                                        title: const Text('背景图片'),
+                                        subtitle: Text(
+                                          img.isEmpty ? '未设置' : img,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        trailing: FilledButton(
+                                          onPressed: () =>
+                                              _editTvBackgroundImage(context),
+                                          child: const Text('设置'),
+                                        ),
+                                        onTap: () =>
+                                            _editTvBackgroundImage(context),
+                                      ),
+                                    );
+                                  case TvBackgroundMode.randomApi:
+                                    final api = appState
+                                        .tvBackgroundRandomApiUrl
+                                        .trim();
+                                    return Column(
+                                      children: [
+                                        tvFocusRow(
+                                          ListTile(
+                                            contentPadding: EdgeInsets.zero,
+                                            leading: const Icon(
+                                                Icons.public_outlined),
+                                            title: const Text('随机背景 API'),
+                                            subtitle: Text(
+                                              api.isEmpty ? '未设置' : api,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                            trailing: FilledButton(
+                                              onPressed: () =>
+                                                  _editTvBackgroundRandomApi(
+                                                      context),
+                                              child: const Text('修改'),
+                                            ),
+                                            onTap: () =>
+                                                _editTvBackgroundRandomApi(
+                                                    context),
+                                          ),
+                                        ),
+                                        Align(
+                                          alignment: Alignment.centerRight,
+                                          child: FilledButton.tonal(
+                                            onPressed: () => appState
+                                                .bumpTvBackgroundRandomNonce(),
+                                            child: const Text('换一张'),
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                }
+                              },
+                            ),
+                            if (appState.tvBackgroundMode !=
+                                TvBackgroundMode.none) ...[
+                              const Divider(height: 1),
+                              tvFocusRow(
+                                ListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: const Icon(Icons.opacity_outlined),
+                                  title: const Text('背景透明度'),
+                                  subtitle: Builder(
+                                    builder: (context) {
+                                      final value =
+                                          (_tvBackgroundOpacityDraft ??
+                                                  appState.tvBackgroundOpacity)
+                                              .clamp(0.0, 1.0)
+                                              .toDouble();
+                                      final pct = (value * 100).round();
+                                      return Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Expanded(
+                                                child: Text(
+                                                  '当前：$pct%（0-100%）',
+                                                ),
+                                              ),
+                                              TextButton(
+                                                onPressed:
+                                                    appState.tvBackgroundOpacity ==
+                                                            1.0
+                                                        ? null
+                                                        : () {
+                                                            setState(() =>
+                                                                _tvBackgroundOpacityDraft =
+                                                                    null);
+                                                            // ignore: unawaited_futures
+                                                            appState
+                                                                .setTvBackgroundOpacity(
+                                                                    1.0);
+                                                          },
+                                                child: const Text('重置'),
+                                              ),
+                                            ],
+                                          ),
+                                          AppSlider(
+                                            value: value,
+                                            min: 0.0,
+                                            max: 1.0,
+                                            divisions: 20,
+                                            label: '$pct%',
+                                            onChanged: (v) => setState(() =>
+                                                _tvBackgroundOpacityDraft = v),
+                                            onChangeEnd: (v) {
+                                              setState(() =>
+                                                  _tvBackgroundOpacityDraft =
+                                                      null);
+                                              // ignore: unawaited_futures
+                                              appState
+                                                  .setTvBackgroundOpacity(v);
+                                            },
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
+                              if (appState.tvBackgroundMode ==
+                                      TvBackgroundMode.image ||
+                                  appState.tvBackgroundMode ==
+                                      TvBackgroundMode.randomApi) ...[
+                                const Divider(height: 1),
+                                tvFocusRow(
+                                  ListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    leading: const Icon(Icons.blur_on_outlined),
+                                    title: const Text('背景模糊度'),
+                                    subtitle: Builder(
+                                      builder: (context) {
+                                        final value =
+                                            (_tvBackgroundBlurSigmaDraft ??
+                                                    appState
+                                                        .tvBackgroundBlurSigma)
+                                                .clamp(0.0, 30.0)
+                                                .toDouble();
+                                        return Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Expanded(
+                                                  child: Text(
+                                                    '当前：${value.toStringAsFixed(0)}（0-30）',
+                                                  ),
+                                                ),
+                                                TextButton(
+                                                  onPressed:
+                                                      appState.tvBackgroundBlurSigma ==
+                                                              0.0
+                                                          ? null
+                                                          : () {
+                                                              setState(() =>
+                                                                  _tvBackgroundBlurSigmaDraft =
+                                                                      null);
+                                                              // ignore: unawaited_futures
+                                                              appState
+                                                                  .setTvBackgroundBlurSigma(
+                                                                      0.0);
+                                                            },
+                                                  child: const Text('重置'),
+                                                ),
+                                              ],
+                                            ),
+                                            AppSlider(
+                                              value: value,
+                                              min: 0.0,
+                                              max: 30.0,
+                                              divisions: 30,
+                                              label: value.toStringAsFixed(0),
+                                              onChanged: (v) => setState(() =>
+                                                  _tvBackgroundBlurSigmaDraft =
+                                                      v),
+                                              onChangeEnd: (v) {
+                                                setState(() =>
+                                                    _tvBackgroundBlurSigmaDraft =
+                                                        null);
+                                                // ignore: unawaited_futures
+                                                appState
+                                                    .setTvBackgroundBlurSigma(
+                                                        v);
+                                              },
+                                            ),
+                                          ],
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                            const Divider(height: 1),
+                          ],
+                          if (!isTv) ...[
+                            Builder(
+                              builder: (context) {
+                                final segments = isDesktopBinaryTheme
+                                    ? const <ButtonSegment<ThemeMode>>[
+                                        ButtonSegment(
+                                            value: ThemeMode.light,
+                                            label: Text('浅色')),
+                                        ButtonSegment(
+                                            value: ThemeMode.dark,
+                                            label: Text('深色')),
+                                      ]
+                                    : const <ButtonSegment<ThemeMode>>[
+                                        ButtonSegment(
+                                            value: ThemeMode.system,
+                                            label: Text('系统')),
+                                        ButtonSegment(
+                                            value: ThemeMode.light,
+                                            label: Text('浅色')),
+                                        ButtonSegment(
+                                            value: ThemeMode.dark,
+                                            label: Text('深色')),
+                                      ];
+                                final selectedMode = isDesktopBinaryTheme &&
+                                        appState.themeMode == ThemeMode.system
+                                    ? (Theme.of(context).brightness ==
+                                            Brightness.dark
+                                        ? ThemeMode.dark
+                                        : ThemeMode.light)
+                                    : appState.themeMode;
+                                return SegmentedButton<ThemeMode>(
+                                  segments: segments,
+                                  selected: {selectedMode},
+                                  onSelectionChanged: (s) =>
+                                      appState.setThemeMode(s.first),
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 10),
+                          ],
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.zoom_out_map),
+                            title: const Text('UI 缩放'),
+                            subtitle: Builder(
+                              builder: (context) {
+                                final value =
+                                    (_uiScaleDraft ?? appState.uiScaleFactor)
+                                        .clamp(0.25, 2.0)
+                                        .toDouble();
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            '当前：${value.toStringAsFixed(2)}x（0.25-2.0）',
+                                          ),
+                                        ),
+                                        TextButton(
+                                          onPressed: appState.uiScaleFactor ==
+                                                  1.0
+                                              ? null
+                                              : () {
+                                                  // ignore: unawaited_futures
+                                                  appState
+                                                      .setUiScaleFactor(1.0);
+                                                },
+                                          child: const Text('重置'),
+                                        ),
+                                      ],
+                                    ),
+                                    AppSlider(
+                                      value: value,
+                                      min: 0.25,
+                                      max: 2.0,
+                                      divisions: 35,
+                                      label: '${value.toStringAsFixed(2)}x',
+                                      onChanged: (v) =>
+                                          setState(() => _uiScaleDraft = v),
+                                      onChangeEnd: (v) {
+                                        setState(() => _uiScaleDraft = null);
+                                        // ignore: unawaited_futures
+                                        appState.setUiScaleFactor(v);
+                                      },
+                                    ),
+                                  ],
+                                );
+                              },
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          if (isDesktop) ...[
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.image_outlined),
+                              title: const Text('自定义背景图'),
+                              subtitle: Text(
+                                appState.desktopBackgroundImage.trim().isEmpty
+                                    ? '未设置'
+                                    : appState.desktopBackgroundImage.trim(),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              trailing: FilledButton(
+                                onPressed: () =>
+                                    _editDesktopBackgroundImage(context),
+                                child: const Text('设置'),
+                              ),
+                              onTap: () => _editDesktopBackgroundImage(context),
+                            ),
+                            if (appState.desktopBackgroundImage
+                                .trim()
+                                .isNotEmpty) ...[
+                              const Divider(height: 1),
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: const Icon(Icons.opacity_outlined),
+                                title: const Text('背景透明度'),
+                                subtitle: Builder(
+                                  builder: (context) {
+                                    final value =
+                                        (_desktopBackgroundOpacityDraft ??
+                                                appState
+                                                    .desktopBackgroundOpacity)
+                                            .clamp(0.0, 1.0)
+                                            .toDouble();
+                                    final pct = (value * 100).round();
+                                    return Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text('当前：$pct%（0-100%）'),
+                                            ),
+                                            TextButton(
+                                              onPressed:
+                                                  ((appState.desktopBackgroundOpacity -
+                                                                      1.0)
+                                                                  .abs() <
+                                                              0.001) &&
+                                                          _desktopBackgroundOpacityDraft ==
+                                                              null
+                                                      ? null
+                                                      : () {
+                                                          setState(() =>
+                                                              _desktopBackgroundOpacityDraft =
+                                                                  null);
+                                                          // ignore: unawaited_futures
+                                                          appState
+                                                              .setDesktopBackgroundOpacity(
+                                                                  1.0);
+                                                        },
+                                              child: const Text('重置'),
+                                            ),
+                                          ],
+                                        ),
+                                        AppSlider(
+                                          value: value,
+                                          min: 0.0,
+                                          max: 1.0,
+                                          divisions: 20,
+                                          label: '$pct%',
+                                          onChanged: (v) => setState(() =>
+                                              _desktopBackgroundOpacityDraft =
+                                                  v),
+                                          onChangeEnd: (v) {
+                                            setState(() =>
+                                                _desktopBackgroundOpacityDraft =
+                                                    null);
+                                            // ignore: unawaited_futures
+                                            appState
+                                                .setDesktopBackgroundOpacity(v);
+                                          },
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                ),
+                              ),
+                              const Divider(height: 1),
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: const Icon(Icons.blur_on_outlined),
+                                title: const Text('背景模糊度'),
+                                subtitle: Builder(
+                                  builder: (context) {
+                                    final value =
+                                        (_desktopBackgroundBlurSigmaDraft ??
+                                                appState
+                                                    .desktopBackgroundBlurSigma)
+                                            .clamp(0.0, 30.0)
+                                            .toDouble();
+                                    return Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                '当前：${value.toStringAsFixed(0)}（0-30）',
+                                              ),
+                                            ),
+                                            TextButton(
+                                              onPressed:
+                                                  ((appState.desktopBackgroundBlurSigma -
+                                                                      0.0)
+                                                                  .abs() <
+                                                              0.001) &&
+                                                          _desktopBackgroundBlurSigmaDraft ==
+                                                              null
+                                                      ? null
+                                                      : () {
+                                                          setState(() =>
+                                                              _desktopBackgroundBlurSigmaDraft =
+                                                                  null);
+                                                          // ignore: unawaited_futures
+                                                          appState
+                                                              .setDesktopBackgroundBlurSigma(
+                                                                  0.0);
+                                                        },
+                                              child: const Text('重置'),
+                                            ),
+                                          ],
+                                        ),
+                                        AppSlider(
+                                          value: value,
+                                          min: 0.0,
+                                          max: 30.0,
+                                          divisions: 30,
+                                          label: value.toStringAsFixed(0),
+                                          onChanged: (v) => setState(() =>
+                                              _desktopBackgroundBlurSigmaDraft =
+                                                  v),
+                                          onChangeEnd: (v) {
+                                            setState(() =>
+                                                _desktopBackgroundBlurSigmaDraft =
+                                                    null);
+                                            // ignore: unawaited_futures
+                                            appState
+                                                .setDesktopBackgroundBlurSigma(
+                                                    v);
+                                          },
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                            const Divider(height: 1),
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.translate_outlined),
+                              title: const Text('界面语言'),
+                              subtitle: const Text('影响桌面端所有页面文案'),
+                              trailing: ConstrainedBox(
+                                constraints:
+                                    BoxConstraints(maxWidth: trailingMaxWidth),
+                                child: DropdownButtonHideUnderline(
+                                  child: DropdownButton<String>(
+                                    value: appState.desktopUiLanguage,
+                                    isExpanded: true,
+                                    items: const [
+                                      DropdownMenuItem(
+                                        value: 'zhCn',
+                                        child: Text('中文'),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 'enUs',
+                                        child: Text('English'),
+                                      ),
+                                    ],
+                                    onChanged: (v) {
+                                      if (v == null) return;
+                                      appState.setDesktopUiLanguage(v);
+                                    },
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const Divider(height: 1),
+                          ],
+                          tvFocusRow(
+                            SwitchListTile(
+                              value: appState.showHomeLibraryQuickAccess,
+                              onChanged: (v) =>
+                                  appState.setShowHomeLibraryQuickAccess(v),
+                              title: const Text('首页媒体库快捷栏'),
+                              subtitle: const Text('在首页“继续观看”下方显示媒体库快速访问栏'),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                          if (isDesktop) ...[
+                            const Divider(height: 1),
+                            tvFocusRow(
+                              SwitchListTile(
+                                value: appState.libraryFilterPanelPinned,
+                                onChanged: (v) =>
+                                    appState.setLibraryFilterPanelPinned(v),
+                                title: const Text('常驻筛选面板'),
+                                subtitle: const Text('在媒体库详情页常驻显示筛选面板'),
+                                contentPadding: EdgeInsets.zero,
+                              ),
+                            ),
+                            const Divider(height: 1),
+                            tvFocusRow(
+                              SwitchListTile(
+                                value:
+                                    appState.libraryCustomPrefixFiltersEnabled,
+                                onChanged: (v) => appState
+                                    .setLibraryCustomPrefixFiltersEnabled(v),
+                                title: const Text('自定义 Tag/Genre 前缀筛选'),
+                                contentPadding: EdgeInsets.zero,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    playbackSection: _Section(
+                      title: '播放',
+                      subtitle: '播放行为、缓存、代理与媒体偏好',
+                      enableBlur: enableBlur,
+                      child: Column(
+                        children: [
+                          tvFocusRow(
+                            SwitchListTile(
+                              value: appState.episodePickerShowTitle,
+                              onChanged: (v) =>
+                                  appState.setEpisodePickerShowTitle(v),
+                              title: const Text('选集列表显示标题'),
+                              subtitle: Text(
+                                appState.episodePickerShowTitle
+                                    ? '条形显示标题和封面'
+                                    : '网格状仅显示集数',
+                              ),
+                              secondary: const Icon(Icons.format_list_numbered),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          tvFocusRow(
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.bug_report_outlined),
+                              title: const Text('导出诊断日志'),
+                              subtitle: const Text('复现问题后导出本次会话日志给开发者排查'),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () => _exportDiagnosticsLog(context),
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          tvFocusRow(
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.task_alt_outlined),
+                              title: const Text('标记阈值'),
+                              subtitle: Builder(
+                                builder: (context) {
+                                  const defaultValue = 90;
+                                  final value = (_markPlayedThresholdDraftPct ??
+                                          appState.markPlayedThresholdPercent
+                                              .toDouble())
+                                      .round()
+                                      .clamp(75, 100);
+                                  return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text('观看进度达到该比例时自动标记为已播放'),
+                                      const SizedBox(height: 6),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text('当前：$value%（75-100%）'),
+                                          ),
+                                          TextButton(
+                                            onPressed: value == defaultValue &&
+                                                    _markPlayedThresholdDraftPct ==
+                                                        null
+                                                ? null
+                                                : () {
+                                                    setState(() =>
+                                                        _markPlayedThresholdDraftPct =
+                                                            null);
+                                                    // ignore: unawaited_futures
+                                                    appState
+                                                        .setMarkPlayedThresholdPercent(
+                                                            defaultValue);
+                                                  },
+                                            child: const Text('重置'),
+                                          ),
+                                        ],
+                                      ),
+                                      AppSlider(
+                                        value: value.toDouble(),
+                                        min: 75,
+                                        max: 100,
+                                        divisions: 25,
+                                        label: '$value%',
+                                        onChanged: (v) => setState(
+                                          () =>
+                                              _markPlayedThresholdDraftPct = v,
+                                        ),
+                                        onChangeEnd: (v) {
+                                          final next = v.round().clamp(75, 100);
+                                          setState(() =>
+                                              _markPlayedThresholdDraftPct =
+                                                  null);
+                                          // ignore: unawaited_futures
+                                          appState
+                                              .setMarkPlayedThresholdPercent(
+                                                  next);
+                                        },
+                                      ),
+                                    ],
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          tvFocusRow(
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.storage_outlined),
+                              title: const Text('播放缓冲大小'),
+                              subtitle: Builder(
+                                builder: (context) {
+                                  final cacheMb = (_mpvCacheDraftMb ??
+                                          appState.mpvCacheSizeMb.toDouble())
+                                      .round()
+                                      .clamp(200, 2048);
+                                  return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                          '当前：${cacheMb}MB（200-2048MB，默认500MB）'),
+                                      AppSlider(
+                                        value: cacheMb.toDouble(),
+                                        min: 200,
+                                        max: 2048,
+                                        divisions: 2048 - 200,
+                                        label: '${cacheMb}MB',
+                                        onChanged: (v) => setState(
+                                            () => _mpvCacheDraftMb = v),
+                                        onChangeEnd: (v) {
+                                          final mb = v.round().clamp(200, 2048);
+                                          setState(
+                                              () => _mpvCacheDraftMb = null);
+                                          // ignore: unawaited_futures
+                                          appState.setMpvCacheSizeMb(mb);
+                                        },
+                                      ),
+                                    ],
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          tvFocusRow(
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.tune_outlined),
+                              title: const Text('缓冲策略'),
+                              subtitle: Builder(
+                                builder: (context) {
+                                  final totalMb = (_mpvCacheDraftMb ??
+                                          appState.mpvCacheSizeMb.toDouble())
+                                      .round()
+                                      .clamp(200, 2048);
+                                  final ratio = (_bufferBackRatioDraft ??
+                                          appState.playbackBufferBackRatio)
+                                      .clamp(0.0, 0.30)
+                                      .toDouble();
+                                  final split = PlaybackBufferSplit.from(
+                                    totalMb: totalMb,
+                                    backRatio: ratio,
+                                  );
+                                  final backPct =
+                                      (split.backRatio * 100).round();
+                                  final forwardPct = 100 - backPct;
+
+                                  return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '回退：${split.backMb}MB（$backPct%）  前向：${split.forwardMb}MB（$forwardPct%）',
+                                      ),
+                                      const SizedBox(height: 8),
+                                      SegmentedButton<PlaybackBufferPreset>(
+                                        segments: PlaybackBufferPreset.values
+                                            .map(
+                                              (p) => ButtonSegment(
+                                                value: p,
+                                                label: Text(p.label),
+                                              ),
+                                            )
+                                            .toList(growable: false),
+                                        selected: {
+                                          appState.playbackBufferPreset
+                                        },
+                                        onSelectionChanged: (s) async {
+                                          setState(() =>
+                                              _bufferBackRatioDraft = null);
+                                          await appState
+                                              .setPlaybackBufferPreset(
+                                            s.first,
+                                          );
+                                        },
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              '回退比例：$backPct%（0-30%）',
+                                            ),
+                                          ),
+                                          TextButton(
+                                            onPressed:
+                                                appState.playbackBufferPreset ==
+                                                            PlaybackBufferPreset
+                                                                .seekFast &&
+                                                        (appState.playbackBufferBackRatio -
+                                                                    0.05)
+                                                                .abs() <
+                                                            0.00001 &&
+                                                        _bufferBackRatioDraft ==
+                                                            null
+                                                    ? null
+                                                    : () {
+                                                        // ignore: unawaited_futures
+                                                        appState
+                                                            .setPlaybackBufferPreset(
+                                                          PlaybackBufferPreset
+                                                              .seekFast,
+                                                        );
+                                                        setState(() =>
+                                                            _bufferBackRatioDraft =
+                                                                null);
+                                                      },
+                                            child: const Text('重置'),
+                                          ),
+                                        ],
+                                      ),
+                                      AppSlider(
+                                        value: split.backRatio,
+                                        min: 0.0,
+                                        max: 0.30,
+                                        divisions: 30,
+                                        label: '$backPct%',
+                                        onChanged: (v) => setState(
+                                          () => _bufferBackRatioDraft = v,
+                                        ),
+                                        onChangeEnd: (v) {
+                                          setState(() =>
+                                              _bufferBackRatioDraft = null);
+                                          // ignore: unawaited_futures
+                                          appState
+                                              .setPlaybackBufferBackRatio(v);
+                                        },
+                                      ),
+                                    ],
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          tvFocusRow(
+                            SwitchListTile(
+                              value: appState.flushBufferOnSeek,
+                              onChanged: (v) =>
+                                  appState.setFlushBufferOnSeek(v),
+                              contentPadding: EdgeInsets.zero,
+                              secondary: const Icon(Icons.flash_on_outlined),
+                              title: const Text('跳转时清空旧缓冲（推荐）'),
+                              subtitle: const Text('快进/快退/拖动进度后优先缓冲新位置，起播更快'),
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          SwitchListTile(
+                            value: appState.autoSkipIntro,
+                            onChanged: (v) async {
+                              await appState.setAutoSkipIntro(v);
+                            },
+                            secondary: const Icon(Icons.skip_next_outlined),
+                            title: const Text('自动跳过片头'),
+                            subtitle: const Text(
+                              '服务器支持片头数据时，在片头段会提示是否跳过。',
+                            ),
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          const Divider(height: 1),
+                          SwitchListTile(
+                            value: appState.preloadEnabled,
+                            onChanged: (v) async {
+                              await appState.setPreloadEnabled(v);
+                            },
+                            secondary: const Icon(Icons.download_outlined),
+                            title: const Text('预加载'),
+                            subtitle: const Text(
+                              '详情页预加载前 3 秒（电影/剧集），续看时从进度处预加载，并在达到观看阈值后预加载下一集前 3 秒。',
+                            ),
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          const Divider(height: 1),
+                          SwitchListTile(
+                            value: appState.unlimitedStreamCache,
+                            onChanged: (v) async {
+                              if (v) {
+                                final confirmed =
+                                    await _confirmEnableUnlimitedStreamCache(
+                                  context,
+                                );
+                                if (!confirmed) return;
+                              }
+                              await appState.setUnlimitedStreamCache(v);
+                            },
+                            secondary: const Icon(Icons.all_inclusive),
+                            title: const Text('不限制视频流缓存'),
+                            subtitle: const Text(
+                              '开启后在线播放会尽量缓存到结束，容易被误判为下载，请谨慎使用。',
+                            ),
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          const Divider(height: 1),
+                          if (isDesktop) ...[
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.vpn_lock_outlined),
+                              title: const Text('播放代理'),
+                              subtitle: Text(_playbackProxySubtitle(appState)),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () {
+                                unawaited(
+                                    _editPlaybackProxy(context, appState));
+                              },
+                            ),
+                            const Divider(height: 1),
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.open_in_new),
+                              title: const Text('外部 MPV（PC）'),
+                              subtitle: Text(
+                                appState.externalMpvPath.trim().isEmpty
+                                    ? '未设置：将尝试调用系统 mpv（PATH 或同目录）'
+                                    : appState.externalMpvPath,
+                              ),
+                              trailing: const Icon(Icons.folder_open),
+                              onTap: () async {
+                                final result = await FilePicker.pickFiles(
+                                  dialogTitle: '选择 mpv 可执行文件',
+                                  allowMultiple: false,
+                                  withData: false,
+                                  type: FileType.any,
+                                );
+                                final path = result?.files.single.path;
+                                if (path == null || path.trim().isEmpty) return;
+                                // ignore: unawaited_futures
+                                appState.setExternalMpvPath(path);
+                              },
+                            ),
+                            if (appState.externalMpvPath.trim().isNotEmpty) ...[
+                              const Divider(height: 1),
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: const Icon(Icons.delete_outline),
+                                title: const Text('清除外部 MPV 路径'),
+                                onTap: () {
+                                  // ignore: unawaited_futures
+                                  appState.setExternalMpvPath('');
+                                },
+                              ),
+                            ],
+                            const Divider(height: 1),
+                          ],
+                          tvFocusRow(
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.audiotrack),
+                              title: const Text('优先音轨'),
+                              trailing: ConstrainedBox(
+                                constraints:
+                                    BoxConstraints(maxWidth: trailingMaxWidth),
+                                child: DropdownButtonHideUnderline(
+                                  child: DropdownButton<String>(
+                                    value: appState.preferredAudioLang,
+                                    items: _audioLangItems(
+                                        appState.preferredAudioLang),
+                                    onChanged: (v) async {
+                                      if (v == null) return;
+                                      if (v == _customSentinel) {
+                                        final code = await _askCustomLang(
+                                          context,
+                                          title: '自定义音轨语言',
+                                          initial: appState.preferredAudioLang,
+                                        );
+                                        if (code == null) return;
+                                        await appState
+                                            .setPreferredAudioLang(code);
+                                        return;
+                                      }
+                                      await appState.setPreferredAudioLang(v);
+                                    },
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          tvFocusRow(
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.subtitles_outlined),
+                              title: const Text('优先字幕'),
+                              trailing: ConstrainedBox(
+                                constraints:
+                                    BoxConstraints(maxWidth: trailingMaxWidth),
+                                child: DropdownButtonHideUnderline(
+                                  child: DropdownButton<String>(
+                                    value: appState.preferredSubtitleLang,
+                                    items: _subtitleLangItems(
+                                        appState.preferredSubtitleLang),
+                                    onChanged: (v) async {
+                                      if (v == null) return;
+                                      if (v == _customSentinel) {
+                                        final code = await _askCustomLang(
+                                          context,
+                                          title: '自定义字幕语言',
+                                          initial:
+                                              appState.preferredSubtitleLang,
+                                        );
+                                        if (code == null) return;
+                                        await appState
+                                            .setPreferredSubtitleLang(code);
+                                        return;
+                                      }
+                                      await appState
+                                          .setPreferredSubtitleLang(v);
+                                    },
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          tvFocusRow(
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.touch_app_outlined),
+                              title: const Text('交互设置'),
+                              subtitle: const Text('手势、双击、快进快退等'),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => InteractionSettingsPage(
+                                      appState: widget.appState,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          if (isTv) ...[
+                            tvFocusRow(
+                              SwitchListTile(
+                                value: appState.danmakuEnabled,
+                                onChanged: (v) => appState.setDanmakuEnabled(v),
+                                secondary: const Icon(Icons.comment_outlined),
+                                title: const Text('弹幕'),
+                                subtitle: Text(
+                                  !appState.danmakuEnabled
+                                      ? '已关闭'
+                                      : (appState.danmakuLoadMode ==
+                                              DanmakuLoadMode.online
+                                          ? '在线：${appState.danmakuApiUrls.isEmpty ? '未配置弹幕源' : appState.danmakuApiUrls.first}'
+                                          : '本地弹幕'),
+                                ),
+                                contentPadding: EdgeInsets.zero,
+                              ),
+                            ),
+                            const Divider(height: 1),
+                            tvFocusRow(
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: const Icon(Icons.tune_outlined),
+                                title: const Text('弹幕设置'),
+                                subtitle: const Text('弹幕源 / 样式 / 匹配'),
+                                trailing: const Icon(Icons.chevron_right),
+                                onTap: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => DanmakuSettingsPage(
+                                          appState: widget.appState),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                            const Divider(height: 1),
+                            tvFocusRow(
+                              SwitchListTile(
+                                value: appState.autoSkipIntro,
+                                onChanged: (v) => appState.setAutoSkipIntro(v),
+                                secondary: const Icon(Icons.skip_next_outlined),
+                                title: const Text('自动跳过片头'),
+                                subtitle: const Text(
+                                  '服务器支持片头数据时，在片头段会提示是否跳过。',
+                                ),
+                                contentPadding: EdgeInsets.zero,
+                              ),
+                            ),
+                            const Divider(height: 1),
+                            tvFocusRow(
+                              SwitchListTile(
+                                value: appState.preloadEnabled,
+                                onChanged: (v) => appState.setPreloadEnabled(v),
+                                secondary: const Icon(Icons.download_outlined),
+                                title: const Text('预加载'),
+                                subtitle: const Text(
+                                  '详情页预加载前 3 秒（电影/剧集），续看时从进度处预加载，并在达到观看阈值后预加载下一集前 3 秒。',
+                                ),
+                                contentPadding: EdgeInsets.zero,
+                              ),
+                            ),
+                          ] else ...[
+                            tvFocusRow(
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: const Icon(Icons.comment_outlined),
+                                title: const Text('弹幕'),
+                                subtitle: Text(
+                                  appState.danmakuLoadMode ==
+                                          DanmakuLoadMode.online
+                                      ? '在线：${appState.danmakuApiUrls.isEmpty ? '未配置弹幕源' : appState.danmakuApiUrls.first}'
+                                      : '本地弹幕',
+                                ),
+                                trailing: const Icon(Icons.chevron_right),
+                                onTap: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => DanmakuSettingsPage(
+                                          appState: widget.appState),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+                          const Divider(height: 1),
+                          tvFocusRow(
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.video_file_outlined),
+                              title: const Text('优先视频版本'),
+                              trailing: ConstrainedBox(
+                                constraints:
+                                    BoxConstraints(maxWidth: trailingMaxWidth),
+                                child: DropdownButtonHideUnderline(
+                                  child: DropdownButton<VideoVersionPreference>(
+                                    value: appState.preferredVideoVersion,
+                                    items: VideoVersionPreference.values
+                                        .map(
+                                          (p) => DropdownMenuItem(
+                                            value: p,
+                                            child: Text(p.label),
+                                          ),
+                                        )
+                                        .toList(),
+                                    onChanged: (v) {
+                                      if (v == null) return;
+                                      appState.setPreferredVideoVersion(v);
+                                    },
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    appSection: _Section(
+                      title: '应用',
+                      subtitle: '插件、备份迁移、缓存与更新',
+                      enableBlur: enableBlur,
+                      child: Column(
+                        children: [
+                          tvFocusRow(
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.extension_outlined),
+                              title: const Text('插件'),
+                              subtitle: const Text('安装/管理脚本插件'),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        PluginsPage(appState: widget.appState),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          tvFocusRow(
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.upload_file_outlined),
+                              title: const Text('导出备份（免密码）'),
+                              subtitle: const Text('不加密：导出全部设置与服务器 token'),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () => _exportPlainBackup(context),
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          tvFocusRow(
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.lock_outline),
+                              title: const Text('导出加密备份（推荐）'),
+                              subtitle: const Text('需要备份密码：可选导出账号密码/会话 token'),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () => _exportEncryptedBackup(context),
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          tvFocusRow(
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(
+                                  Icons.download_for_offline_outlined),
+                              title: const Text('导入备份'),
+                              subtitle: const Text('覆盖本机全部设置与 Emby 服务器列表'),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () => _importBackup(context),
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          tvFocusRow(
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.content_paste_outlined),
+                              title: const Text('从文本提取并导入服务器'),
+                              subtitle:
+                                  const Text('解析“线路 & 用户密码”消息，批量创建服务器/线路'),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () => _openServerTextImport(context),
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          tvFocusRow(
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.delete_outline),
+                              title: const Text('清理视频流缓存'),
+                              subtitle: const Text('删除本地缓存的视频流数据'),
+                              onTap: () async {
+                                final confirmed = await showDialog<bool>(
+                                  context: context,
+                                  builder: (dctx) => AlertDialog(
+                                    title: const Text('清理视频流缓存'),
+                                    content: const Text(
+                                      '将删除已缓存的视频流数据，下次播放时会重新缓存。',
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.of(dctx).pop(false),
+                                        child: const Text('取消'),
+                                      ),
+                                      FilledButton(
+                                        onPressed: () =>
+                                            Navigator.of(dctx).pop(true),
+                                        child: const Text('清理'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (confirmed != true) return;
+                                try {
+                                  await StreamCache.clear();
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('已清理视频流缓存')),
+                                  );
+                                } catch (e) {
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('清理失败：$e')),
+                                  );
+                                }
+                              },
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          tvFocusRow(
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.delete_outline),
+                              title: const Text('清理封面缓存'),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Text('删除本地缓存的封面/随机推荐图片'),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '已缓存${_formatMb(_coverCacheSizeBytes)}',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurfaceVariant,
+                                        ),
+                                  ),
+                                ],
+                              ),
+                              onTap: () async {
+                                final confirmed = await showDialog<bool>(
+                                  context: context,
+                                  builder: (dctx) => AlertDialog(
+                                    title: const Text('清理封面缓存'),
+                                    content: const Text(
+                                      '将删除已缓存的封面/随机推荐图片，下次展示时会重新下载。',
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.of(dctx).pop(false),
+                                        child: const Text('取消'),
+                                      ),
+                                      FilledButton(
+                                        onPressed: () => Navigator.of(dctx).pop(
+                                          true,
+                                        ),
+                                        child: const Text('清理'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (confirmed != true) return;
+                                try {
+                                  await CoverCacheManager.instance.emptyCache();
+                                  PaintingBinding.instance.imageCache.clear();
+                                  PaintingBinding.instance.imageCache
+                                      .clearLiveImages();
+                                  unawaited(_refreshCoverCacheSize());
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('已清理封面缓存')),
+                                  );
+                                } catch (e) {
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('清理失败：$e')),
+                                  );
+                                }
+                              },
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          tvFocusRow(
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.delete_sweep_outlined),
+                              title: const Text(
+                                  '\u6e05\u7406\u6d4f\u89c8\u7f13\u5b58'),
+                              subtitle: const Text(
+                                '\u5220\u9664\u9996\u9875\u3001\u7ee7\u7eed\u89c2\u770b\u3001\u8be6\u60c5\u9875\u7b49\u5185\u5bb9\u7f13\u5b58',
+                              ),
+                              onTap: () => _clearBrowsingCache(context),
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          tvFocusRow(
+                            SwitchListTile(
+                              value: appState.autoUpdateEnabled,
+                              onChanged: (v) async {
+                                await appState.setAutoUpdateEnabled(v);
+                                if (v && context.mounted) {
+                                  unawaited(
+                                    AppUpdateFlow.maybeAutoCheck(
+                                      context,
+                                      appState: appState,
+                                      force: true,
+                                    ),
+                                  );
+                                }
+                              },
+                              secondary: const Icon(Icons.system_update),
+                              title: const Text('自动更新'),
+                              subtitle: const Text('启动时自动检查新版本，并在发现更新时提示安装'),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          tvFocusRow(
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading:
+                                  const Icon(Icons.system_update_alt_outlined),
+                              title: const Text('检查更新'),
+                              subtitle: _currentVersionFull.trim().isEmpty
+                                  ? null
+                                  : Text('当前版本：${_currentVersionFull.trim()}'),
+                              trailing: _checkingUpdate
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2),
+                                    )
+                                  : const Icon(Icons.chevron_right),
+                              onTap: _checkingUpdate
+                                  ? null
+                                  : () => _checkUpdates(context),
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          tvFocusRow(
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(Icons.info_outline),
+                              title: const Text('关于'),
+                              subtitle: Text(
+                                  '${appConfig.displayName} (${appConfig.repoUrl})'),
+                              trailing: const Icon(Icons.open_in_new),
+                              onTap: () async {
+                                final ok =
+                                    await launchUrlString(appConfig.repoUrl);
+                                if (!ok && context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('无法打开链接，请检查系统浏览器/网络设置'),
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
+                          ),
+                          const Divider(height: 1),
+                          tvFocusRow(
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading:
+                                  const Icon(Icons.volunteer_activism_outlined),
+                              title: const Text('捐赠'),
+                              subtitle: const Text('支持作者继续开发（爱发电）'),
+                              trailing: const Icon(Icons.open_in_new),
+                              onTap: () async {
+                                final ok = await launchUrlString(_donateUrl);
+                                if (!ok && context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('无法打开链接，请检查系统浏览器/网络设置'),
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _UpdateProgressDialog extends StatefulWidget {
+  const _UpdateProgressDialog({required this.asset});
+
+  final GitHubReleaseAsset asset;
+
+  @override
+  State<_UpdateProgressDialog> createState() => _UpdateProgressDialogState();
+}
+
+class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
+  double? _progress;
+  String _status = '正在下载更新...';
+
+  @override
+  void initState() {
+    super.initState();
+    _start();
+  }
+
+  Future<void> _start() async {
+    final svc = AppUpdateService();
+    try {
+      final file = await svc.downloadAssetToTemp(
+        widget.asset,
+        onProgress: (received, total) {
+          if (!mounted) return;
+          if (total <= 0) {
+            setState(() => _progress = null);
+            return;
+          }
+          setState(() => _progress = received / total);
+        },
+      );
+      if (!mounted) return;
+      setState(() => _status = '正在启动安装程序（如弹出权限提示请允许）...');
+      await svc.startWindowsInstaller(file);
+      exit(0);
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context).pop(e.toString());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    var progress = _progress;
+    if (progress != null) {
+      if (progress < 0) progress = 0;
+      if (progress > 1) progress = 1;
+    }
+
+    return AlertDialog(
+      title: const Text('正在更新'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(_status),
+          const SizedBox(height: 16),
+          if (progress == null)
+            const Center(child: CircularProgressIndicator())
+          else ...[
+            LinearProgressIndicator(value: progress),
+            const SizedBox(height: 8),
+            Text('${(progress * 100).toStringAsFixed(0)}%'),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _UnlimitedStreamCacheConfirmDialog extends StatefulWidget {
+  const _UnlimitedStreamCacheConfirmDialog();
+
+  @override
+  State<_UnlimitedStreamCacheConfirmDialog> createState() =>
+      _UnlimitedStreamCacheConfirmDialogState();
+}
+
+class _UnlimitedStreamCacheConfirmDialogState
+    extends State<_UnlimitedStreamCacheConfirmDialog> {
+  static const _waitSeconds = 3;
+  int _remaining = _waitSeconds;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return;
+      setState(() {
+        _remaining -= 1;
+        if (_remaining <= 0) {
+          _remaining = 0;
+          timer.cancel();
+        }
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canConfirm = _remaining == 0;
+    return AlertDialog(
+      title: const Text('开启不限制缓存？'),
+      content: const Text(
+        '开启后将会一直缓存到结束，容易被误判为下载。\n'
+        '注意使用。\n\n'
+        '等待 3 秒后「确定」按钮才可以点击。',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: canConfirm ? () => Navigator.of(context).pop(true) : null,
+          child: Text(canConfirm ? '确定' : '确定（$_remaining）'),
+        ),
+      ],
+    );
+  }
+}
+
+class _Section extends StatelessWidget {
+  const _Section({
+    required this.title,
+    this.subtitle,
+    required this.child,
+    required this.enableBlur,
+  });
+
+  final String title;
+  final String? subtitle;
+  final Widget child;
+  final bool enableBlur;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppPanel(
+      enableBlur: enableBlur,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium
+                ?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          if ((subtitle ?? '').trim().isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(
+              subtitle!.trim(),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          DefaultTextStyle.merge(
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            child: child,
+          ),
+        ],
+      ),
     );
   }
 }

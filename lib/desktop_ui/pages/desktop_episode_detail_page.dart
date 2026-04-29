@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:ui' as ui;
 
 import '../models/desktop_ui_language.dart';
 import '../theme/desktop_theme_scope.dart';
@@ -12,12 +13,22 @@ class DesktopEpisodeDetailPage extends StatelessWidget {
     this.language = DesktopUiLanguage.zhCn,
     this.onOpenItem,
     this.onPlayPressed,
+    this.posterKey,
+    this.posterVisible = true,
+    this.onPosterReady,
+    this.posterSnapshotImage,
+    this.useSharedPosterOverlay = false,
   });
 
   final DesktopDetailViewModel viewModel;
   final DesktopUiLanguage language;
   final DesktopDetailOpenItem? onOpenItem;
   final VoidCallback? onPlayPressed;
+  final Key? posterKey;
+  final bool posterVisible;
+  final VoidCallback? onPosterReady;
+  final ui.Image? posterSnapshotImage;
+  final bool useSharedPosterOverlay;
 
   @override
   Widget build(BuildContext context) {
@@ -27,6 +38,11 @@ class DesktopEpisodeDetailPage extends StatelessWidget {
         language: language,
         onOpenItem: onOpenItem,
         onPlayPressed: onPlayPressed,
+        posterKey: posterKey,
+        posterVisible: posterVisible,
+        onPosterReady: onPosterReady,
+        posterSnapshotImage: posterSnapshotImage,
+        useSharedPosterOverlay: useSharedPosterOverlay,
       ),
     );
   }

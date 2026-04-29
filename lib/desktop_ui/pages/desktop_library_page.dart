@@ -12,6 +12,7 @@ import '../../library_items_page.dart';
 import '../../server_adapters/server_access.dart';
 import '../models/desktop_ui_language.dart';
 import '../theme/desktop_theme_extension.dart';
+import '../widgets/desktop_image_reveal.dart';
 import '../widgets/desktop_media_card.dart';
 import '../widgets/desktop_page_route.dart';
 import '../widgets/desktop_top_bar.dart' show DesktopHomeTab;
@@ -923,7 +924,11 @@ class _CategoryCoverImageState extends State<_CategoryCoverImage> {
       imageUrl: imageUrl,
       cacheManager: CoverCacheManager.instance,
       httpHeaders: {'User-Agent': LinHttpClientFactory.userAgent},
-      fit: BoxFit.cover,
+      imageBuilder: (context, imageProvider) => DesktopImageReveal(
+        key: ValueKey<String>('category-reveal-$imageUrl'),
+        image: imageProvider,
+        fit: BoxFit.cover,
+      ),
       placeholder: (_, __) => widget.placeholder,
       errorWidget: (_, __, ___) {
         if (_currentIndex < urls.length - 1) {

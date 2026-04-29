@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
+import 'dart:ui' as ui;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/gestures.dart';
@@ -57,12 +58,22 @@ class DesktopDetailPage extends StatefulWidget {
     this.language = DesktopUiLanguage.zhCn,
     this.onOpenItem,
     this.onPlayPressed,
+    this.posterKey,
+    this.posterVisible = true,
+    this.onPosterReady,
+    this.posterSnapshotImage,
+    this.useSharedPosterOverlay = false,
   });
 
   final DesktopDetailViewModel viewModel;
   final DesktopUiLanguage language;
   final DesktopDetailOpenItem? onOpenItem;
   final VoidCallback? onPlayPressed;
+  final Key? posterKey;
+  final bool posterVisible;
+  final VoidCallback? onPosterReady;
+  final ui.Image? posterSnapshotImage;
+  final bool useSharedPosterOverlay;
 
   @override
   State<DesktopDetailPage> createState() => _DesktopDetailPageState();
@@ -575,7 +586,8 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
     ServerAuthSession auth,
     Map<String, dynamic>? mediaSource,
   ) {
-    final directCandidate = (mediaSource?['DirectStreamUrl'] as String?)?.trim();
+    final directCandidate =
+        (mediaSource?['DirectStreamUrl'] as String?)?.trim();
     final pathCandidate = (mediaSource?['Path'] as String?)?.trim();
     final pathUri = (pathCandidate == null || pathCandidate.isEmpty)
         ? null
@@ -583,7 +595,9 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
 
     final candidate = (directCandidate != null && directCandidate.isNotEmpty)
         ? directCandidate
-        : ((pathUri != null && pathUri.scheme.isNotEmpty && pathUri.host.isNotEmpty)
+        : ((pathUri != null &&
+                pathUri.scheme.isNotEmpty &&
+                pathUri.host.isNotEmpty)
             ? pathCandidate
             : null);
     if (candidate == null || candidate.isEmpty) return null;
@@ -591,7 +605,8 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
     final resolved = Uri.parse(auth.baseUrl).resolve(candidate);
 
     bool sameOrigin(Uri a, Uri b) {
-      int portOf(Uri u) => u.hasPort ? u.port : (u.scheme == 'https' ? 443 : 80);
+      int portOf(Uri u) =>
+          u.hasPort ? u.port : (u.scheme == 'https' ? 443 : 80);
       return a.scheme == b.scheme && a.host == b.host && portOf(a) == portOf(b);
     }
 
@@ -679,8 +694,11 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
       final source = directFromPlaybackInfo ?? streamUrl;
 
       bool sameOrigin(Uri a, Uri b) {
-        int portOf(Uri u) => u.hasPort ? u.port : (u.scheme == 'https' ? 443 : 80);
-        return a.scheme == b.scheme && a.host == b.host && portOf(a) == portOf(b);
+        int portOf(Uri u) =>
+            u.hasPort ? u.port : (u.scheme == 'https' ? 443 : 80);
+        return a.scheme == b.scheme &&
+            a.host == b.host &&
+            portOf(a) == portOf(b);
       }
 
       final sourceUri = Uri.tryParse(source);
@@ -694,8 +712,9 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
       final launched = await launchExternalMpv(
         executablePath: vm.appState.externalMpvPath,
         source: source,
-        httpHeaders:
-            needsAuthHeaders ? access.adapter.buildStreamHeaders(access.auth) : null,
+        httpHeaders: needsAuthHeaders
+            ? access.adapter.buildStreamHeaders(access.auth)
+            : null,
       );
       _showMessage(
         launched
@@ -757,6 +776,11 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
                   child: _HeroPanel(
                     item: item,
                     access: vm.access,
+                    posterKey: widget.posterKey,
+                    posterVisible: widget.posterVisible,
+                    onPosterReady: widget.onPosterReady,
+                    posterSnapshotImage: widget.posterSnapshotImage,
+                    useSharedPosterOverlay: widget.useSharedPosterOverlay,
                     watched: watched,
                     isFavorite: vm.favorite,
                     trackState: trackState,
@@ -1075,6 +1099,11 @@ class _HeroPanel extends StatelessWidget {
   const _HeroPanel({
     required this.item,
     required this.access,
+    required this.posterKey,
+    required this.posterVisible,
+    this.onPosterReady,
+    this.posterSnapshotImage,
+    this.useSharedPosterOverlay = false,
     required this.language,
     required this.watched,
     required this.isFavorite,
@@ -1091,6 +1120,11 @@ class _HeroPanel extends StatelessWidget {
 
   final MediaItem item;
   final ServerAccess? access;
+  final Key? posterKey;
+  final bool posterVisible;
+  final VoidCallback? onPosterReady;
+  final ui.Image? posterSnapshotImage;
+  final bool useSharedPosterOverlay;
   final DesktopUiLanguage language;
   final bool watched;
   final bool isFavorite;
@@ -1215,10 +1249,15 @@ class _HeroPanel extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             _PosterCard(
+                              key: posterKey,
                               imageUrl: posterUrl,
                               fallbackLabel: item.name,
                               width: posterWidth,
                               height: posterHeight,
+                              visible: posterVisible,
+                              onReady: onPosterReady,
+                              transitionImage: posterSnapshotImage,
+                              useSharedPosterOverlay: useSharedPosterOverlay,
                             ),
                             const SizedBox(height: 22),
                             _HeroInfoColumn(
@@ -1245,10 +1284,15 @@ class _HeroPanel extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             _PosterCard(
+                              key: posterKey,
                               imageUrl: posterUrl,
                               fallbackLabel: item.name,
                               width: posterWidth,
                               height: posterHeight,
+                              visible: posterVisible,
+                              onReady: onPosterReady,
+                              transitionImage: posterSnapshotImage,
+                              useSharedPosterOverlay: useSharedPosterOverlay,
                             ),
                             const SizedBox(width: 32),
                             Expanded(
@@ -1460,48 +1504,129 @@ class _HeroInfoColumn extends StatelessWidget {
   }
 }
 
-class _PosterCard extends StatelessWidget {
+class _PosterCard extends StatefulWidget {
   const _PosterCard({
+    super.key,
     required this.imageUrl,
     required this.fallbackLabel,
     required this.width,
     required this.height,
+    this.visible = true,
+    this.onReady,
+    this.transitionImage,
+    this.useSharedPosterOverlay = false,
   });
 
   final String? imageUrl;
   final String fallbackLabel;
   final double width;
   final double height;
+  final bool visible;
+  final VoidCallback? onReady;
+  final ui.Image? transitionImage;
+  final bool useSharedPosterOverlay;
+
+  @override
+  State<_PosterCard> createState() => _PosterCardState();
+}
+
+class _PosterCardState extends State<_PosterCard> {
+  bool _readyReported = false;
+
+  @override
+  void didUpdateWidget(covariant _PosterCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final oldImageUrl = (oldWidget.imageUrl ?? '').trim();
+    final newImageUrl = (widget.imageUrl ?? '').trim();
+    if (oldImageUrl != newImageUrl ||
+        oldWidget.fallbackLabel != widget.fallbackLabel ||
+        oldWidget.transitionImage != widget.transitionImage) {
+      _readyReported = false;
+    }
+  }
+
+  void _scheduleReadyNotification() {
+    if (_readyReported) return;
+    _readyReported = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      widget.onReady?.call();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = _EpisodeDetailColors.of(context);
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: colors.shadow,
-            blurRadius: 20,
-            offset: Offset(0, 4),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: (imageUrl ?? '').trim().isEmpty
-            ? _FallbackImage(label: fallbackLabel)
-            : CachedNetworkImage(
-                imageUrl: imageUrl!,
-                cacheManager: CoverCacheManager.instance,
-                httpHeaders: {'User-Agent': LinHttpClientFactory.userAgent},
-                fit: BoxFit.cover,
-                errorWidget: (_, __, ___) =>
-                    _FallbackImage(label: fallbackLabel),
-                placeholder: (_, __) => const SizedBox.shrink(),
+    final imageUrl = (widget.imageUrl ?? '').trim();
+    if (widget.useSharedPosterOverlay) {
+      return SizedBox(
+        width: widget.width,
+        height: widget.height,
+      );
+    }
+    final hasTransitionImage =
+        widget.transitionImage != null && !widget.visible;
+    final liveLayerOpacity =
+        widget.visible || widget.transitionImage == null ? 1.0 : 0.0;
+    if (imageUrl.isEmpty) {
+      _scheduleReadyNotification();
+    }
+    return Opacity(
+      opacity: 1,
+      child: Container(
+        width: widget.width,
+        height: widget.height,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: colors.shadow,
+              blurRadius: 20,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (hasTransitionImage)
+                RawImage(
+                  image: widget.transitionImage,
+                  fit: BoxFit.cover,
+                  filterQuality: FilterQuality.high,
+                ),
+              Opacity(
+                opacity: liveLayerOpacity,
+                child: imageUrl.isEmpty
+                    ? _FallbackImage(label: widget.fallbackLabel)
+                    : Image(
+                        image: CachedNetworkImageProvider(
+                          imageUrl,
+                          cacheManager: CoverCacheManager.instance,
+                          headers: {
+                            'User-Agent': LinHttpClientFactory.userAgent,
+                          },
+                        ),
+                        fit: BoxFit.cover,
+                        gaplessPlayback: true,
+                        filterQuality: FilterQuality.high,
+                        frameBuilder: (context, child, frame, wasSyncLoaded) {
+                          if (wasSyncLoaded || frame != null) {
+                            _scheduleReadyNotification();
+                          }
+                          return child;
+                        },
+                        errorBuilder: (context, error, stackTrace) {
+                          _scheduleReadyNotification();
+                          return _FallbackImage(label: widget.fallbackLabel);
+                        },
+                      ),
               ),
+            ],
+          ),
+        ),
       ),
     );
   }

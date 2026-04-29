@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
@@ -30,6 +32,7 @@ import 'theme/desktop_theme_extension.dart';
 import 'theme/desktop_theme_scope.dart';
 import 'view_models/desktop_detail_view_model.dart';
 import 'widgets/desktop_page_route.dart';
+import 'widgets/desktop_shared_transition_coordinator.dart';
 import 'widgets/desktop_shortcut_wrapper.dart';
 import 'widgets/desktop_sidebar.dart';
 import 'widgets/desktop_sidebar_item.dart' show DesktopSidebarServerAction;
@@ -114,10 +117,14 @@ class _DesktopWorkspace extends StatefulWidget {
   State<_DesktopWorkspace> createState() => _DesktopWorkspaceState();
 }
 
-class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
+class _DesktopWorkspaceState extends State<_DesktopWorkspace>
+    with SingleTickerProviderStateMixin {
   static const double _kTopBarFadeDistance = 220.0;
   static const Duration _kSectionTransitionDuration = Duration(
     milliseconds: 240,
+  );
+  static const Duration _kSharedOpenTransitionDuration = Duration(
+    milliseconds: 520,
   );
 
   _DesktopSection _section = _DesktopSection.library;
@@ -137,7 +144,17 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
   bool _loadingMediaStats = false;
   int _mediaStatsRequestVersion = 0;
   final ValueNotifier<double> _topBarVisibility = ValueNotifier<double>(1.0);
+  final GlobalKey _contentTransitionRootKey = GlobalKey();
+  final GlobalKey _detailPosterKey = GlobalKey();
   _DesktopSectionTransition _sectionTransition = _DesktopSectionTransition.fade;
+  late final AnimationController _sharedOpenController = AnimationController(
+    vsync: this,
+    duration: _kSharedOpenTransitionDuration,
+  )..addStatusListener(_handleSharedOpenTransitionStatus);
+  _DesktopSharedOpenTransitionState? _sharedOpenTransition;
+  int _sharedOpenResolveAttempts = 0;
+  bool _sharedOpenAnimationCompleted = false;
+  bool _sharedOpenDetailPosterReady = false;
 
   @override
   void initState() {
@@ -147,10 +164,130 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
 
   @override
   void dispose() {
+    _sharedOpenController
+      ..removeStatusListener(_handleSharedOpenTransitionStatus)
+      ..dispose();
+    _sharedOpenTransition?.dispose();
     _searchController.dispose();
     _topBarVisibility.dispose();
     _detailViewModel?.dispose();
     super.dispose();
+  }
+
+  void _disposeSharedTransitionLater(
+    _DesktopSharedOpenTransitionState? transition,
+  ) {
+    if (transition == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      transition.dispose();
+    });
+  }
+
+  void _handleSharedOpenTransitionStatus(AnimationStatus status) {
+    if (status != AnimationStatus.completed) return;
+    if (mounted) {
+      setState(() => _sharedOpenAnimationCompleted = true);
+    } else {
+      _sharedOpenAnimationCompleted = true;
+    }
+    _tryFinishSharedOpenTransitionHandoff();
+  }
+
+  void _handleDetailPosterReady() {
+    if (_sharedOpenTransition == null) return;
+    _sharedOpenDetailPosterReady = true;
+    _tryFinishSharedOpenTransitionHandoff();
+  }
+
+  void _tryFinishSharedOpenTransitionHandoff() {
+    if (!_sharedOpenAnimationCompleted || !_sharedOpenDetailPosterReady) {
+      return;
+    }
+  }
+
+  void _clearSharedOpenTransition({bool clearPendingSource = false}) {
+    if (clearPendingSource) {
+      DesktopSharedTransitionCoordinator.instance.clear();
+    }
+    _sharedOpenResolveAttempts = 0;
+    _sharedOpenAnimationCompleted = false;
+    _sharedOpenDetailPosterReady = false;
+    _sharedOpenController.stop();
+    final previousTransition = _sharedOpenTransition;
+    if (_sharedOpenTransition == null) {
+      if (_sharedOpenController.value != 0) {
+        _sharedOpenController.value = 0;
+      }
+      return;
+    }
+    if (!mounted) {
+      _sharedOpenTransition = null;
+      previousTransition?.dispose();
+      if (_sharedOpenController.value != 0) {
+        _sharedOpenController.value = 0;
+      }
+      return;
+    }
+    setState(() => _sharedOpenTransition = null);
+    if (_sharedOpenController.value != 0) {
+      _sharedOpenController.value = 0;
+    }
+    _disposeSharedTransitionLater(previousTransition);
+  }
+
+  void _scheduleSharedOpenTransitionResolution() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _resolveSharedOpenTransitionTargets();
+    });
+  }
+
+  void _resolveSharedOpenTransitionTargets() {
+    final transition = _sharedOpenTransition;
+    if (!mounted || transition == null) return;
+
+    final rootContext = _contentTransitionRootKey.currentContext;
+    final posterContext = _detailPosterKey.currentContext;
+    final rootBox = rootContext?.findRenderObject() as RenderBox?;
+    final posterBox = posterContext?.findRenderObject() as RenderBox?;
+
+    if (rootBox == null ||
+        posterBox == null ||
+        !rootBox.hasSize ||
+        !posterBox.hasSize) {
+      if (_sharedOpenResolveAttempts < 6) {
+        _sharedOpenResolveAttempts += 1;
+        _scheduleSharedOpenTransitionResolution();
+        return;
+      }
+      _clearSharedOpenTransition();
+      return;
+    }
+
+    final rootOrigin = rootBox.localToGlobal(Offset.zero);
+    final targetOrigin = posterBox.localToGlobal(Offset.zero);
+    final resolvedSourceRect = transition.sourceGlobalRect.shift(-rootOrigin);
+    final resolvedTargetRect = Rect.fromLTWH(
+      targetOrigin.dx - rootOrigin.dx,
+      targetOrigin.dy - rootOrigin.dy,
+      posterBox.size.width,
+      posterBox.size.height,
+    );
+
+    _sharedOpenResolveAttempts = 0;
+    setState(() {
+      _sharedOpenTransition = transition.copyWith(
+        sourceRect: resolvedSourceRect,
+        targetRect: resolvedTargetRect,
+        contentRect: Offset.zero & rootBox.size,
+      );
+    });
+    if (_sharedOpenAnimationCompleted) {
+      return;
+    }
+    _sharedOpenController
+      ..stop()
+      ..value = 0
+      ..forward();
   }
 
   DesktopUiLanguage get _uiLanguage =>
@@ -1026,6 +1163,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
   }
 
   void _handleHomeTabChanged(DesktopHomeTab tab) {
+    _clearSharedOpenTransition(clearPendingSource: true);
     setState(() {
       _sectionTransition = _DesktopSectionTransition.push;
       _homeTab = tab;
@@ -1047,6 +1185,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
   }
 
   Future<void> _openLibraryItems(String parentId, String title) async {
+    _clearSharedOpenTransition(clearPendingSource: true);
     final id = parentId.trim();
     if (id.isEmpty) return;
     final normalizedTitle = title.trim().isEmpty
@@ -1087,6 +1226,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
   }
 
   Future<void> _handleBackRequested() async {
+    _clearSharedOpenTransition(clearPendingSource: true);
     if (!_sidebarCollapsed) {
       setState(() => _sidebarCollapsed = true);
       return;
@@ -1159,6 +1299,13 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     final currentVm = _detailViewModel;
     final alreadyInDetail =
         _section == _DesktopSection.detail && currentVm != null;
+    final sharedSource =
+        (!alreadyInDetail && transition == _DesktopSectionTransition.push)
+            ? DesktopSharedTransitionCoordinator.instance.consumePendingSource(
+                itemId,
+              )
+            : null;
+    final runSharedOpen = sharedSource != null;
 
     if (alreadyInDetail && pushHistory) {
       final currentItem = currentVm.detail;
@@ -1189,9 +1336,23 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
       server: server,
     );
     _detailViewModel?.dispose();
+    final previousTransition = _sharedOpenTransition;
     setState(() {
-      _sectionTransition = transition;
+      _sectionTransition =
+          runSharedOpen ? _DesktopSectionTransition.fade : transition;
       _detailViewModel = next;
+      _sharedOpenAnimationCompleted = false;
+      _sharedOpenDetailPosterReady = false;
+      _sharedOpenTransition = runSharedOpen
+          ? _DesktopSharedOpenTransitionState(
+              itemId: itemId,
+              sourceGlobalRect: sharedSource.globalRect,
+              imageUrls: sharedSource.imageUrls,
+              sourceImage: sharedSource.snapshotImage,
+              fallbackLabel: sharedSource.fallbackLabel,
+              sourceBorderRadius: sharedSource.borderRadius,
+            )
+          : null;
       if (_sectionStack.isEmpty) {
         _sectionStack.add(_DesktopSection.detail);
       } else if (_sectionStack.last != _DesktopSection.detail) {
@@ -1199,7 +1360,20 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
       }
       _section = _DesktopSection.detail;
     });
+    if (!identical(previousTransition, _sharedOpenTransition)) {
+      _disposeSharedTransitionLater(previousTransition);
+    }
     _resetTopBarVisibility();
+    if (runSharedOpen) {
+      _scheduleSharedOpenTransitionResolution();
+    } else {
+      DesktopSharedTransitionCoordinator.instance.clear();
+      _sharedOpenResolveAttempts = 0;
+      _sharedOpenController.stop();
+      if (_sharedOpenController.value != 0) {
+        _sharedOpenController.value = 0;
+      }
+    }
     unawaited(next.load(forceRefresh: true));
   }
 
@@ -1601,6 +1775,9 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     if (notification.depth != 0) return false;
     final axis = axisDirectionToAxis(notification.metrics.axisDirection);
     if (axis != Axis.vertical) return false;
+    if (_sharedOpenTransition != null && _sharedOpenAnimationCompleted) {
+      _scheduleSharedOpenTransitionResolution();
+    }
 
     final pixels = notification.metrics.pixels;
     if (pixels <= 0) {
@@ -1661,6 +1838,8 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
         }
         final type = vm.detail.type.trim().toLowerCase();
         final detailKey = ValueKey<String>(vm.detail.id);
+        final posterVisible = _sharedOpenTransition == null;
+        final useSharedPosterOverlay = _sharedOpenTransition != null;
         if (type == 'movie') {
           return DesktopMovieDetailPage(
             key: detailKey,
@@ -1668,6 +1847,11 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
             language: _uiLanguage,
             onOpenItem: _openDetail,
             onPlayPressed: _onPlayCurrentDetail,
+            posterKey: _detailPosterKey,
+            posterVisible: posterVisible,
+            onPosterReady: _handleDetailPosterReady,
+            posterSnapshotImage: _sharedOpenTransition?.sourceImage,
+            useSharedPosterOverlay: useSharedPosterOverlay,
           );
         }
         if (type == 'episode') {
@@ -1677,6 +1861,11 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
             language: _uiLanguage,
             onOpenItem: _openDetail,
             onPlayPressed: _onPlayCurrentDetail,
+            posterKey: _detailPosterKey,
+            posterVisible: posterVisible,
+            onPosterReady: _handleDetailPosterReady,
+            posterSnapshotImage: _sharedOpenTransition?.sourceImage,
+            useSharedPosterOverlay: useSharedPosterOverlay,
           );
         }
         return DesktopShowDetailPage(
@@ -1685,6 +1874,11 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
           language: _uiLanguage,
           onOpenItem: _openDetail,
           onPlayPressed: _onPlayCurrentDetail,
+          posterKey: _detailPosterKey,
+          posterVisible: posterVisible,
+          onPosterReady: _handleDetailPosterReady,
+          posterSnapshotImage: _sharedOpenTransition?.sourceImage,
+          useSharedPosterOverlay: useSharedPosterOverlay,
         );
     }
   }
@@ -1890,12 +2084,57 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
                               );
                             },
                             transitionBuilder: _buildContentTransition,
-                            child: RepaintBoundary(
+                            child: KeyedSubtree(
                               key: contentKey,
-                              child: NotificationListener<ScrollNotification>(
-                                onNotification:
-                                    _handleContentScrollNotification,
-                                child: contentView,
+                              child: RepaintBoundary(
+                                key: _contentTransitionRootKey,
+                                child: AnimatedBuilder(
+                                  animation: _sharedOpenController,
+                                  builder: (context, _) {
+                                    final sharedTransition =
+                                        _sharedOpenTransition;
+                                    final sharedProgress =
+                                        _sharedOpenController.value;
+                                    final sharedResolved =
+                                        sharedTransition?.isResolved ?? false;
+                                    final sharedInteractionLocked =
+                                        sharedTransition != null &&
+                                            !_sharedOpenAnimationCompleted;
+                                    final contentOpacity = sharedTransition ==
+                                            null
+                                        ? 1.0
+                                        : sharedResolved
+                                            ? Curves.easeOutCubic.transform(
+                                                ((sharedProgress - 0.58) / 0.42)
+                                                    .clamp(0.0, 1.0),
+                                              )
+                                            : 0.0;
+
+                                    return Stack(
+                                      fit: StackFit.expand,
+                                      children: [
+                                        IgnorePointer(
+                                          ignoring: sharedInteractionLocked,
+                                          child: Opacity(
+                                            opacity: contentOpacity,
+                                            child: NotificationListener<
+                                                ScrollNotification>(
+                                              onNotification:
+                                                  _handleContentScrollNotification,
+                                              child: contentView,
+                                            ),
+                                          ),
+                                        ),
+                                        if (sharedTransition != null)
+                                          _DesktopSharedOpenOverlay(
+                                            transition: sharedTransition,
+                                            progress: sharedProgress,
+                                            theme: desktopTheme,
+                                          ),
+                                      ],
+                                    );
+                                  },
+                                ),
                               ),
                             ),
                           ),
@@ -1909,6 +2148,222 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _DesktopSharedOpenTransitionState {
+  const _DesktopSharedOpenTransitionState({
+    required this.itemId,
+    required this.sourceGlobalRect,
+    required this.imageUrls,
+    required this.sourceImage,
+    required this.fallbackLabel,
+    required this.sourceBorderRadius,
+    this.sourceRect,
+    this.targetRect,
+    this.contentRect,
+  });
+
+  final String itemId;
+  final Rect sourceGlobalRect;
+  final List<String> imageUrls;
+  final ui.Image? sourceImage;
+  final String fallbackLabel;
+  final double sourceBorderRadius;
+  final Rect? sourceRect;
+  final Rect? targetRect;
+  final Rect? contentRect;
+
+  bool get isResolved =>
+      sourceRect != null && targetRect != null && contentRect != null;
+
+  void dispose() {
+    sourceImage?.dispose();
+  }
+
+  _DesktopSharedOpenTransitionState copyWith({
+    Rect? sourceRect,
+    Rect? targetRect,
+    Rect? contentRect,
+  }) {
+    return _DesktopSharedOpenTransitionState(
+      itemId: itemId,
+      sourceGlobalRect: sourceGlobalRect,
+      imageUrls: imageUrls,
+      sourceImage: sourceImage,
+      fallbackLabel: fallbackLabel,
+      sourceBorderRadius: sourceBorderRadius,
+      sourceRect: sourceRect ?? this.sourceRect,
+      targetRect: targetRect ?? this.targetRect,
+      contentRect: contentRect ?? this.contentRect,
+    );
+  }
+}
+
+class _DesktopSharedOpenOverlay extends StatelessWidget {
+  const _DesktopSharedOpenOverlay({
+    required this.transition,
+    required this.progress,
+    required this.theme,
+  });
+
+  final _DesktopSharedOpenTransitionState transition;
+  final double progress;
+  final DesktopThemeExtension theme;
+
+  @override
+  Widget build(BuildContext context) {
+    final sourceRect = transition.sourceRect;
+    final targetRect = transition.targetRect;
+    final contentRect = transition.contentRect;
+    if (sourceRect == null || targetRect == null || contentRect == null) {
+      return const SizedBox.shrink();
+    }
+
+    final posterT = Curves.easeOutCubic.transform(
+      (progress / 0.72).clamp(0.0, 1.0),
+    );
+    final posterRect = Rect.lerp(sourceRect, targetRect, posterT)!;
+    final posterRadius =
+        ui.lerpDouble(transition.sourceBorderRadius, 12, posterT) ?? 12;
+
+    return IgnorePointer(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned.fromRect(
+            rect: posterRect,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(posterRadius),
+                boxShadow: [
+                  BoxShadow(
+                    color: theme.shadowColor.withValues(alpha: 0.34),
+                    blurRadius: 26,
+                    offset: const Offset(0, 16),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(posterRadius),
+                child: transition.sourceImage != null
+                    ? RawImage(
+                        image: transition.sourceImage,
+                        fit: BoxFit.cover,
+                        filterQuality: FilterQuality.high,
+                      )
+                    : _DesktopSharedOpenPosterImage(
+                        imageUrls: transition.imageUrls,
+                        fallbackLabel: transition.fallbackLabel,
+                      ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DesktopSharedOpenPosterImage extends StatefulWidget {
+  const _DesktopSharedOpenPosterImage({
+    required this.imageUrls,
+    required this.fallbackLabel,
+  });
+
+  final List<String> imageUrls;
+  final String fallbackLabel;
+
+  @override
+  State<_DesktopSharedOpenPosterImage> createState() =>
+      _DesktopSharedOpenPosterImageState();
+}
+
+class _DesktopSharedOpenPosterImageState
+    extends State<_DesktopSharedOpenPosterImage> {
+  int _currentIndex = 0;
+
+  @override
+  void didUpdateWidget(covariant _DesktopSharedOpenPosterImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imageUrls.join('|') != widget.imageUrls.join('|')) {
+      _currentIndex = 0;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final imageUrls = widget.imageUrls
+        .map((url) => url.trim())
+        .where((url) => url.isNotEmpty)
+        .toList(growable: false);
+    if (imageUrls.isEmpty || _currentIndex >= imageUrls.length) {
+      return _DesktopSharedOpenFallback(label: widget.fallbackLabel);
+    }
+
+    final imageUrl = imageUrls[_currentIndex];
+    return CachedNetworkImage(
+      key: ValueKey<String>('shared-open-$imageUrl'),
+      imageUrl: imageUrl,
+      cacheManager: CoverCacheManager.instance,
+      httpHeaders: {'User-Agent': LinHttpClientFactory.userAgent},
+      fit: BoxFit.cover,
+      useOldImageOnUrlChange: true,
+      fadeInDuration: Duration.zero,
+      fadeOutDuration: Duration.zero,
+      placeholderFadeInDuration: Duration.zero,
+      placeholder: (_, __) => _DesktopSharedOpenFallback(
+        label: widget.fallbackLabel,
+      ),
+      errorWidget: (_, __, ___) {
+        if (_currentIndex < imageUrls.length - 1) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            setState(() => _currentIndex += 1);
+          });
+        }
+        return _DesktopSharedOpenFallback(label: widget.fallbackLabel);
+      },
+    );
+  }
+}
+
+class _DesktopSharedOpenFallback extends StatelessWidget {
+  const _DesktopSharedOpenFallback({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = DesktopThemeExtension.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            theme.surfaceElevated,
+            theme.surface,
+          ],
+        ),
+      ),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            label.trim().isEmpty ? 'Media' : label,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: theme.textMuted,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
       ),
     );
   }

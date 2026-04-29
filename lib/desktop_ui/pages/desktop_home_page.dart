@@ -15,7 +15,7 @@ import '../../search_page.dart';
 import '../../server_page.dart';
 import '../../server_adapters/server_access.dart';
 import '../../services/playback/player_core_pages.dart';
-import '../../settings_page.dart';
+import 'desktop_settings_page.dart';
 import '../../show_detail_page.dart';
 import '../../plugins/plugin_slot_area.dart';
 import '../../plugins/plugin_page_host_page.dart';
@@ -160,7 +160,7 @@ class _DesktopHomePageState extends State<DesktopHomePage> with RouteAware {
   Future<void> _openSettings() async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => SettingsPage(appState: widget.appState),
+        builder: (_) => DesktopSettingsPage(appState: widget.appState),
       ),
     );
   }

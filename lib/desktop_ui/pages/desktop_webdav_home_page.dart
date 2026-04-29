@@ -3,7 +3,7 @@ import 'package:lin_player_state/lin_player_state.dart';
 
 import '../../services/app_back_intent.dart';
 import '../../services/playback/player_core_pages.dart';
-import '../../settings_page.dart';
+import 'desktop_settings_page.dart';
 import '../../webdav_browser_page.dart';
 import '../widgets/desktop_cinematic_shell.dart';
 
@@ -41,7 +41,7 @@ class _DesktopWebDavHomePageState extends State<DesktopWebDavHomePage> {
       else
         WebDavBrowserPage(appState: appState, server: server),
       buildLocalPlayerScreen(appState: appState),
-      SettingsPage(appState: appState),
+      DesktopSettingsPage(appState: appState),
     ];
 
     return Actions(
