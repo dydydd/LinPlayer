@@ -55,6 +55,12 @@ jobs:
         shell: bash
         run: chmod +x legacy/tv-legacy/gradlew
 
+      - name: Fetch TV proxy assets (mihomo + metacubexd)
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./tool/fetch_tv_proxy_assets.ps1
+
       - name: Resolve artifact mode
         shell: bash
         env:
@@ -116,6 +122,21 @@ jobs:
           ./legacy/tv-legacy/gradlew -p legacy/tv-legacy "$LEGACY_TV_GRADLE_TASK" \
             -Plinplayer.versionCode="$BUILD_NUMBER" \
             -Plinplayer.versionName="$BUILD_NAME"
+
+      - name: Verify legacy TV APK bundles 32-bit mihomo
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK_PATH="$LEGACY_TV_APK_PATH"
+          if [[ ! -f "$APK_PATH" ]]; then
+            echo "Legacy TV APK not found: $APK_PATH" >&2
+            exit 1
+          fi
+          if ! unzip -l "$APK_PATH" | grep -q "lib/armeabi-v7a/libmihomo.so"; then
+            echo "Legacy TV APK is missing lib/armeabi-v7a/libmihomo.so" >&2
+            unzip -l "$APK_PATH" | grep "lib/" || true
+            exit 1
+          fi
 
       - name: Stage APK artifact
         shell: bash

@@ -10,6 +10,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+
 function Get-VersionFromPubspec {
   if (-not (Test-Path 'pubspec.yaml')) { return $null }
   $versionLine = Get-Content 'pubspec.yaml' | Where-Object { $_ -match '^\s*version:\s*' } | Select-Object -First 1
@@ -82,6 +84,29 @@ function Copy-IfExists([string]$Src, [string]$Dst) {
   return $true
 }
 
+function Test-ApkContainsEntry([string]$ApkPath, [string]$EntryPath) {
+  $resolvedApk = (Resolve-Path $ApkPath).Path
+  $zip = [System.IO.Compression.ZipFile]::OpenRead($resolvedApk)
+  try {
+    return $null -ne ($zip.Entries | Where-Object { $_.FullName -eq $EntryPath } | Select-Object -First 1)
+  } finally {
+    $zip.Dispose()
+  }
+}
+
+function Assert-TvApkContains32BitMihomo([string]$ApkPath) {
+  if (-not (Test-Path $ApkPath)) {
+    throw "TV APK not found: $ApkPath"
+  }
+
+  $entryPath = 'lib/armeabi-v7a/libmihomo.so'
+  if (-not (Test-ApkContainsEntry -ApkPath $ApkPath -EntryPath $entryPath)) {
+    throw "TV APK missing $entryPath. Ensure the build includes android-arm and bundled TV proxy assets."
+  }
+
+  Write-Host "Verified 32-bit mihomo in TV APK:" $ApkPath
+}
+
 if ($SplitPerAbi) {
   $copied = $false
   $copied = (Copy-IfExists 'build/app/outputs/flutter-apk/app-arm64-v8a-release.apk' (Join-Path $OutDir 'LinPlayer-Android-TV-arm64-v8a.apk')) -or $copied
@@ -90,6 +115,8 @@ if ($SplitPerAbi) {
   if (-not $copied) {
     throw "No split APKs found under build/app/outputs/flutter-apk/."
   }
+
+  Assert-TvApkContains32BitMihomo (Join-Path $OutDir 'LinPlayer-Android-TV-armeabi-v7a.apk')
 } else {
   $src = 'build/app/outputs/flutter-apk/app-release.apk'
   $dst = Join-Path $OutDir 'LinPlayer-Android-TV.apk'
@@ -97,9 +124,9 @@ if ($SplitPerAbi) {
     throw "APK output missing: $src"
   }
   Copy-Item -Path $src -Destination $dst -Force
+  Assert-TvApkContains32BitMihomo $dst
 }
 
 $outPath = (Resolve-Path $OutDir).Path
 Write-Host ""
 Write-Host "Output folder: $outPath"
-

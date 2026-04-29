@@ -1,6 +1,8 @@
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.util.Properties
+import java.util.zip.GZIPInputStream
 
 plugins {
     id("com.android.application")
@@ -13,6 +15,14 @@ fun propOrEnv(properties: Properties, propName: String, envName: String): String
     val prop = properties.getProperty(propName)?.trim()
     return prop?.takeIf { it.isNotEmpty() }
 }
+
+val repoRootDir =
+    rootProject.projectDir.parentFile?.parentFile
+        ?: throw GradleException("Cannot resolve repository root from ${rootProject.projectDir}")
+val sharedLegacyTvMihomoAssetFile =
+    File(repoRootDir, "assets/tv_proxy/mihomo/android/armeabi-v7a/mihomo.gz")
+val manualLegacyTvMihomoFile = project.file("src/main/jniLibs/armeabi-v7a/libmihomo.so")
+val generatedLegacyTvMihomoJniLibsDir = File(project.buildDir, "generated/mihomoJniLibs")
 
 android {
     namespace = "com.linplayer.tvlegacy"
@@ -146,4 +156,52 @@ dependencies {
 
     // QR code (Android 4.4 compatible)
     implementation("com.google.zxing:core:3.5.3")
+}
+
+val prepareLegacyTvMihomoJniLibs =
+    tasks.register("prepareLegacyTvMihomoJniLibs") {
+        inputs.property("sharedLegacyTvMihomoAssetPath", sharedLegacyTvMihomoAssetFile.path)
+        inputs.property("sharedLegacyTvMihomoAssetExists", sharedLegacyTvMihomoAssetFile.exists())
+        inputs.property(
+            "sharedLegacyTvMihomoAssetLastModified",
+            if (sharedLegacyTvMihomoAssetFile.exists()) sharedLegacyTvMihomoAssetFile.lastModified() else -1L,
+        )
+        inputs.property("manualLegacyTvMihomoFilePath", manualLegacyTvMihomoFile.path)
+        inputs.property("manualLegacyTvMihomoExists", manualLegacyTvMihomoFile.exists())
+        inputs.property(
+            "manualLegacyTvMihomoLastModified",
+            if (manualLegacyTvMihomoFile.exists()) manualLegacyTvMihomoFile.lastModified() else -1L,
+        )
+        outputs.dir(generatedLegacyTvMihomoJniLibsDir)
+
+        doLast {
+            generatedLegacyTvMihomoJniLibsDir.deleteRecursively()
+
+            if (manualLegacyTvMihomoFile.exists()) {
+                logger.lifecycle(
+                    "Legacy TV mihomo already provided manually at ${manualLegacyTvMihomoFile.path}; skip generated fallback.",
+                )
+                return@doLast
+            }
+
+            if (!sharedLegacyTvMihomoAssetFile.exists()) {
+                logger.lifecycle(
+                    "Legacy TV mihomo asset not found at ${sharedLegacyTvMihomoAssetFile.path}; build will continue without bundled mihomo.",
+                )
+                return@doLast
+            }
+
+            val dst = File(generatedLegacyTvMihomoJniLibsDir, "armeabi-v7a/libmihomo.so")
+            dst.parentFile.mkdirs()
+            GZIPInputStream(FileInputStream(sharedLegacyTvMihomoAssetFile)).use { input ->
+                FileOutputStream(dst).use { output ->
+                    input.copyTo(output)
+                }
+            }
+        }
+    }
+
+android.sourceSets.getByName("main").jniLibs.srcDir(generatedLegacyTvMihomoJniLibsDir)
+tasks.named("preBuild").configure {
+    dependsOn(prepareLegacyTvMihomoJniLibs)
 }

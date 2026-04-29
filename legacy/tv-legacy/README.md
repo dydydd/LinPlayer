@@ -35,5 +35,7 @@
 ## 备注
 
 - `local.properties` 不提交；Android Studio 会生成。
-- 如需使用内置 mihomo 代理，请放置 `armeabi-v7a` 的 mihomo：`app/src/main/jniLibs/armeabi-v7a/libmihomo.so`
+- 内置 mihomo 代理默认优先复用仓库共享资产：`../../assets/tv_proxy/mihomo/android/armeabi-v7a/mihomo.gz`，构建时会自动解压并注入 `jniLibs`
+- 如需手动覆盖内核版本，可直接放置：`app/src/main/jniLibs/armeabi-v7a/libmihomo.so`
+- 若共享资产缺失，可先在仓库根目录运行：`./tool/fetch_tv_proxy_assets.ps1`
 - mihomo 配置运行时生成：`<app filesDir>/mihomo/config.yaml`
