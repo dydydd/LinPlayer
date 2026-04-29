@@ -75,7 +75,7 @@ class _DesktopUiSettingsPageState extends State<DesktopUiSettingsPage> {
                             _t(zh: '界面设置', en: 'UI Settings'),
                             style: TextStyle(
                               color: desktopTheme.textPrimary,
-                              fontSize: 19,
+                              fontSize: 22,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
@@ -98,7 +98,7 @@ class _DesktopUiSettingsPageState extends State<DesktopUiSettingsPage> {
                         ),
                         style: TextStyle(
                           color: desktopTheme.textMuted,
-                          fontSize: 13,
+                          fontSize: 14.5,
                         ),
                       ),
                       const SizedBox(height: 18),
@@ -107,7 +107,7 @@ class _DesktopUiSettingsPageState extends State<DesktopUiSettingsPage> {
                         style: TextStyle(
                           color: desktopTheme.textPrimary,
                           fontWeight: FontWeight.w600,
-                          fontSize: 14,
+                          fontSize: 15.5,
                         ),
                       ),
                       const SizedBox(height: 10),
@@ -142,7 +142,7 @@ class _DesktopUiSettingsPageState extends State<DesktopUiSettingsPage> {
                           _t(zh: '打开完整设置', en: 'Open Full Settings'),
                           style: TextStyle(
                             color: desktopTheme.textPrimary,
-                            fontSize: 13.5,
+                            fontSize: 15,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -153,7 +153,7 @@ class _DesktopUiSettingsPageState extends State<DesktopUiSettingsPage> {
                           ),
                           style: TextStyle(
                             color: desktopTheme.textMuted,
-                            fontSize: 12,
+                            fontSize: 13.5,
                           ),
                         ),
                         trailing: Icon(

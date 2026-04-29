@@ -74,7 +74,7 @@ class DesktopSidebarItem extends StatelessWidget {
                 fallbackInitial.toUpperCase(),
                 style: TextStyle(
                   color: selected ? theme.accent : theme.textMuted,
-                  fontSize: 13,
+                  fontSize: 14,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -100,7 +100,7 @@ class DesktopSidebarItem extends StatelessWidget {
         child: Padding(
           padding: EdgeInsets.symmetric(
             horizontal: collapsed ? 10 : 12,
-            vertical: 9,
+            vertical: 10,
           ),
           child: Row(
             mainAxisAlignment:
@@ -108,8 +108,8 @@ class DesktopSidebarItem extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
-                width: 34,
-                height: 34,
+                width: 40,
+                height: 40,
                 clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
                   color: selected
@@ -144,7 +144,7 @@ class DesktopSidebarItem extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: fgPrimary,
-                          fontSize: 15,
+                          fontSize: 16.5,
                           height: 1.1,
                           fontWeight:
                               selected ? FontWeight.w700 : FontWeight.w600,
@@ -157,7 +157,7 @@ class DesktopSidebarItem extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: fgSecondary,
-                          fontSize: 11.5,
+                          fontSize: 13,
                           height: 1.15,
                           fontWeight: FontWeight.w500,
                         ),

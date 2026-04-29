@@ -73,7 +73,7 @@ class DesktopSidebar extends StatelessWidget {
                 '服务器',
                 style: TextStyle(
                   color: theme.textMuted,
-                  fontSize: 12,
+                  fontSize: 13.5,
                   fontWeight: FontWeight.w600,
                   letterSpacing: 0.2,
                 ),
@@ -86,7 +86,7 @@ class DesktopSidebar extends StatelessWidget {
                         '暂无服务器',
                         style: TextStyle(
                           color: theme.textMuted,
-                          fontSize: 13,
+                          fontSize: 14.5,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -105,7 +105,8 @@ class DesktopSidebar extends StatelessWidget {
                             selected: selectedServerId == item.id,
                             collapsed: collapsed,
                             onTap: () => onSelected(item.id),
-                            onActionSelected: collapsed || onServerAction == null
+                            onActionSelected: collapsed ||
+                                    onServerAction == null
                                 ? null
                                 : (action) => onServerAction!(item.id, action),
                           ),

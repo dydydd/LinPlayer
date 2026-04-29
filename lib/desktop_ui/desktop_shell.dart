@@ -12,18 +12,22 @@ import 'package:lin_player_ui/lin_player_ui.dart';
 import '../server_adapters/server_access.dart';
 import '../library_page.dart';
 import '../library_items_page.dart';
-import '../settings_page.dart';
 import '../services/app_back_intent.dart';
-import '../services/playback/player_core_pages.dart';
 import 'mock/desktop_ui_preview_page.dart';
 import 'models/desktop_ui_language.dart';
-import 'pages/desktop_detail_page.dart';
+import 'pages/desktop_episode_detail_page.dart';
 import 'pages/desktop_library_page.dart';
+import 'pages/desktop_library_detail_page.dart';
+import 'pages/desktop_movie_detail_page.dart';
 import 'pages/desktop_navigation_layout.dart';
+import 'pages/desktop_player_page.dart';
 import 'pages/desktop_search_page.dart';
 import 'pages/desktop_server_page.dart';
+import 'pages/desktop_settings_page.dart';
+import 'pages/desktop_show_detail_page.dart';
 import 'pages/desktop_webdav_home_page.dart';
 import 'theme/desktop_theme_extension.dart';
+import 'theme/desktop_theme_scope.dart';
 import 'view_models/desktop_detail_view_model.dart';
 import 'widgets/desktop_page_route.dart';
 import 'widgets/desktop_shortcut_wrapper.dart';
@@ -158,56 +162,6 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
       default:
         return DesktopUiLanguage.zhCn;
     }
-  }
-
-  TextTheme _stripTextDecorations(TextTheme textTheme) {
-    TextStyle? clear(TextStyle? style) =>
-        style?.copyWith(decoration: TextDecoration.none);
-    return textTheme.copyWith(
-      displayLarge: clear(textTheme.displayLarge),
-      displayMedium: clear(textTheme.displayMedium),
-      displaySmall: clear(textTheme.displaySmall),
-      headlineLarge: clear(textTheme.headlineLarge),
-      headlineMedium: clear(textTheme.headlineMedium),
-      headlineSmall: clear(textTheme.headlineSmall),
-      titleLarge: clear(textTheme.titleLarge),
-      titleMedium: clear(textTheme.titleMedium),
-      titleSmall: clear(textTheme.titleSmall),
-      bodyLarge: clear(textTheme.bodyLarge),
-      bodyMedium: clear(textTheme.bodyMedium),
-      bodySmall: clear(textTheme.bodySmall),
-      labelLarge: clear(textTheme.labelLarge),
-      labelMedium: clear(textTheme.labelMedium),
-      labelSmall: clear(textTheme.labelSmall),
-    );
-  }
-
-  ThemeData _withDesktopTheme(ThemeData base) {
-    final fallback = DesktopThemeExtension.fallback(base.brightness);
-    final existing = base.extension<DesktopThemeExtension>();
-    final desktopTheme = existing ?? fallback;
-    final extensions = base.extensions.values
-        .where((ext) => ext is! DesktopThemeExtension)
-        .toList();
-    extensions.add(desktopTheme);
-
-    final scheme = ColorScheme.fromSeed(
-      seedColor: desktopTheme.accent,
-      brightness: base.brightness,
-    ).copyWith(
-      primary: desktopTheme.accent,
-      surface: desktopTheme.surface,
-    );
-
-    return base.copyWith(
-      colorScheme: scheme,
-      scaffoldBackgroundColor: desktopTheme.background,
-      canvasColor: desktopTheme.background,
-      cardColor: desktopTheme.surface,
-      textTheme: _stripTextDecorations(base.textTheme),
-      primaryTextTheme: _stripTextDecorations(base.primaryTextTheme),
-      extensions: extensions,
-    );
   }
 
   void _handleServerSelected(String serverId) {
@@ -1069,7 +1023,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
 
   void _handleHomeTabChanged(DesktopHomeTab tab) {
     setState(() {
-      _sectionTransition = _DesktopSectionTransition.stack;
+      _sectionTransition = _DesktopSectionTransition.push;
       _homeTab = tab;
       _sectionStack
         ..clear()
@@ -1104,7 +1058,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     final result = await Navigator.of(context).push<LibraryItemsPageResult>(
       buildDesktopPageRoute(
         transition: DesktopPageTransitionStyle.push,
-        builder: (_) => LibraryItemsPage(
+        builder: (_) => DesktopLibraryDetailPage(
           appState: widget.appState,
           parentId: id,
           title: normalizedTitle,
@@ -1271,7 +1225,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     await Navigator.of(context).push(
       buildDesktopPageRoute(
         transition: DesktopPageTransitionStyle.push,
-        builder: (_) => buildNetworkPlayerPage(
+        builder: (_) => DesktopPlayerPage.network(
           title: playable.name,
           itemId: playable.id,
           appState: widget.appState,
@@ -1312,8 +1266,8 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
   Future<void> _openSettings() async {
     await Navigator.of(context).push(
       buildDesktopPageRoute(
-        transition: DesktopPageTransitionStyle.stack,
-        builder: (_) => SettingsPage(appState: widget.appState),
+        transition: DesktopPageTransitionStyle.push,
+        builder: (_) => DesktopSettingsPage(appState: widget.appState),
       ),
     );
   }
@@ -1321,7 +1275,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
   Future<void> _openLibraryManager() async {
     await Navigator.of(context).push(
       buildDesktopPageRoute(
-        transition: DesktopPageTransitionStyle.stack,
+        transition: DesktopPageTransitionStyle.push,
         builder: (_) => LibraryPage(appState: widget.appState),
       ),
     );
@@ -1607,7 +1561,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
 
   void _handleSearchSubmitted(String value) {
     setState(() {
-      _sectionTransition = _DesktopSectionTransition.flip;
+      _sectionTransition = _DesktopSectionTransition.push;
       _searchQuery = value.trim();
       _searchController.value = TextEditingValue(
         text: _searchQuery,
@@ -1697,8 +1651,28 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
             ),
           );
         }
-        return DesktopDetailPage(
-          key: ValueKey<String>(vm.detail.id),
+        final type = vm.detail.type.trim().toLowerCase();
+        final detailKey = ValueKey<String>(vm.detail.id);
+        if (type == 'movie') {
+          return DesktopMovieDetailPage(
+            key: detailKey,
+            viewModel: vm,
+            language: _uiLanguage,
+            onOpenItem: _openDetail,
+            onPlayPressed: _onPlayCurrentDetail,
+          );
+        }
+        if (type == 'episode') {
+          return DesktopEpisodeDetailPage(
+            key: detailKey,
+            viewModel: vm,
+            language: _uiLanguage,
+            onOpenItem: _openDetail,
+            onPlayPressed: _onPlayCurrentDetail,
+          );
+        }
+        return DesktopShowDetailPage(
+          key: detailKey,
           viewModel: vm,
           language: _uiLanguage,
           onOpenItem: _openDetail,
@@ -1773,150 +1747,143 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
 
   @override
   Widget build(BuildContext context) {
-    final themed = _withDesktopTheme(Theme.of(context));
-
-    return Theme(
-      data: themed,
-      child: DefaultTextStyle.merge(
-        style: const TextStyle(decoration: TextDecoration.none),
-        child: Builder(
-          builder: (context) {
-            final desktopTheme = DesktopThemeExtension.of(context);
-            final desktopBackgroundImage =
-                widget.appState.desktopBackgroundImage.trim();
-            final desktopBackgroundOpacity = widget
-                .appState.desktopBackgroundOpacity
-                .clamp(0.0, 1.0)
-                .toDouble();
-            final hasCustomBackground = desktopBackgroundImage.isNotEmpty;
-            final isDetailSection = _section == _DesktopSection.detail;
-            final baseBackground = desktopTheme.background;
-            final contentBackgroundStart = isDetailSection
-                ? desktopTheme.background
-                : desktopTheme.backgroundGradientStart;
-            final contentBackgroundEnd = isDetailSection
-                ? desktopTheme.background
-                : desktopTheme.backgroundGradientEnd;
-            final overlayAlpha = hasCustomBackground
-                ? (1.0 - desktopBackgroundOpacity).clamp(0.0, 1.0).toDouble()
-                : 1.0;
-            final overlayBackgroundStart = hasCustomBackground
-                ? contentBackgroundStart.withValues(alpha: overlayAlpha)
-                : contentBackgroundStart;
-            final overlayBackgroundEnd = hasCustomBackground
-                ? contentBackgroundEnd.withValues(alpha: overlayAlpha)
-                : contentBackgroundEnd;
-            final title = switch (_section) {
-              _DesktopSection.library => _uiLanguage.pick(
-                  zh: _homeTab == DesktopHomeTab.home
-                      ? '\u4e3b\u9875'
-                      : '\u559c\u6b22',
-                  en: _homeTab == DesktopHomeTab.home ? 'Home' : 'Favorites',
+    return DesktopThemeScope(
+      child: Builder(
+        builder: (context) {
+          final desktopTheme = DesktopThemeExtension.of(context);
+          final desktopBackgroundImage =
+              widget.appState.desktopBackgroundImage.trim();
+          final desktopBackgroundOpacity = widget
+              .appState.desktopBackgroundOpacity
+              .clamp(0.0, 1.0)
+              .toDouble();
+          final hasCustomBackground = desktopBackgroundImage.isNotEmpty;
+          final isDetailSection = _section == _DesktopSection.detail;
+          final baseBackground = desktopTheme.background;
+          final contentBackgroundStart = isDetailSection
+              ? desktopTheme.background
+              : desktopTheme.backgroundGradientStart;
+          final contentBackgroundEnd = isDetailSection
+              ? desktopTheme.background
+              : desktopTheme.backgroundGradientEnd;
+          final overlayAlpha = hasCustomBackground
+              ? (1.0 - desktopBackgroundOpacity).clamp(0.0, 1.0).toDouble()
+              : 1.0;
+          final overlayBackgroundStart = hasCustomBackground
+              ? contentBackgroundStart.withValues(alpha: overlayAlpha)
+              : contentBackgroundStart;
+          final overlayBackgroundEnd = hasCustomBackground
+              ? contentBackgroundEnd.withValues(alpha: overlayAlpha)
+              : contentBackgroundEnd;
+          final title = switch (_section) {
+            _DesktopSection.library => _uiLanguage.pick(
+                zh: _homeTab == DesktopHomeTab.home
+                    ? '\u4e3b\u9875'
+                    : '\u559c\u6b22',
+                en: _homeTab == DesktopHomeTab.home ? 'Home' : 'Favorites',
+              ),
+            _DesktopSection.search => _uiLanguage.pick(
+                zh: '\u641c\u7d22',
+                en: 'Search',
+              ),
+            _DesktopSection.detail => _detailViewModel?.detail.name ??
+                _uiLanguage.pick(
+                  zh: '\u8be6\u60c5',
+                  en: 'Media Detail',
                 ),
-              _DesktopSection.search => _uiLanguage.pick(
-                  zh: '\u641c\u7d22',
-                  en: 'Search',
-                ),
-              _DesktopSection.detail => _detailViewModel?.detail.name ??
-                  _uiLanguage.pick(
-                    zh: '\u8be6\u60c5',
-                    en: 'Media Detail',
-                  ),
-            };
-            final sidebarServers = _buildSidebarServers();
+          };
+          final sidebarServers = _buildSidebarServers();
 
-            return ColoredBox(
-              color: baseBackground,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Positioned.fill(
-                    child: DesktopUnifiedBackground(
-                      appState: widget.appState,
-                      baseColor: baseBackground,
-                    ),
+          return ColoredBox(
+            color: baseBackground,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Positioned.fill(
+                  child: DesktopUnifiedBackground(
+                    appState: widget.appState,
+                    baseColor: baseBackground,
                   ),
-                  SafeArea(
-                    child: DesktopShortcutWrapper(
-                      enabled: true,
-                      shortcuts: <ShortcutActivator, Intent>{
-                        const SingleActivator(LogicalKeyboardKey.escape):
-                            AppBackIntent(),
-                      },
-                      actions: <Type, Action<Intent>>{
-                        AppBackIntent: CallbackAction<AppBackIntent>(
-                          onInvoke: (_) {
-                            _onBackRequested();
-                            return null;
-                          },
-                        ),
-                      },
-                      child: FocusTraversalManager(
-                        child: WindowPaddingContainer(
-                          padding: EdgeInsets.zero,
-                          dragRegionHeight: 0,
-                          child: DesktopNavigationLayout(
-                            backgroundStartColor: overlayBackgroundStart,
-                            backgroundEndColor: overlayBackgroundEnd,
-                            sidebarWidth: 264,
-                            sidebarVisible: !_sidebarCollapsed,
-                            onDismissSidebar: _hideSidebar,
-                            sidebar: DesktopSidebar(
-                              servers: sidebarServers,
-                              selectedServerId: widget.appState.activeServerId,
-                              onSelected: _handleServerSelected,
-                              onServerAction: _handleSidebarServerAction,
-                              collapsed: _sidebarCollapsed,
-                            ),
-                            topBar: DesktopTopBar(
-                              title: title,
-                              serverName:
-                                  widget.appState.activeServer?.name ?? '',
-                              movieCount: _mediaStats?.movieCount,
-                              seriesCount: _mediaStats?.seriesCount,
-                              statsLoading: _loadingMediaStats,
-                              language: _uiLanguage,
-                              showSearch: _section != _DesktopSection.library,
-                              homeTab: _homeTab,
-                              onHomeTabChanged: _handleHomeTabChanged,
-                              backEnabled: _sectionStack.length > 1 ||
-                                  widget.appState.hasActiveServer,
-                              onBack: _onBackRequested,
-                              onToggleSidebar: _toggleSidebar,
-                              searchController: _searchController,
-                              onSearchChanged: _handleSearchChanged,
-                              onSearchSubmitted: _handleSearchSubmitted,
-                              onRefresh: _refreshCurrentPage,
-                              onOpenLibraryManager: _openLibraryManager,
-                              onOpenRouteManager: _openRouteManager,
-                              onOpenSettings: _openSettings,
-                              searchHint: _uiLanguage.pick(
-                                zh: '\u641c\u7d22\u5267\u96c6\u6216\u7535\u5f71',
-                                en: 'Search series or movies',
-                              ),
-                            ),
-                            content: AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 360),
-                              switchInCurve: Curves.easeOutCubic,
-                              switchOutCurve: Curves.easeInCubic,
-                              transitionBuilder: _buildContentTransition,
-                              child: NotificationListener<ScrollNotification>(
-                                onNotification:
-                                    _handleContentScrollNotification,
-                                child: _buildContent(),
-                              ),
-                            ),
-                            topBarVisibility: _topBarVisibility,
+                ),
+                SafeArea(
+                  child: DesktopShortcutWrapper(
+                    enabled: true,
+                    shortcuts: <ShortcutActivator, Intent>{
+                      const SingleActivator(LogicalKeyboardKey.escape):
+                          AppBackIntent(),
+                    },
+                    actions: <Type, Action<Intent>>{
+                      AppBackIntent: CallbackAction<AppBackIntent>(
+                        onInvoke: (_) {
+                          _onBackRequested();
+                          return null;
+                        },
+                      ),
+                    },
+                    child: FocusTraversalManager(
+                      child: WindowPaddingContainer(
+                        padding: EdgeInsets.zero,
+                        dragRegionHeight: 0,
+                        child: DesktopNavigationLayout(
+                          backgroundStartColor: overlayBackgroundStart,
+                          backgroundEndColor: overlayBackgroundEnd,
+                          sidebarWidth: 264,
+                          sidebarVisible: !_sidebarCollapsed,
+                          onDismissSidebar: _hideSidebar,
+                          sidebar: DesktopSidebar(
+                            servers: sidebarServers,
+                            selectedServerId: widget.appState.activeServerId,
+                            onSelected: _handleServerSelected,
+                            onServerAction: _handleSidebarServerAction,
+                            collapsed: _sidebarCollapsed,
                           ),
+                          topBar: DesktopTopBar(
+                            title: title,
+                            serverName:
+                                widget.appState.activeServer?.name ?? '',
+                            movieCount: _mediaStats?.movieCount,
+                            seriesCount: _mediaStats?.seriesCount,
+                            statsLoading: _loadingMediaStats,
+                            language: _uiLanguage,
+                            showSearch: _section != _DesktopSection.library,
+                            homeTab: _homeTab,
+                            onHomeTabChanged: _handleHomeTabChanged,
+                            backEnabled: _sectionStack.length > 1 ||
+                                widget.appState.hasActiveServer,
+                            onBack: _onBackRequested,
+                            onToggleSidebar: _toggleSidebar,
+                            searchController: _searchController,
+                            onSearchChanged: _handleSearchChanged,
+                            onSearchSubmitted: _handleSearchSubmitted,
+                            onRefresh: _refreshCurrentPage,
+                            onOpenLibraryManager: _openLibraryManager,
+                            onOpenRouteManager: _openRouteManager,
+                            onOpenSettings: _openSettings,
+                            searchHint: _uiLanguage.pick(
+                              zh: '\u641c\u7d22\u5267\u96c6\u6216\u7535\u5f71',
+                              en: 'Search series or movies',
+                            ),
+                          ),
+                          content: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 360),
+                            switchInCurve: Curves.easeOutCubic,
+                            switchOutCurve: Curves.easeInCubic,
+                            transitionBuilder: _buildContentTransition,
+                            child: NotificationListener<ScrollNotification>(
+                              onNotification: _handleContentScrollNotification,
+                              child: _buildContent(),
+                            ),
+                          ),
+                          topBarVisibility: _topBarVisibility,
                         ),
                       ),
                     ),
                   ),
-                ],
-              ),
-            );
-          },
-        ),
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }

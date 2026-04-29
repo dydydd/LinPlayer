@@ -29,10 +29,10 @@ class DesktopCinematicShell extends StatelessWidget {
   Widget build(BuildContext context) {
     final brightness = Theme.of(context).brightness;
     final isDark = brightness == Brightness.dark;
-    final background = DesktopUnifiedBackground.baseColorForBrightness(brightness);
-    final surfaceColor = isDark
-        ? const Color(0xD1111620)
-        : const Color(0xECFFFFFF);
+    final background =
+        DesktopUnifiedBackground.baseColorForBrightness(brightness);
+    final surfaceColor =
+        isDark ? const Color(0xD1111620) : const Color(0xECFFFFFF);
     final surfaceBorder = isDark
         ? Colors.white.withValues(alpha: 0.10)
         : Colors.black.withValues(alpha: 0.08);
@@ -49,13 +49,13 @@ class DesktopCinematicShell extends StatelessWidget {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 86, 20, 20),
+              padding: const EdgeInsets.fromLTRB(22, 92, 22, 22),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(30),
+                borderRadius: BorderRadius.circular(32),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     color: surfaceColor,
-                    borderRadius: BorderRadius.circular(30),
+                    borderRadius: BorderRadius.circular(32),
                     border: Border.all(
                       color: surfaceBorder,
                     ),
@@ -123,11 +123,11 @@ class _TopPill extends StatelessWidget {
       builder: (context, constraints) {
         final targetWidth =
             (constraints.maxWidth * 0.72).clamp(320.0, 980.0).toDouble();
-        final width =
-            targetWidth > constraints.maxWidth ? constraints.maxWidth : targetWidth;
-        final panelColor = isDark
-            ? const Color(0xD1111620)
-            : const Color(0xECFFFFFF);
+        final width = targetWidth > constraints.maxWidth
+            ? constraints.maxWidth
+            : targetWidth;
+        final panelColor =
+            isDark ? const Color(0xD1111620) : const Color(0xECFFFFFF);
         final panelBorder = isDark
             ? Colors.white.withValues(alpha: 0.10)
             : Colors.black.withValues(alpha: 0.08);
@@ -168,6 +168,7 @@ class _TopPill extends StatelessWidget {
                     style: textTheme.titleSmall?.copyWith(
                       color: isDark ? Colors.white : const Color(0xFF111827),
                       fontWeight: FontWeight.w700,
+                      fontSize: 16,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -184,7 +185,7 @@ class _TopPill extends StatelessWidget {
                                 duration: const Duration(milliseconds: 160),
                                 curve: Curves.easeOut,
                                 padding:
-                                    const EdgeInsets.symmetric(vertical: 10),
+                                    const EdgeInsets.symmetric(vertical: 12),
                                 decoration: BoxDecoration(
                                   color: i == selectedIndex
                                       ? activeBg
@@ -201,7 +202,7 @@ class _TopPill extends StatelessWidget {
                                   children: [
                                     Icon(
                                       tabs[i].icon,
-                                      size: 18,
+                                      size: 20,
                                       color: i == selectedIndex
                                           ? activeFg
                                           : inactiveFg,
@@ -215,6 +216,7 @@ class _TopPill extends StatelessWidget {
                                         color: i == selectedIndex
                                             ? activeFg
                                             : inactiveFg,
+                                        fontSize: 14.5,
                                         fontWeight: i == selectedIndex
                                             ? FontWeight.w600
                                             : FontWeight.w500,
@@ -234,8 +236,8 @@ class _TopPill extends StatelessWidget {
                     Container(
                       constraints: const BoxConstraints(maxWidth: 220),
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 9,
+                        horizontal: 14,
+                        vertical: 10,
                       ),
                       decoration: BoxDecoration(
                         color: badgeBg,
@@ -257,6 +259,7 @@ class _TopPill extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: textTheme.labelMedium?.copyWith(
                                 color: inactiveFg,
+                                fontSize: 13.5,
                               ),
                             ),
                           ),

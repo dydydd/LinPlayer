@@ -78,7 +78,7 @@ class DesktopNavigationLayout extends StatelessWidget {
               AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
                 curve: Curves.easeOutCubic,
-                height: 22 * topBarTarget,
+                height: 28 * topBarTarget,
               ),
               Expanded(
                 child: Padding(
@@ -106,7 +106,7 @@ class DesktopNavigationLayout extends StatelessWidget {
           ),
         if (showSidebar)
           Positioned(
-            top: 72,
+            top: 82,
             bottom: 24,
             left: 16,
             child: SizedBox(

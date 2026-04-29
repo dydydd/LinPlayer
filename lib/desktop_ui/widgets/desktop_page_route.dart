@@ -12,7 +12,7 @@ enum DesktopPageTransitionStyle {
 Route<T> buildDesktopPageRoute<T>({
   required WidgetBuilder builder,
   DesktopPageTransitionStyle transition = DesktopPageTransitionStyle.push,
-  Duration duration = const Duration(milliseconds: 360),
+  Duration duration = const Duration(milliseconds: 320),
   RouteSettings? settings,
 }) {
   return PageRouteBuilder<T>(
@@ -30,10 +30,10 @@ Route<T> buildDesktopPageRoute<T>({
       switch (transition) {
         case DesktopPageTransitionStyle.push:
           return FadeTransition(
-            opacity: Tween<double>(begin: 0.18, end: 1.0).animate(curved),
+            opacity: Tween<double>(begin: 0.08, end: 1.0).animate(curved),
             child: SlideTransition(
               position: Tween<Offset>(
-                begin: const Offset(0.08, 0),
+                begin: const Offset(0.05, 0),
                 end: Offset.zero,
               ).animate(curved),
               child: child,

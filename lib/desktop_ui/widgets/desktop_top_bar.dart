@@ -91,13 +91,13 @@ class DesktopTopBar extends StatelessWidget {
               borderRadius: BorderRadius.circular(14),
             ),
             child: SizedBox(
-              height: 60,
+              height: 70,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 14),
                 child: Row(
                   children: [
                     SizedBox(
-                      width: 560,
+                      width: 600,
                       child: Row(
                         children: [
                           _HeaderIconButton(
@@ -109,7 +109,7 @@ class DesktopTopBar extends StatelessWidget {
                                 ? iconColor
                                 : iconColor.withValues(alpha: 0.38),
                           ),
-                          const SizedBox(width: 6),
+                          const SizedBox(width: 8),
                           _HeaderIconButton(
                             icon: Icons.menu_rounded,
                             tooltip: _t(zh: '\u83dc\u5355', en: 'Menu'),
@@ -118,9 +118,9 @@ class DesktopTopBar extends StatelessWidget {
                                 ? iconColor
                                 : iconColor.withValues(alpha: 0.38),
                           ),
-                          const SizedBox(width: 10),
-                          _LogoBadge(theme: theme),
                           const SizedBox(width: 12),
+                          _LogoBadge(theme: theme),
+                          const SizedBox(width: 14),
                           Expanded(
                             child: _ServerSummaryBadge(
                               language: language,
@@ -153,7 +153,7 @@ class DesktopTopBar extends StatelessWidget {
                       ),
                     ),
                     SizedBox(
-                      width: 280,
+                      width: 304,
                       child: Align(
                         alignment: Alignment.centerRight,
                         child: Row(
@@ -260,8 +260,8 @@ class _ServerSummaryBadge extends StatelessWidget {
         '${_countText(seriesCount)}';
 
     return Container(
-      height: 42,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
       decoration: BoxDecoration(
         color: theme.surfaceElevated.withValues(alpha: 0.55),
         borderRadius: BorderRadius.circular(10),
@@ -277,9 +277,9 @@ class _ServerSummaryBadge extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: theme.textPrimary,
-              fontSize: 13,
+              fontSize: 15,
               height: 1.0,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w700,
             ),
           ),
           const SizedBox(height: 4),
@@ -289,7 +289,7 @@ class _ServerSummaryBadge extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: theme.textMuted,
-              fontSize: 11.5,
+              fontSize: 13,
               height: 1.0,
               fontWeight: FontWeight.w500,
             ),
@@ -334,12 +334,12 @@ class _SearchCenter extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: textColor,
-                fontSize: 18,
+                fontSize: 22,
                 fontWeight: FontWeight.w700,
               ),
             ),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 16),
           Expanded(
             flex: 5,
             child: TextField(
@@ -349,18 +349,18 @@ class _SearchCenter extends StatelessWidget {
               textInputAction: TextInputAction.search,
               style: baseInputStyle.copyWith(
                 color: theme.textPrimary,
-                fontSize: 14,
+                fontSize: 15.5,
               ),
               decoration: InputDecoration(
                 isDense: true,
                 hintText: hintText,
                 hintStyle: baseInputStyle.copyWith(
                   color: theme.textMuted.withValues(alpha: 0.9),
-                  fontSize: 13,
+                  fontSize: 14,
                 ),
                 prefixIcon: Icon(
                   Icons.search_rounded,
-                  size: 20,
+                  size: 22,
                   color: theme.textMuted,
                 ),
                 border: OutlineInputBorder(
@@ -378,7 +378,7 @@ class _SearchCenter extends StatelessWidget {
                 fillColor: theme.surfaceElevated.withValues(alpha: 0.78),
                 filled: true,
                 contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               ),
             ),
           ),
@@ -400,8 +400,8 @@ class _LogoBadge extends StatelessWidget {
         ClipRRect(
           borderRadius: BorderRadius.circular(8),
           child: SizedBox(
-            width: 30,
-            height: 30,
+            width: 32,
+            height: 32,
             child: Image.asset(
               'assets/app_icon.jpg',
               fit: BoxFit.cover,
@@ -413,8 +413,8 @@ class _LogoBadge extends StatelessWidget {
           'LinPlayer',
           style: TextStyle(
             color: theme.textPrimary,
-            fontSize: 24,
-            fontWeight: FontWeight.w500,
+            fontSize: 26,
+            fontWeight: FontWeight.w600,
             letterSpacing: 0.2,
           ),
         ),
@@ -447,8 +447,8 @@ class _TopPillTabs extends StatelessWidget {
     final homeActive = selected == DesktopHomeTab.home;
 
     return Container(
-      width: 248,
-      height: 40,
+      width: 272,
+      height: 46,
       padding: const EdgeInsets.all(3.5),
       decoration: BoxDecoration(
         color: theme.topTabBackground,
@@ -584,7 +584,7 @@ class _TopPillActionButtonState extends State<_TopPillActionButton> {
                     color: widget.active
                         ? widget.activeColor
                         : widget.inactiveColor,
-                    fontSize: 14,
+                    fontSize: 15.5,
                     fontWeight:
                         widget.active ? FontWeight.w700 : FontWeight.w500,
                   ),
@@ -657,8 +657,8 @@ class _HeaderIconButtonState extends State<_HeaderIconButton> {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 160),
               curve: Curves.easeOutCubic,
-              width: 34,
-              height: 34,
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(
                 color: background,
                 borderRadius: BorderRadius.circular(18),
@@ -688,7 +688,7 @@ class _HeaderIconButtonState extends State<_HeaderIconButton> {
                       enabled ? () => setState(() => _pressed = false) : null,
                   onTapUp:
                       enabled ? (_) => setState(() => _pressed = false) : null,
-                  child: Icon(widget.icon, size: 22, color: widget.color),
+                  child: Icon(widget.icon, size: 24, color: widget.color),
                 ),
               ),
             ),

@@ -81,12 +81,12 @@ class _DesktopMediaCardState extends State<DesktopMediaCard> {
                 ? SystemMouseCursors.click
                 : SystemMouseCursors.basic,
             child: AnimatedScale(
-              scale: _active ? 1.05 : 1.0,
+              scale: _active ? 1.03 : 1.0,
               duration: const Duration(milliseconds: 180),
               curve: Curves.easeOutCubic,
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(12),
                   boxShadow: _active
                       ? [
                           BoxShadow(
@@ -98,7 +98,7 @@ class _DesktopMediaCardState extends State<DesktopMediaCard> {
                       : null,
                 ),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(12),
                   child: Material(
                     color: Colors.transparent,
                     child: InkWell(
@@ -133,8 +133,8 @@ class _DesktopMediaCardState extends State<DesktopMediaCard> {
                                   children: [
                                     Center(
                                       child: Container(
-                                        width: 48,
-                                        height: 48,
+                                        width: 56,
+                                        height: 56,
                                         decoration: BoxDecoration(
                                           color: theme.accent,
                                           shape: BoxShape.circle,
@@ -142,7 +142,7 @@ class _DesktopMediaCardState extends State<DesktopMediaCard> {
                                         child: const Icon(
                                           Icons.play_arrow_rounded,
                                           color: Colors.white,
-                                          size: 24,
+                                          size: 28,
                                         ),
                                       ),
                                     ),
@@ -226,15 +226,15 @@ class _DesktopMediaCardState extends State<DesktopMediaCard> {
             ),
           ),
           if (widget.showMeta) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Text(
               title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: theme.textPrimary,
-                fontSize: 14,
-                fontWeight: FontWeight.w400,
+                fontSize: 15.5,
+                fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(height: 4),
@@ -244,7 +244,7 @@ class _DesktopMediaCardState extends State<DesktopMediaCard> {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: theme.textMuted,
-                fontSize: 12,
+                fontSize: 13.5,
                 fontWeight: FontWeight.w400,
               ),
             ),
@@ -408,7 +408,7 @@ class _ImageFallback extends StatelessWidget {
             style: TextStyle(
               color: theme.textMuted,
               fontWeight: FontWeight.w400,
-              fontSize: 12,
+              fontSize: 13,
             ),
           ),
         ),
@@ -441,13 +441,13 @@ class _OverlayIconButton extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(999),
         child: Ink(
-          width: 28,
-          height: 28,
+          width: 32,
+          height: 32,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: background,
           ),
-          child: Icon(icon, size: 16, color: fg),
+          child: Icon(icon, size: 18, color: fg),
         ),
       ),
     );
@@ -463,8 +463,8 @@ class _Badge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 24,
-      height: 24,
+      width: 26,
+      height: 26,
       decoration: BoxDecoration(
         color: color,
         shape: BoxShape.circle,
@@ -474,7 +474,7 @@ class _Badge extends StatelessWidget {
         text,
         style: const TextStyle(
           color: Colors.white,
-          fontSize: 11,
+          fontSize: 12,
           fontWeight: FontWeight.w700,
           height: 1.0,
         ),

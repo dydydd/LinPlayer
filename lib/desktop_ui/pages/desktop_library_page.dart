@@ -169,7 +169,7 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
   Future<void> _openContinueWatchingPage() async {
     await Navigator.of(context).push(
       buildDesktopPageRoute(
-        transition: DesktopPageTransitionStyle.stack,
+        transition: DesktopPageTransitionStyle.push,
         builder: (_) => DesktopContinueWatchingPage(
           appState: widget.appState,
           language: widget.language,
@@ -186,7 +186,7 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
     if (items.isEmpty) return;
     await Navigator.of(context).push(
       buildDesktopPageRoute(
-        transition: DesktopPageTransitionStyle.stack,
+        transition: DesktopPageTransitionStyle.push,
         builder: (_) => DesktopFavoritesItemsPage(
           appState: widget.appState,
           title: title,
@@ -473,7 +473,7 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
                 ),
                 style: TextStyle(
                   color: theme.textMuted,
-                  fontSize: 13,
+                  fontSize: 14.5,
                 ),
               ),
             );
@@ -516,54 +516,54 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
     }
 
     return _PosterRailSection(
-          prefixTitle: '',
-          highlightedTitle: _t(
-            language: widget.language,
-            zh: '\u7ee7\u7eed\u89c2\u770b',
-            en: 'Continue',
-          ),
-          items: items,
-          access: access,
-          loading: loading,
-          language: widget.language,
-          onOpenItem: widget.onOpenItem,
-          isFavorite: _isFavorite,
-          onToggleFavorite: _toggleFavorite,
-          onTogglePlayed: access == null
-              ? null
-              : (item) {
-                  if (_markingPlayedIds.contains(item.id)) return null;
-                  return () => _toggleContinueWatchingPlayed(
-                        access: access,
-                        item: item,
-                      );
-                },
-          cardWidth: 224,
-          cardImageAspectRatio: 16 / 9,
-          railHeight: 242,
-          showCardBadge: false,
-          titleBuilder: _continueTitle,
-          subtitleBuilder: _continueSubtitle,
-          subtitleMaxLines: 2,
-          showProgress: true,
-          onViewAllTap: items.isEmpty
-              ? null
-              : () {
-                  if (favoriteMode) {
-                    unawaited(
-                      _openFavoriteItemsPage(
-                        title: _t(
-                          language: widget.language,
-                          zh: '\u559c\u6b22 \u00b7 \u7ee7\u7eed\u89c2\u770b',
-                          en: 'Favorites · Continue',
-                        ),
-                        items: items,
-                      ),
-                    );
-                    return;
-                  }
-                  unawaited(_openContinueWatchingPage());
-                },
+      prefixTitle: '',
+      highlightedTitle: _t(
+        language: widget.language,
+        zh: '\u7ee7\u7eed\u89c2\u770b',
+        en: 'Continue',
+      ),
+      items: items,
+      access: access,
+      loading: loading,
+      language: widget.language,
+      onOpenItem: widget.onOpenItem,
+      isFavorite: _isFavorite,
+      onToggleFavorite: _toggleFavorite,
+      onTogglePlayed: access == null
+          ? null
+          : (item) {
+              if (_markingPlayedIds.contains(item.id)) return null;
+              return () => _toggleContinueWatchingPlayed(
+                    access: access,
+                    item: item,
+                  );
+            },
+      cardWidth: 224,
+      cardImageAspectRatio: 16 / 9,
+      railHeight: 242,
+      showCardBadge: false,
+      titleBuilder: _continueTitle,
+      subtitleBuilder: _continueSubtitle,
+      subtitleMaxLines: 2,
+      showProgress: true,
+      onViewAllTap: items.isEmpty
+          ? null
+          : () {
+              if (favoriteMode) {
+                unawaited(
+                  _openFavoriteItemsPage(
+                    title: _t(
+                      language: widget.language,
+                      zh: '\u559c\u6b22 \u00b7 \u7ee7\u7eed\u89c2\u770b',
+                      en: 'Favorites · Continue',
+                    ),
+                    items: items,
+                  ),
+                );
+                return;
+              }
+              unawaited(_openContinueWatchingPage());
+            },
     );
   }
 }
@@ -660,7 +660,8 @@ class _MediaCategorySectionState extends State<_MediaCategorySection> {
     final distance = (target - _controller.offset).abs();
     if (distance < 0.5) return;
     final durationMs = (distance / 1.5).round();
-    final clampedMs = durationMs < 1 ? 1 : (durationMs > 220 ? 220 : durationMs);
+    final clampedMs =
+        durationMs < 1 ? 1 : (durationMs > 220 ? 220 : durationMs);
     unawaited(
       _controller.animateTo(
         target,
@@ -703,7 +704,7 @@ class _MediaCategorySectionState extends State<_MediaCategorySection> {
           ),
           style: TextStyle(
             color: theme.textPrimary,
-            fontSize: 20,
+            fontSize: 24,
             fontWeight: FontWeight.w700,
           ),
         ),
@@ -865,8 +866,8 @@ class _CategoryCard extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: theme.textPrimary,
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
                 shadows: const [
                   Shadow(
                     color: Colors.black54,
@@ -994,7 +995,7 @@ class _PosterRailSection extends StatelessWidget {
         : highlightedTitle;
     final baseTitleStyle = (textTheme.titleLarge ?? const TextStyle()).copyWith(
       color: theme.textPrimary,
-      fontSize: 20,
+      fontSize: 23,
       fontWeight: FontWeight.w700,
     );
 
@@ -1195,8 +1196,8 @@ class _ViewAllLinkState extends State<_ViewAllLink> {
           widget.label,
           style: TextStyle(
             color: _hovered ? theme.accent : theme.link,
-            fontSize: 13,
-            fontWeight: FontWeight.w400,
+            fontSize: 14.5,
+            fontWeight: FontWeight.w500,
           ),
         ),
       ),
@@ -1231,7 +1232,7 @@ class _FavoritesEmptySection extends StatelessWidget {
             ),
             style: TextStyle(
               color: theme.textPrimary,
-              fontSize: 18,
+              fontSize: 21,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -1244,7 +1245,7 @@ class _FavoritesEmptySection extends StatelessWidget {
             ),
             style: TextStyle(
               color: theme.textMuted,
-              fontSize: 13,
+              fontSize: 14.5,
             ),
           ),
         ],
