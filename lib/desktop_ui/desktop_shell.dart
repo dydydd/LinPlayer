@@ -86,7 +86,7 @@ class DesktopShell extends StatelessWidget {
 
 enum _DesktopSection { library, search, detail }
 
-enum _DesktopSectionTransition { push, pull, fade, flip, stack }
+enum _DesktopSectionTransition { push, pull }
 
 class _DesktopDetailStackEntry {
   const _DesktopDetailStackEntry({
@@ -120,9 +120,6 @@ class _DesktopWorkspace extends StatefulWidget {
 class _DesktopWorkspaceState extends State<_DesktopWorkspace>
     with SingleTickerProviderStateMixin {
   static const double _kTopBarFadeDistance = 220.0;
-  static const Duration _kSectionTransitionDuration = Duration(
-    milliseconds: 240,
-  );
   static const Duration _kSharedOpenTransitionDuration = Duration(
     milliseconds: 520,
   );
@@ -146,7 +143,6 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace>
   final ValueNotifier<double> _topBarVisibility = ValueNotifier<double>(1.0);
   final GlobalKey _contentTransitionRootKey = GlobalKey();
   final GlobalKey _detailPosterKey = GlobalKey();
-  _DesktopSectionTransition _sectionTransition = _DesktopSectionTransition.fade;
   late final AnimationController _sharedOpenController = AnimationController(
     vsync: this,
     duration: _kSharedOpenTransitionDuration,
@@ -324,7 +320,6 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace>
     _hideSidebar();
     if (_section != _DesktopSection.library || _topBarVisibility.value < 1.0) {
       setState(() {
-        _sectionTransition = _DesktopSectionTransition.fade;
         _sectionStack
           ..clear()
           ..add(_DesktopSection.library);
@@ -1165,7 +1160,6 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace>
   void _handleHomeTabChanged(DesktopHomeTab tab) {
     _clearSharedOpenTransition(clearPendingSource: true);
     setState(() {
-      _sectionTransition = _DesktopSectionTransition.push;
       _homeTab = tab;
       _sectionStack
         ..clear()
@@ -1252,7 +1246,6 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace>
         _detailViewModel = null;
         _detailStack.clear();
         setState(() {
-          _sectionTransition = _DesktopSectionTransition.pull;
           _sectionStack.removeLast();
           _section = _sectionStack.last;
         });
@@ -1265,7 +1258,6 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace>
     if (_sectionStack.length > 1) {
       final leavingDetail = _sectionStack.last == _DesktopSection.detail;
       setState(() {
-        _sectionTransition = _DesktopSectionTransition.pull;
         _sectionStack.removeLast();
         _section = _sectionStack.last;
       });
@@ -1338,8 +1330,6 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace>
     _detailViewModel?.dispose();
     final previousTransition = _sharedOpenTransition;
     setState(() {
-      _sectionTransition =
-          runSharedOpen ? _DesktopSectionTransition.fade : transition;
       _detailViewModel = next;
       _sharedOpenAnimationCompleted = false;
       _sharedOpenDetailPosterReady = false;
@@ -1445,6 +1435,16 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace>
     await Navigator.of(context).push(
       buildDesktopPageRoute(
         transition: DesktopPageTransitionStyle.push,
+        builder: (_) => DesktopSettingsPage(appState: widget.appState),
+      ),
+    );
+  }
+
+  Future<void> _openSettingsFromRect(Rect _) async {
+    await Navigator.of(context).push(
+      buildDesktopPageRoute(
+        transition: DesktopPageTransitionStyle.stack,
+        duration: const Duration(milliseconds: 220),
         builder: (_) => DesktopSettingsPage(appState: widget.appState),
       ),
     );
@@ -1739,7 +1739,6 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace>
 
   void _handleSearchSubmitted(String value) {
     setState(() {
-      _sectionTransition = _DesktopSectionTransition.push;
       _searchQuery = value.trim();
       _searchController.value = TextEditingValue(
         text: _searchQuery,
@@ -1804,147 +1803,101 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace>
     return false;
   }
 
-  Widget _buildContent() {
-    switch (_section) {
-      case _DesktopSection.library:
-        return DesktopLibraryPage(
-          key: ValueKey<String>('library-${_homeTab.name}-$_refreshSignal'),
-          appState: widget.appState,
-          refreshSignal: _refreshSignal,
-          onOpenItem: _openDetail,
-          onOpenLibraryItems: _openLibraryItems,
-          activeTab: _homeTab,
-          language: _uiLanguage,
-        );
-      case _DesktopSection.search:
-        return DesktopSearchPage(
-          key: ValueKey<String>('$_searchQuery-$_refreshSignal'),
-          appState: widget.appState,
-          query: _searchQuery,
-          refreshSignal: _refreshSignal,
-          language: _uiLanguage,
-          onOpenItem: _openDetail,
-        );
-      case _DesktopSection.detail:
-        final vm = _detailViewModel;
-        if (vm == null) {
-          return Center(
-            child: Text(
-              _uiLanguage.pick(
-                  zh: '\u672a\u9009\u62e9\u8be6\u60c5\u5185\u5bb9',
-                  en: 'No detail selected'),
-            ),
-          );
-        }
-        final type = vm.detail.type.trim().toLowerCase();
-        final detailKey = ValueKey<String>(vm.detail.id);
-        final posterVisible = _sharedOpenTransition == null;
-        final useSharedPosterOverlay = _sharedOpenTransition != null;
-        if (type == 'movie') {
-          return DesktopMovieDetailPage(
-            key: detailKey,
-            viewModel: vm,
-            language: _uiLanguage,
-            onOpenItem: _openDetail,
-            onPlayPressed: _onPlayCurrentDetail,
-            posterKey: _detailPosterKey,
-            posterVisible: posterVisible,
-            onPosterReady: _handleDetailPosterReady,
-            posterSnapshotImage: _sharedOpenTransition?.sourceImage,
-            useSharedPosterOverlay: useSharedPosterOverlay,
-          );
-        }
-        if (type == 'episode') {
-          return DesktopEpisodeDetailPage(
-            key: detailKey,
-            viewModel: vm,
-            language: _uiLanguage,
-            onOpenItem: _openDetail,
-            onPlayPressed: _onPlayCurrentDetail,
-            posterKey: _detailPosterKey,
-            posterVisible: posterVisible,
-            onPosterReady: _handleDetailPosterReady,
-            posterSnapshotImage: _sharedOpenTransition?.sourceImage,
-            useSharedPosterOverlay: useSharedPosterOverlay,
-          );
-        }
-        return DesktopShowDetailPage(
-          key: detailKey,
-          viewModel: vm,
-          language: _uiLanguage,
-          onOpenItem: _openDetail,
-          onPlayPressed: _onPlayCurrentDetail,
-          posterKey: _detailPosterKey,
-          posterVisible: posterVisible,
-          onPosterReady: _handleDetailPosterReady,
-          posterSnapshotImage: _sharedOpenTransition?.sourceImage,
-          useSharedPosterOverlay: useSharedPosterOverlay,
-        );
+  Widget _buildDetailContent() {
+    final vm = _detailViewModel;
+    if (vm == null) {
+      return Center(
+        child: Text(
+          _uiLanguage.pick(
+            zh: '\u672a\u9009\u62e9\u8be6\u60c5\u5185\u5bb9',
+            en: 'No detail selected',
+          ),
+        ),
+      );
     }
+
+    final type = vm.detail.type.trim().toLowerCase();
+    final detailKey = ValueKey<String>(vm.detail.id);
+    final posterVisible = _sharedOpenTransition == null;
+    final useSharedPosterOverlay = _sharedOpenTransition != null;
+    if (type == 'movie') {
+      return DesktopMovieDetailPage(
+        key: detailKey,
+        viewModel: vm,
+        language: _uiLanguage,
+        onOpenItem: _openDetail,
+        onPlayPressed: _onPlayCurrentDetail,
+        posterKey: _detailPosterKey,
+        posterVisible: posterVisible,
+        onPosterReady: _handleDetailPosterReady,
+        posterSnapshotImage: _sharedOpenTransition?.sourceImage,
+        useSharedPosterOverlay: useSharedPosterOverlay,
+      );
+    }
+    if (type == 'episode') {
+      return DesktopEpisodeDetailPage(
+        key: detailKey,
+        viewModel: vm,
+        language: _uiLanguage,
+        onOpenItem: _openDetail,
+        onPlayPressed: _onPlayCurrentDetail,
+        posterKey: _detailPosterKey,
+        posterVisible: posterVisible,
+        onPosterReady: _handleDetailPosterReady,
+        posterSnapshotImage: _sharedOpenTransition?.sourceImage,
+        useSharedPosterOverlay: useSharedPosterOverlay,
+      );
+    }
+    return DesktopShowDetailPage(
+      key: detailKey,
+      viewModel: vm,
+      language: _uiLanguage,
+      onOpenItem: _openDetail,
+      onPlayPressed: _onPlayCurrentDetail,
+      posterKey: _detailPosterKey,
+      posterVisible: posterVisible,
+      onPosterReady: _handleDetailPosterReady,
+      posterSnapshotImage: _sharedOpenTransition?.sourceImage,
+      useSharedPosterOverlay: useSharedPosterOverlay,
+    );
   }
 
-  Widget _buildContentTransition(Widget child, Animation<double> animation) {
-    final curved = CurvedAnimation(
-      parent: animation,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
+  Widget _buildContentLayers() {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Visibility(
+          visible: _section == _DesktopSection.library,
+          maintainState: true,
+          child: DesktopLibraryPage(
+            key: const PageStorageKey<String>('desktop-library-section'),
+            appState: widget.appState,
+            refreshSignal: _refreshSignal,
+            onOpenItem: _openDetail,
+            onOpenLibraryItems: _openLibraryItems,
+            activeTab: _homeTab,
+            language: _uiLanguage,
+          ),
+        ),
+        Visibility(
+          visible: _section == _DesktopSection.search,
+          maintainState: true,
+          child: DesktopSearchPage(
+            key: const PageStorageKey<String>('desktop-search-section'),
+            appState: widget.appState,
+            query: _searchQuery,
+            refreshSignal: _refreshSignal,
+            language: _uiLanguage,
+            onOpenItem: _openDetail,
+          ),
+        ),
+        Visibility(
+          visible: _section == _DesktopSection.detail,
+          maintainState: true,
+          child: _buildDetailContent(),
+        ),
+      ],
     );
-
-    switch (_sectionTransition) {
-      case _DesktopSectionTransition.push:
-        return FadeTransition(
-          opacity: Tween<double>(begin: 0.24, end: 1.0).animate(curved),
-          child: SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(0.07, 0),
-              end: Offset.zero,
-            ).animate(curved),
-            child: child,
-          ),
-        );
-      case _DesktopSectionTransition.pull:
-        return FadeTransition(
-          opacity: Tween<double>(begin: 0.30, end: 1.0).animate(curved),
-          child: SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(-0.06, 0),
-              end: Offset.zero,
-            ).animate(curved),
-            child: child,
-          ),
-        );
-      case _DesktopSectionTransition.fade:
-        return FadeTransition(
-          opacity: curved,
-          child: child,
-        );
-      case _DesktopSectionTransition.flip:
-        return FadeTransition(
-          opacity: Tween<double>(begin: 0.2, end: 1.0).animate(curved),
-          child: AnimatedBuilder(
-            animation: curved,
-            child: child,
-            builder: (context, child) {
-              final matrix = Matrix4.identity()
-                ..setEntry(3, 2, 0.0013)
-                ..rotateY((1 - curved.value) * 0.09);
-              return Transform(
-                alignment: Alignment.center,
-                transform: matrix,
-                child: child,
-              );
-            },
-          ),
-        );
-      case _DesktopSectionTransition.stack:
-        return FadeTransition(
-          opacity: Tween<double>(begin: 0.0, end: 1.0).animate(curved),
-          child: ScaleTransition(
-            scale: Tween<double>(begin: 0.965, end: 1.0).animate(curved),
-            child: child,
-          ),
-        );
-    }
   }
 
   @override
@@ -1995,9 +1948,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace>
                 ),
           };
           final sidebarServers = _buildSidebarServers();
-          final contentView = _buildContent();
-          final contentKey =
-              contentView.key ?? ValueKey<String>('section-${_section.name}');
+          final contentView = _buildContentLayers();
 
           return ColoredBox(
             color: baseBackground,
@@ -2065,77 +2016,58 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace>
                             onOpenLibraryManager: _openLibraryManager,
                             onOpenRouteManager: _openRouteManager,
                             onOpenSettings: _openSettings,
+                            onOpenSettingsFromRect: _openSettingsFromRect,
                             searchHint: _uiLanguage.pick(
                               zh: '\u641c\u7d22\u5267\u96c6\u6216\u7535\u5f71',
                               en: 'Search series or movies',
                             ),
                           ),
-                          content: AnimatedSwitcher(
-                            duration: _kSectionTransitionDuration,
-                            switchInCurve: Curves.easeOutCubic,
-                            switchOutCurve: Curves.easeInCubic,
-                            layoutBuilder: (currentChild, previousChildren) {
-                              return Stack(
-                                fit: StackFit.expand,
-                                children: <Widget>[
-                                  ...previousChildren,
-                                  if (currentChild != null) currentChild,
-                                ],
-                              );
-                            },
-                            transitionBuilder: _buildContentTransition,
-                            child: KeyedSubtree(
-                              key: contentKey,
-                              child: RepaintBoundary(
-                                key: _contentTransitionRootKey,
-                                child: AnimatedBuilder(
-                                  animation: _sharedOpenController,
-                                  builder: (context, _) {
-                                    final sharedTransition =
-                                        _sharedOpenTransition;
-                                    final sharedProgress =
-                                        _sharedOpenController.value;
-                                    final sharedResolved =
-                                        sharedTransition?.isResolved ?? false;
-                                    final sharedInteractionLocked =
-                                        sharedTransition != null &&
-                                            !_sharedOpenAnimationCompleted;
-                                    final contentOpacity = sharedTransition ==
-                                            null
-                                        ? 1.0
-                                        : sharedResolved
-                                            ? Curves.easeOutCubic.transform(
-                                                ((sharedProgress - 0.58) / 0.42)
-                                                    .clamp(0.0, 1.0),
-                                              )
-                                            : 0.0;
+                          content: RepaintBoundary(
+                            key: _contentTransitionRootKey,
+                            child: AnimatedBuilder(
+                              animation: _sharedOpenController,
+                              builder: (context, _) {
+                                final sharedTransition = _sharedOpenTransition;
+                                final sharedProgress =
+                                    _sharedOpenController.value;
+                                final sharedResolved =
+                                    sharedTransition?.isResolved ?? false;
+                                final sharedInteractionLocked =
+                                    sharedTransition != null &&
+                                        !_sharedOpenAnimationCompleted;
+                                final contentOpacity = sharedTransition == null
+                                    ? 1.0
+                                    : sharedResolved
+                                        ? Curves.easeOutCubic.transform(
+                                            ((sharedProgress - 0.58) / 0.42)
+                                                .clamp(0.0, 1.0),
+                                          )
+                                        : 0.0;
 
-                                    return Stack(
-                                      fit: StackFit.expand,
-                                      children: [
-                                        IgnorePointer(
-                                          ignoring: sharedInteractionLocked,
-                                          child: Opacity(
-                                            opacity: contentOpacity,
-                                            child: NotificationListener<
-                                                ScrollNotification>(
-                                              onNotification:
-                                                  _handleContentScrollNotification,
-                                              child: contentView,
-                                            ),
-                                          ),
+                                return Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    IgnorePointer(
+                                      ignoring: sharedInteractionLocked,
+                                      child: Opacity(
+                                        opacity: contentOpacity,
+                                        child: NotificationListener<
+                                            ScrollNotification>(
+                                          onNotification:
+                                              _handleContentScrollNotification,
+                                          child: contentView,
                                         ),
-                                        if (sharedTransition != null)
-                                          _DesktopSharedOpenOverlay(
-                                            transition: sharedTransition,
-                                            progress: sharedProgress,
-                                            theme: desktopTheme,
-                                          ),
-                                      ],
-                                    );
-                                  },
-                                ),
-                              ),
+                                      ),
+                                    ),
+                                    if (sharedTransition != null)
+                                      _DesktopSharedOpenOverlay(
+                                        transition: sharedTransition,
+                                        progress: sharedProgress,
+                                        theme: desktopTheme,
+                                      ),
+                                  ],
+                                );
+                              },
                             ),
                           ),
                           topBarVisibilityListenable: _topBarVisibility,

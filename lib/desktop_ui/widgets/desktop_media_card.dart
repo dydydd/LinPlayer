@@ -5,7 +5,6 @@ import 'package:lin_player_ui/lin_player_ui.dart';
 
 import '../../server_adapters/server_access.dart';
 import '../theme/desktop_theme_extension.dart';
-import 'desktop_image_reveal.dart';
 import 'desktop_media_meta.dart';
 import 'desktop_shared_transition_coordinator.dart';
 
@@ -357,13 +356,44 @@ class _CardImage extends StatefulWidget {
 
 class _CardImageState extends State<_CardImage> {
   int _currentIndex = 0;
+  bool _hasShownFrame = false;
+  bool _frameMarkPending = false;
+  bool _advanceCandidatePending = false;
 
   @override
   void didUpdateWidget(covariant _CardImage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.imageUrls.join('|') != widget.imageUrls.join('|')) {
       _currentIndex = 0;
+      _hasShownFrame = false;
+      _frameMarkPending = false;
+      _advanceCandidatePending = false;
     }
+  }
+
+  void _markFrameShown() {
+    if (_hasShownFrame || _frameMarkPending) return;
+    _frameMarkPending = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _frameMarkPending = false;
+      if (!mounted || _hasShownFrame) return;
+      setState(() => _hasShownFrame = true);
+    });
+  }
+
+  void _advanceToNextCandidate(List<String> candidates) {
+    if (_advanceCandidatePending || _currentIndex >= candidates.length - 1) {
+      return;
+    }
+    _advanceCandidatePending = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _advanceCandidatePending = false;
+      if (!mounted || _currentIndex >= candidates.length - 1) return;
+      setState(() {
+        _currentIndex += 1;
+        _hasShownFrame = false;
+      });
+    });
   }
 
   @override
@@ -374,30 +404,31 @@ class _CardImageState extends State<_CardImage> {
         .toList(growable: false);
     if (candidates.isNotEmpty && _currentIndex < candidates.length) {
       final imageUrl = candidates[_currentIndex];
-      return CachedNetworkImage(
-        key: ValueKey<String>('${widget.title}-$imageUrl'),
-        imageUrl: imageUrl,
+      final imageProvider = CachedNetworkImageProvider(
+        imageUrl,
         cacheManager: CoverCacheManager.instance,
-        httpHeaders: {'User-Agent': LinHttpClientFactory.userAgent},
-        imageBuilder: (context, imageProvider) => DesktopImageReveal(
-          key: ValueKey<String>('reveal-$imageUrl'),
-          image: imageProvider,
-          fit: BoxFit.cover,
-        ),
-        placeholder: (_, __) => const _ImageFallback(),
-        errorWidget: (_, __, ___) {
-          if (_currentIndex < candidates.length - 1) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (!mounted) return;
-              setState(() => _currentIndex += 1);
-            });
+        headers: {'User-Agent': LinHttpClientFactory.userAgent},
+      );
+      return Image(
+        image: imageProvider,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+        filterQuality: FilterQuality.medium,
+        frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+          final ready = wasSynchronouslyLoaded || frame != null;
+          if (ready) {
+            _markFrameShown();
+            return child;
           }
+          if (_hasShownFrame) {
+            return child;
+          }
+          return const _ImageFallback();
+        },
+        errorBuilder: (context, error, stackTrace) {
+          _advanceToNextCandidate(candidates);
           return _ImageFallback(title: widget.title);
         },
-        useOldImageOnUrlChange: true,
-        fadeInDuration: Duration.zero,
-        fadeOutDuration: Duration.zero,
-        placeholderFadeInDuration: Duration.zero,
       );
     }
     return _ImageFallback(title: widget.title);

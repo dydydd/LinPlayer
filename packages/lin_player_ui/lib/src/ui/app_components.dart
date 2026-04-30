@@ -1,13 +1,11 @@
 import 'dart:math' as math;
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../device/device_type.dart';
-import '../services/cover_cache_manager.dart';
-import 'package:lin_player_server_api/network/lin_http_client.dart';
 import 'app_style.dart';
 import 'frosted_card.dart';
+import 'lin_network_image.dart';
 import 'rating_badge.dart';
 
 AppStyle _styleOf(BuildContext context) =>
@@ -139,18 +137,11 @@ class _MediaPosterTileState extends State<MediaPosterTile> {
     final shadowColor = scheme.shadow.withValues(alpha: isDark ? 0.22 : 0.12);
 
     final image = widget.imageUrl != null
-        ? CachedNetworkImage(
+        ? LinNetworkImage(
             imageUrl: widget.imageUrl!,
-            cacheManager: CoverCacheManager.instance,
-            httpHeaders: {'User-Agent': LinHttpClientFactory.userAgent},
             fit: BoxFit.cover,
-            placeholder: (_, __) => const ColoredBox(color: Colors.black12),
-            errorWidget: (_, __, ___) =>
-                const ColoredBox(color: Colors.black26),
-            useOldImageOnUrlChange: true,
-            fadeInDuration: Duration.zero,
-            fadeOutDuration: Duration.zero,
-            placeholderFadeInDuration: Duration.zero,
+            placeholder: const ColoredBox(color: Colors.black12),
+            errorWidget: const ColoredBox(color: Colors.black26),
           )
         : const ColoredBox(color: Colors.black26, child: Icon(Icons.image));
 
@@ -361,23 +352,17 @@ class _MediaBackdropTileState extends State<MediaBackdropTile> {
     final hasImage = imageUrl.isNotEmpty;
 
     final image = hasImage
-        ? CachedNetworkImage(
+        ? LinNetworkImage(
             imageUrl: imageUrl,
-            cacheManager: CoverCacheManager.instance,
-            httpHeaders: {'User-Agent': LinHttpClientFactory.userAgent},
             fit: BoxFit.cover,
-            placeholder: (_, __) => const ColoredBox(
+            placeholder: const ColoredBox(
               color: Colors.black12,
               child: Center(child: Icon(Icons.image_outlined)),
             ),
-            errorWidget: (_, __, ___) => const ColoredBox(
+            errorWidget: const ColoredBox(
               color: Colors.black26,
               child: Center(child: Icon(Icons.broken_image_outlined)),
             ),
-            useOldImageOnUrlChange: true,
-            fadeInDuration: Duration.zero,
-            fadeOutDuration: Duration.zero,
-            placeholderFadeInDuration: Duration.zero,
           )
         : const ColoredBox(
             color: Colors.black26,

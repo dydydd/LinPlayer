@@ -28,6 +28,7 @@ class DesktopTopBar extends StatelessWidget {
     this.onOpenLibraryManager,
     this.onOpenRouteManager,
     this.onOpenSettings,
+    this.onOpenSettingsFromRect,
     this.homeTab = DesktopHomeTab.home,
     this.onHomeTabChanged,
     this.searchHint = '\u641c\u7d22\u5267\u96c6\u6216\u7535\u5f71',
@@ -51,6 +52,7 @@ class DesktopTopBar extends StatelessWidget {
   final VoidCallback? onOpenLibraryManager;
   final VoidCallback? onOpenRouteManager;
   final VoidCallback? onOpenSettings;
+  final ValueChanged<Rect>? onOpenSettingsFromRect;
   final DesktopHomeTab homeTab;
   final ValueChanged<DesktopHomeTab>? onHomeTabChanged;
   final String searchHint;
@@ -196,6 +198,7 @@ class DesktopTopBar extends StatelessWidget {
                               icon: Icons.settings_outlined,
                               tooltip: _t(zh: '\u8bbe\u7f6e', en: 'Settings'),
                               onTap: onOpenSettings,
+                              onTapWithRect: onOpenSettingsFromRect,
                               color: iconColor,
                             ),
                             if (onRefresh != null && showSearch) ...[
@@ -608,20 +611,37 @@ class _HeaderIconButton extends StatefulWidget {
     required this.tooltip,
     required this.color,
     this.onTap,
+    this.onTapWithRect,
   });
 
   final IconData icon;
   final String tooltip;
   final Color color;
   final VoidCallback? onTap;
+  final ValueChanged<Rect>? onTapWithRect;
 
   @override
   State<_HeaderIconButton> createState() => _HeaderIconButtonState();
 }
 
 class _HeaderIconButtonState extends State<_HeaderIconButton> {
+  final GlobalKey _tapTargetKey = GlobalKey();
   bool _hovered = false;
   bool _pressed = false;
+
+  void _handleTap() {
+    final callbackWithRect = widget.onTapWithRect;
+    if (callbackWithRect != null) {
+      final tapContext = _tapTargetKey.currentContext;
+      final renderObject = tapContext?.findRenderObject();
+      if (renderObject is RenderBox && renderObject.hasSize) {
+        final origin = renderObject.localToGlobal(Offset.zero);
+        callbackWithRect(origin & renderObject.size);
+        return;
+      }
+    }
+    widget.onTap?.call();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -658,6 +678,7 @@ class _HeaderIconButtonState extends State<_HeaderIconButton> {
             duration: const Duration(milliseconds: 130),
             curve: Curves.easeOutCubic,
             child: AnimatedContainer(
+              key: _tapTargetKey,
               duration: const Duration(milliseconds: 160),
               curve: Curves.easeOutCubic,
               width: 40,
@@ -684,7 +705,7 @@ class _HeaderIconButtonState extends State<_HeaderIconButton> {
                 color: Colors.transparent,
                 child: InkWell(
                   borderRadius: BorderRadius.circular(18),
-                  onTap: widget.onTap,
+                  onTap: _handleTap,
                   onTapDown:
                       enabled ? (_) => setState(() => _pressed = true) : null,
                   onTapCancel:

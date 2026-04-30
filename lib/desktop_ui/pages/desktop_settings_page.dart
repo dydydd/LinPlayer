@@ -926,6 +926,7 @@ class _DesktopSettingsPageState extends State<DesktopSettingsPage> {
     required Widget appSection,
   }) {
     const gap = 18.0;
+    Widget isolate(Widget child) => RepaintBoundary(child: child);
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -935,11 +936,11 @@ class _DesktopSettingsPageState extends State<DesktopSettingsPage> {
           return Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(child: appearanceSection),
+              Expanded(child: isolate(appearanceSection)),
               const SizedBox(width: gap),
-              Expanded(child: playbackSection),
+              Expanded(child: isolate(playbackSection)),
               const SizedBox(width: gap),
-              Expanded(child: appSection),
+              Expanded(child: isolate(appSection)),
             ],
           );
         }
@@ -951,13 +952,13 @@ class _DesktopSettingsPageState extends State<DesktopSettingsPage> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(child: appearanceSection),
+                  Expanded(child: isolate(appearanceSection)),
                   const SizedBox(width: gap),
-                  Expanded(child: playbackSection),
+                  Expanded(child: isolate(playbackSection)),
                 ],
               ),
               const SizedBox(height: gap),
-              appSection,
+              isolate(appSection),
             ],
           );
         }
@@ -965,11 +966,11 @@ class _DesktopSettingsPageState extends State<DesktopSettingsPage> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            appearanceSection,
+            isolate(appearanceSection),
             const SizedBox(height: gap),
-            playbackSection,
+            isolate(playbackSection),
             const SizedBox(height: gap),
-            appSection,
+            isolate(appSection),
           ],
         );
       },
@@ -1563,6 +1564,7 @@ class _DesktopSettingsPageState extends State<DesktopSettingsPage> {
           final appState = widget.appState;
           final blurAllowed = !isTv;
           final enableBlur = blurAllowed && appState.enableBlurEffects;
+          final sectionBlurEnabled = enableBlur && !isDesktop;
           final trailingMaxWidth = (MediaQuery.sizeOf(context).width * 0.45)
               .clamp(140.0, 260.0)
               .toDouble();
@@ -1605,7 +1607,7 @@ class _DesktopSettingsPageState extends State<DesktopSettingsPage> {
                       title: '外观',
                       subtitle:
                           isTv ? '自定义背景 / UI 缩放 / 模糊与透明度' : '主题、缩放、背景与界面语言',
-                      enableBlur: enableBlur,
+                      enableBlur: sectionBlurEnabled,
                       child: Column(
                         children: [
                           if (isTv) ...[
@@ -2191,7 +2193,7 @@ class _DesktopSettingsPageState extends State<DesktopSettingsPage> {
                     playbackSection: _Section(
                       title: '播放',
                       subtitle: '播放行为、缓存、代理与媒体偏好',
-                      enableBlur: enableBlur,
+                      enableBlur: sectionBlurEnabled,
                       child: Column(
                         children: [
                           tvFocusRow(
@@ -2760,7 +2762,7 @@ class _DesktopSettingsPageState extends State<DesktopSettingsPage> {
                     appSection: _Section(
                       title: '应用',
                       subtitle: '插件、备份迁移、缓存与更新',
-                      enableBlur: enableBlur,
+                      enableBlur: sectionBlurEnabled,
                       child: Column(
                         children: [
                           tvFocusRow(
