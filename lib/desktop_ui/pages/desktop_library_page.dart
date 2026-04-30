@@ -723,41 +723,52 @@ class _MediaCategorySectionState extends State<_MediaCategorySection> {
           LayoutBuilder(
             builder: (context, constraints) {
               const spacing = 16.0;
+              const labelGap = 10.0;
+              const labelAreaHeight = 38.0;
+              const hoverPadding = 12.0;
               final cardWidth =
                   (constraints.maxWidth * 0.2).clamp(156.0, 220.0);
-              final cardHeight = cardWidth / 1.62;
+              final coverHeight = cardWidth / 1.62;
+              final cardHeight = coverHeight + labelGap + labelAreaHeight;
+              final viewportHeight = cardHeight + (hoverPadding * 2);
 
               return SizedBox(
-                height: cardHeight,
-                child: Listener(
-                  onPointerSignal: _onPointerSignal,
-                  child: ListView.separated(
-                    controller: _controller,
-                    scrollDirection: Axis.horizontal,
-                    physics: const BouncingScrollPhysics(),
-                    itemCount: widget.libraries.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: spacing),
-                    itemBuilder: (context, index) {
-                      final library = widget.libraries[index];
-                      final preview =
-                          widget.appState.getHome('lib_${library.id}');
-                      return _CategoryCard(
-                        width: cardWidth,
-                        height: cardHeight,
-                        library: library,
-                        preview: preview,
-                        access: widget.access,
-                        language: widget.language,
-                        onTap: () {
-                          _centerLibraryCard(
-                            index: index,
-                            cardWidth: cardWidth,
-                            spacing: spacing,
-                          );
-                          widget.onOpenLibrary(library);
-                        },
-                      );
-                    },
+                height: viewportHeight,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: hoverPadding),
+                  child: Listener(
+                    onPointerSignal: _onPointerSignal,
+                    child: ListView.separated(
+                      controller: _controller,
+                      clipBehavior: Clip.none,
+                      scrollDirection: Axis.horizontal,
+                      physics: const BouncingScrollPhysics(),
+                      itemCount: widget.libraries.length,
+                      separatorBuilder: (_, __) =>
+                          const SizedBox(width: spacing),
+                      itemBuilder: (context, index) {
+                        final library = widget.libraries[index];
+                        final preview =
+                            widget.appState.getHome('lib_${library.id}');
+                        return _CategoryCard(
+                          width: cardWidth,
+                          height: cardHeight,
+                          imageHeight: coverHeight,
+                          library: library,
+                          preview: preview,
+                          access: widget.access,
+                          language: widget.language,
+                          onTap: () {
+                            _centerLibraryCard(
+                              index: index,
+                              cardWidth: cardWidth,
+                              spacing: spacing,
+                            );
+                            widget.onOpenLibrary(library);
+                          },
+                        );
+                      },
+                    ),
                   ),
                 ),
               );
@@ -768,10 +779,11 @@ class _MediaCategorySectionState extends State<_MediaCategorySection> {
   }
 }
 
-class _CategoryCard extends StatelessWidget {
+class _CategoryCard extends StatefulWidget {
   const _CategoryCard({
     required this.width,
     required this.height,
+    required this.imageHeight,
     required this.library,
     required this.preview,
     required this.access,
@@ -781,6 +793,7 @@ class _CategoryCard extends StatelessWidget {
 
   final double width;
   final double height;
+  final double imageHeight;
   final LibraryInfo library;
   final List<MediaItem> preview;
   final ServerAccess? access;
@@ -788,20 +801,30 @@ class _CategoryCard extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
+  State<_CategoryCard> createState() => _CategoryCardState();
+}
+
+class _CategoryCardState extends State<_CategoryCard> {
+  bool _hovered = false;
+  bool _focused = false;
+
+  bool get _active => _hovered || _focused;
+
+  @override
   Widget build(BuildContext context) {
     final theme = DesktopThemeExtension.of(context);
     final imageCandidates = <String>[];
     final libraryCoverCandidates = _libraryImageCandidates(
-      access: access,
-      library: library,
+      access: widget.access,
+      library: widget.library,
     );
     for (final url in libraryCoverCandidates) {
       if (!imageCandidates.contains(url)) {
         imageCandidates.add(url);
       }
     }
-    for (final item in preview.take(8)) {
-      final urls = _coverImageCandidates(access: access, item: item);
+    for (final item in widget.preview.take(8)) {
+      final urls = _coverImageCandidates(access: widget.access, item: item);
       for (final url in urls) {
         if (!imageCandidates.contains(url)) {
           imageCandidates.add(url);
@@ -810,75 +833,116 @@ class _CategoryCard extends StatelessWidget {
       if (imageCandidates.length >= 12) break;
     }
 
-    final label = library.name.trim().isEmpty
+    final label = widget.library.name.trim().isEmpty
         ? _t(
-            language: language,
+            language: widget.language,
             zh: '\u5206\u7c7b',
             en: 'Category',
           )
-        : library.name;
+        : widget.library.name;
 
-    return _HoverScaleCard(
-      width: width,
-      height: height,
-      borderRadius: 8,
-      onTap: onTap,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (imageCandidates.isNotEmpty)
-            _CategoryCoverImage(
-              imageUrls: imageCandidates,
-              placeholder: ColoredBox(color: theme.surfaceElevated),
-            )
-          else
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [theme.surfaceElevated, theme.surface],
-                ),
-              ),
-            ),
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.transparent,
-                    theme.categoryOverlay,
-                  ],
-                  stops: const [0.45, 1.0],
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            left: 10,
-            right: 10,
-            bottom: 8,
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: theme.textPrimary,
-                fontSize: 13.5,
-                fontWeight: FontWeight.w600,
-                shadows: const [
-                  Shadow(
-                    color: Colors.black54,
-                    blurRadius: 8,
+    return SizedBox(
+      width: widget.width,
+      height: widget.height,
+      child: FocusableActionDetector(
+        onShowHoverHighlight: (value) => setState(() => _hovered = value),
+        onShowFocusHighlight: (value) => setState(() => _focused = value),
+        mouseCursor: widget.onTap != null
+            ? SystemMouseCursors.click
+            : SystemMouseCursors.basic,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onTap,
+            hoverColor: Colors.transparent,
+            focusColor: Colors.transparent,
+            highlightColor: Colors.transparent,
+            splashColor: Colors.transparent,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AnimatedScale(
+                  scale: _active ? 1.035 : 1.0,
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
+                  child: SizedBox(
+                    height: widget.imageHeight,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: _active
+                            ? [
+                                BoxShadow(
+                                  color:
+                                      theme.shadowColor.withValues(alpha: 0.42),
+                                  blurRadius: 24,
+                                  offset: const Offset(0, 12),
+                                ),
+                              ]
+                            : null,
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            if (imageCandidates.isNotEmpty)
+                              _CategoryCoverImage(
+                                imageUrls: imageCandidates,
+                                placeholder:
+                                    ColoredBox(color: theme.surfaceElevated),
+                              )
+                            else
+                              DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                    colors: [
+                                      theme.surfaceElevated,
+                                      theme.surface,
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            Positioned.fill(
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      theme.categoryOverlay
+                                          .withValues(alpha: 0.08),
+                                      theme.categoryOverlay
+                                          .withValues(alpha: 0.22),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: theme.textPrimary,
+                    fontSize: 14,
+                    height: 1.15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -1095,77 +1159,6 @@ class _PosterRailSection extends StatelessWidget {
             ),
           ),
       ],
-    );
-  }
-}
-
-class _HoverScaleCard extends StatefulWidget {
-  const _HoverScaleCard({
-    required this.child,
-    required this.width,
-    required this.height,
-    required this.borderRadius,
-    this.onTap,
-  });
-
-  final Widget child;
-  final double width;
-  final double height;
-  final double borderRadius;
-  final VoidCallback? onTap;
-
-  @override
-  State<_HoverScaleCard> createState() => _HoverScaleCardState();
-}
-
-class _HoverScaleCardState extends State<_HoverScaleCard> {
-  bool _hovered = false;
-  bool _focused = false;
-
-  bool get _active => _hovered || _focused;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = DesktopThemeExtension.of(context);
-    return FocusableActionDetector(
-      onShowHoverHighlight: (value) => setState(() => _hovered = value),
-      onShowFocusHighlight: (value) => setState(() => _focused = value),
-      mouseCursor: widget.onTap != null
-          ? SystemMouseCursors.click
-          : SystemMouseCursors.basic,
-      child: AnimatedScale(
-        scale: _active ? 1.05 : 1.0,
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOutCubic,
-        child: SizedBox(
-          width: widget.width,
-          height: widget.height,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(widget.borderRadius),
-              boxShadow: _active
-                  ? [
-                      BoxShadow(
-                        color: theme.shadowColor.withValues(alpha: 0.9),
-                        blurRadius: 16,
-                        offset: const Offset(0, 8),
-                      ),
-                    ]
-                  : null,
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(widget.borderRadius),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: widget.onTap,
-                  child: widget.child,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

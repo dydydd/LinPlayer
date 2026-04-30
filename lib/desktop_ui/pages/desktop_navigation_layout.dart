@@ -6,6 +6,10 @@ import '../theme/desktop_theme_extension.dart';
 class DesktopNavigationLayout extends StatelessWidget {
   static const double _kTopBarHeight = 70.0;
   static const double _kTopBarGap = 28.0;
+  static const Duration _kSidebarAnimationDuration = Duration(
+    milliseconds: 260,
+  );
+  static const Curve _kSidebarAnimationCurve = Curves.easeOutCubic;
 
   const DesktopNavigationLayout({
     super.key,
@@ -36,7 +40,8 @@ class DesktopNavigationLayout extends StatelessWidget {
     final backgroundStart = backgroundStartColor ?? desktopTheme.background;
     final backgroundEnd =
         backgroundEndColor ?? desktopTheme.backgroundGradientEnd;
-    final showSidebar = sidebarVisible && sidebarWidth > 0;
+    final canAnimateSidebar = sidebarWidth > 0;
+    final showSidebar = sidebarVisible && canAnimateSidebar;
     const horizontalPadding = 0.0;
 
     return Stack(
@@ -100,24 +105,74 @@ class DesktopNavigationLayout extends StatelessWidget {
             },
           ),
         ),
-        if (showSidebar)
+        if (canAnimateSidebar)
           Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: onDismissSidebar,
-              child: ColoredBox(
-                color: Colors.black.withValues(alpha: 0.32),
+            child: IgnorePointer(
+              ignoring: !showSidebar,
+              child: AnimatedOpacity(
+                opacity: showSidebar ? 1 : 0,
+                duration: _kSidebarAnimationDuration,
+                curve: _kSidebarAnimationCurve,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onDismissSidebar,
+                  child: ColoredBox(
+                    color: Colors.black.withValues(alpha: 0.32),
+                  ),
+                ),
               ),
             ),
           ),
-        if (showSidebar)
+        if (canAnimateSidebar)
           Positioned(
             top: 82,
             bottom: 24,
             left: 16,
-            child: SizedBox(
-              width: sidebarWidth,
-              child: sidebar,
+            child: IgnorePointer(
+              ignoring: !showSidebar,
+              child: AnimatedSlide(
+                offset: showSidebar ? Offset.zero : const Offset(-0.08, 0),
+                duration: _kSidebarAnimationDuration,
+                curve: _kSidebarAnimationCurve,
+                child: AnimatedScale(
+                  scale: showSidebar ? 1 : 0.985,
+                  alignment: Alignment.topLeft,
+                  duration: _kSidebarAnimationDuration,
+                  curve: _kSidebarAnimationCurve,
+                  child: AnimatedOpacity(
+                    opacity: showSidebar ? 1 : 0,
+                    duration: _kSidebarAnimationDuration,
+                    curve: _kSidebarAnimationCurve,
+                    child: SizedBox(
+                      width: sidebarWidth,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          boxShadow: [
+                            BoxShadow(
+                              color: desktopTheme.shadowColor.withValues(
+                                alpha: 0.34,
+                              ),
+                              blurRadius: 34,
+                              spreadRadius: -10,
+                              offset: const Offset(0, 18),
+                            ),
+                            BoxShadow(
+                              color: desktopTheme.accent.withValues(
+                                alpha: 0.08,
+                              ),
+                              blurRadius: 40,
+                              spreadRadius: -18,
+                              offset: const Offset(0, 10),
+                            ),
+                          ],
+                        ),
+                        child: RepaintBoundary(child: sidebar),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
           ),
       ],
