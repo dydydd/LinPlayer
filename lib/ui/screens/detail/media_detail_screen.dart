@@ -11,82 +11,154 @@ import '../../widgets/common/media_widgets.dart';
 /// 媒体详情页（剧/电影通用）
 class MediaDetailScreen extends ConsumerWidget {
   final String itemId;
-  
+
   const MediaDetailScreen({super.key, required this.itemId});
-  
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final itemAsync = ref.watch(mediaItemProvider(itemId));
-    final seasonsAsync = ref.watch(seasonsProvider(itemId));
-    final episodesAsync = ref.watch(episodesProvider((seriesId: itemId, seasonId: null)));
-    
+
     return Scaffold(
       body: itemAsync.when(
-        data: (item) => CustomScrollView(
-          slivers: [
-            // 封面区域
-            SliverToBoxAdapter(
-              child: _DetailHeader(item: item),
+        data: (item) => _DetailContent(item: item, itemId: itemId),
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, stackTrace) => _ErrorView(
+          error: error,
+          onRetry: () => ref.invalidate(mediaItemProvider(itemId)),
+        ),
+      ),
+    );
+  }
+}
+
+class _DetailContent extends StatelessWidget {
+  final MediaItem item;
+  final String itemId;
+
+  const _DetailContent({required this.item, required this.itemId});
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomScrollView(
+      slivers: [
+        // 封面区域
+        SliverToBoxAdapter(
+          child: _DetailHeader(item: item),
+        ),
+
+        // 简介
+        if (item.overview != null && item.overview!.isNotEmpty)
+          SliverToBoxAdapter(
+            child: _OverviewSection(overview: item.overview!),
+          ),
+
+        // 剧集相关区块
+        if (item.type == 'Series') ...[
+          SliverToBoxAdapter(
+            child: _SeasonsAndEpisodesSection(
+              itemId: itemId,
+              onEpisodeTap: (episode) => context.push('/player/${episode.id}'),
+              onSeasonTap: (season) => context.push('/season/${season.id}'),
             ),
-            
-            // 简介
-            if (item.overview != null)
-              SliverToBoxAdapter(
-                child: _OverviewSection(overview: item.overview!),
+          ),
+        ],
+
+        // 电影播放按钮
+        if (item.type == 'Movie') ...[
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: _MoviePlayButtons(itemId: itemId),
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: _VersionInfoSection(itemId: itemId),
+          ),
+        ],
+
+        const SliverPadding(padding: EdgeInsets.only(bottom: 32)),
+      ],
+    );
+  }
+}
+
+class _SeasonsAndEpisodesSection extends ConsumerWidget {
+  final String itemId;
+  final Function(Episode) onEpisodeTap;
+  final Function(Season) onSeasonTap;
+
+  const _SeasonsAndEpisodesSection({
+    required this.itemId,
+    required this.onEpisodeTap,
+    required this.onSeasonTap,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final seasonsAsync = ref.watch(seasonsProvider(itemId));
+    final episodesAsync = ref.watch(episodesProvider((seriesId: itemId, seasonId: null)));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SeasonsSection(
+          seasonsAsync: seasonsAsync,
+          onSeasonTap: onSeasonTap,
+        ),
+        _EpisodesSection(
+          title: '集数选择',
+          episodesAsync: episodesAsync,
+          onEpisodeTap: onEpisodeTap,
+        ),
+      ],
+    );
+  }
+}
+
+class _ErrorView extends StatelessWidget {
+  final Object error;
+  final VoidCallback onRetry;
+
+  const _ErrorView({required this.error, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: 48,
+              color: Theme.of(context).colorScheme.error,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '加载详情失败',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.error,
               ),
-            
-            // 继续观看（剧集）
-            if (item.type == 'Series')
-              SliverToBoxAdapter(
-                child: _EpisodesSection(
-                  title: '继续观看',
-                  episodesAsync: episodesAsync,
-                  onEpisodeTap: (episode) => context.push('/player/${episode.id}'),
-                ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              error.toString().replaceAll('Exception: ', '').replaceAll('DioException ', ''),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13,
+                color: Theme.of(context).textTheme.bodySmall?.color,
               ),
-            
-            // 季选择
-            if (item.type == 'Series')
-              SliverToBoxAdapter(
-                child: _SeasonsSection(
-                  seasonsAsync: seasonsAsync,
-                  onSeasonTap: (season) => context.push('/season/${season.id}'),
-                ),
-              ),
-            
-            // 集数选择
-            if (item.type == 'Series')
-              SliverToBoxAdapter(
-                child: _EpisodesSection(
-                  title: '集数选择',
-                  episodesAsync: episodesAsync,
-                  onEpisodeTap: (episode) => context.push('/player/${episode.id}'),
-                ),
-              ),
-            
-            // 电影播放按钮
-            if (item.type == 'Movie')
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: _MoviePlayButtons(itemId: itemId),
-                ),
-              ),
-            
-            // 版本信息（电影）
-            if (item.type == 'Movie')
-              SliverToBoxAdapter(
-                child: _VersionInfoSection(itemId: itemId),
-              ),
-            
-            const SliverPadding(padding: EdgeInsets.only(bottom: 32)),
+            ),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh),
+              label: const Text('重试'),
+            ),
           ],
-        ),
-        loading: () => const Scaffold(
-          body: Center(child: CircularProgressIndicator()),
-        ),
-        error: (error, _) => Scaffold(
-          body: Center(child: Text('加载失败: $error')),
         ),
       ),
     );
@@ -94,16 +166,16 @@ class MediaDetailScreen extends ConsumerWidget {
 }
 
 /// 详情页头部
-class _DetailHeader extends StatelessWidget {
+class _DetailHeader extends ConsumerWidget {
   final MediaItem item;
-  
+
   const _DetailHeader({required this.item});
-  
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final screenWidth = MediaQuery.of(context).size.width;
     final headerHeight = screenWidth * 0.5;
-    final api = ProviderScope.containerOf(context).read(apiClientProvider);
+    final api = ref.read(apiClientProvider);
     final imageUrl = item.backdropImageTag != null
         ? api.image.getBackdropImageUrl(item.id, tag: item.backdropImageTag)
         : item.primaryImageTag != null
@@ -471,7 +543,7 @@ class _EpisodeListTile extends ConsumerWidget {
         ],
       ),
       subtitle: Text(
-        '${episode.formattedRuntime ?? ''}',
+        episode.formattedRuntime ?? '',
         style: TextStyle(fontSize: 12, color: Theme.of(context).textTheme.bodySmall?.color),
       ),
     );

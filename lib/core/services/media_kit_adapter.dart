@@ -89,6 +89,8 @@ class MediaKitAdapter implements PlayerAdapter {
   Future<void> initialize({
     required String videoUrl,
     Duration? startPosition,
+    bool dolbyVisionFix = false,
+    bool useLibass = false,
   }) async {
     try {
       await dispose();
@@ -97,8 +99,11 @@ class MediaKitAdapter implements PlayerAdapter {
       _isCompleted = false;
       _errorMessage = null;
       
-      // 创建 MPV 播放器
-      _player = Player();
+      // 创建 MPV 播放器，根据设置配置参数
+      final configuration = PlayerConfiguration(
+        vo: dolbyVisionFix ? 'gpu-next' : null,
+      );
+      _player = Player(configuration: configuration);
       _videoController = VideoController(_player!);
       
       // 监听状态

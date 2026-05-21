@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' show max, min;
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../api/api_interfaces.dart';
 import 'player_adapter.dart';
 import 'video_player_adapter.dart';
@@ -32,6 +33,8 @@ class VideoPlayerService extends ChangeNotifier {
   double _dragStartY = 0;
   Duration _dragStartPosition = Duration.zero;
   double _dragStartVolume = 1.0;
+  double _currentBrightness = 1.0;
+  double _dragStartBrightness = 1.0;
   
   // 播放上报
   String? _currentItemId;
@@ -56,6 +59,7 @@ class VideoPlayerService extends ChangeNotifier {
   bool get isCompleted => _adapter?.isCompleted ?? false;
   double get progress => _adapter?.progress ?? 0.0;
   PlayerCoreType get coreType => _coreType;
+  double get brightness => _currentBrightness;
   
   /// 设置播放器内核
   void setCoreType(PlayerCoreType type) {
@@ -88,6 +92,8 @@ class VideoPlayerService extends ChangeNotifier {
     Function(PlaybackStartInfo)? onStart,
     Function(PlaybackProgressInfo)? onProgress,
     Function(PlaybackStopInfo)? onStop,
+    bool? dolbyVisionFix,
+    bool? useLibass,
   }) async {
     _currentItemId = itemId;
     _mediaSourceId = mediaSourceId ?? itemId;
@@ -129,6 +135,8 @@ class VideoPlayerService extends ChangeNotifier {
     await _adapter!.initialize(
       videoUrl: videoUrl,
       startPosition: startPosition,
+      dolbyVisionFix: dolbyVisionFix ?? false,
+      useLibass: useLibass ?? false,
     );
     
     // 开始播放
@@ -205,6 +213,28 @@ class VideoPlayerService extends ChangeNotifier {
     await _adapter?.setVolume(volume);
     notifyListeners();
   }
+
+  /// 设置亮度
+  void setBrightness(double brightness) {
+    _currentBrightness = brightness.clamp(0.1, 1.0);
+    notifyListeners();
+  }
+
+  /// 保存亮度到本地
+  Future<void> saveBrightness() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('player_brightness', _currentBrightness);
+  }
+
+  /// 从本地加载亮度
+  Future<void> loadBrightness() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedBrightness = prefs.getDouble('player_brightness');
+    if (savedBrightness != null) {
+      _currentBrightness = savedBrightness;
+      notifyListeners();
+    }
+  }
   
   /// 显示/隐藏控制栏
   void toggleControls() {
@@ -237,6 +267,7 @@ class VideoPlayerService extends ChangeNotifier {
     _dragStartY = details.globalPosition.dy;
     _dragStartPosition = position;
     _dragStartVolume = volume;
+    _dragStartBrightness = _currentBrightness;
     _cancelHideControlsTimer();
     notifyListeners();
   }
@@ -262,7 +293,10 @@ class VideoPlayerService extends ChangeNotifier {
     } else {
       // 垂直滑动
       if (_dragStartX < width / 2) {
-        // 左侧：亮度（暂不实现）
+        // 左侧：亮度
+        final brightnessDelta = -dy / height;
+        final newBrightness = (_dragStartBrightness + brightnessDelta).clamp(0.1, 1.0);
+        setBrightness(newBrightness);
       } else {
         // 右侧：音量
         final volumeDelta = -dy / height;

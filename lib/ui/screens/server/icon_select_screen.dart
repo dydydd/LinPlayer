@@ -1,8 +1,9 @@
-import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:dio/dio.dart';
 import '../../../core/providers/app_providers.dart';
 
 /// 图标选择页面
@@ -19,22 +20,52 @@ class _IconSelectScreenState extends ConsumerState<IconSelectScreen> with Single
   late TabController _tabController;
   final _urlController = TextEditingController();
   
-  // Mock icon library data
-  final List<IconLibrary> _libraries = [
-    IconLibrary(
-      name: 'Zzzの方形Emby图标',
-      url: 'https://juhe.greentea520.xyz/share/78aspf.json',
-      icons: [
-        IconItem(name: 'SaturDay.Lite', url: 'https://cdn.picui.cn/vip/2026/01/04/695959d7a1e28.png'),
-        IconItem(name: 'Shrek', url: 'https://cdn.picui.cn/vip/2026/01/04/69595a04ad8ca.png'),
-      ],
-    ),
-  ];
+  final List<IconLibrary> _libraries = [];
+  bool _isLoading = true;
+  String? _loadError;
   
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _loadDefaultLibraries();
+  }
+
+  Future<void> _loadDefaultLibraries() async {
+    final defaultLibraries = [
+      _IconLibSource(
+        name: 'Zzzの方形Emby图标',
+        url: 'https://juhe.greentea520.xyz/share/78aspf.json',
+      ),
+    ];
+
+    for (final source in defaultLibraries) {
+      try {
+        final dio = Dio();
+        final resp = await dio.get(source.url);
+        final icons = _parseIconJson(jsonEncode(resp.data));
+        if (mounted) {
+          setState(() {
+            _libraries.add(IconLibrary(
+              name: source.name,
+              url: source.url,
+              icons: icons,
+            ));
+          });
+        }
+      } catch (e) {
+        debugPrint('加载图标库失败: ${source.url}, 错误: $e');
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+        if (_libraries.isEmpty) {
+          _loadError = '未能加载任何图标库，请检查网络连接或手动添加';
+        }
+      });
+    }
   }
   
   @override
@@ -148,6 +179,47 @@ class _IconSelectScreenState extends ConsumerState<IconSelectScreen> with Single
   }
   
   Widget _buildNetworkTab() {
+    if (_isLoading) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('正在加载图标库...'),
+          ],
+        ),
+      );
+    }
+
+    if (_libraries.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.image_not_supported_outlined,
+              size: 64,
+              color: Theme.of(context).colorScheme.outline,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _loadError ?? '暂无图标库',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.outline,
+              ),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: () => _showAddLibraryDialog(),
+              icon: const Icon(Icons.add),
+              label: const Text('添加网络图标库'),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Column(
       children: [
         // Library list
@@ -156,12 +228,25 @@ class _IconSelectScreenState extends ConsumerState<IconSelectScreen> with Single
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('图标库', style: TextStyle(fontWeight: FontWeight.w600)),
+              Row(
+                children: [
+                  const Text('图标库', style: TextStyle(fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  Text(
+                    '共 ${_libraries.expand((l) => l.icons).length} 个图标',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).textTheme.bodySmall?.color,
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 12),
               ..._libraries.map((lib) => Card(
                 child: ListTile(
                   title: Text(lib.name),
                   subtitle: Text(lib.url, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  trailing: Text('${lib.icons.length} 个图标'),
                 ),
               )),
               const SizedBox(height: 8),
@@ -238,8 +323,9 @@ class _IconSelectScreenState extends ConsumerState<IconSelectScreen> with Single
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
           FilledButton(
             onPressed: () async {
-              await _loadIconLibrary(urlController.text, _urlController.text);
-              if (mounted) Navigator.pop(context);
+              final result = await _loadIconLibrary(urlController.text, _urlController.text);
+              if (!mounted) return;
+              _showAddResult(result);
             },
             child: const Text('添加'),
           ),
@@ -247,26 +333,33 @@ class _IconSelectScreenState extends ConsumerState<IconSelectScreen> with Single
       ),
     );
   }
-  
-  Future<void> _loadIconLibrary(String name, String urlOrJson) async {
-    if (urlOrJson.isEmpty) return;
-    
+
+  void _showAddResult(String? result) {
+    if (result != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result)),
+      );
+    }
+    Navigator.pop(context);
+  }
+
+  Future<String?> _loadIconLibrary(String name, String urlOrJson) async {
+    if (urlOrJson.isEmpty) return null;
+
     try {
       List<IconItem> icons = [];
-      
+
       // 尝试解析JSON
       if (urlOrJson.trim().startsWith('[') || urlOrJson.trim().startsWith('{')) {
         // 直接是JSON文本
         icons = _parseIconJson(urlOrJson);
       } else if (urlOrJson.startsWith('http')) {
-        // 是URL，尝试加载
-        // TODO: 使用dio加载远程JSON
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('远程加载需要网络请求支持，请直接粘贴JSON')),
-        );
-        return;
+        // 是URL，使用dio加载
+        final dio = Dio();
+        final resp = await dio.get(urlOrJson);
+        icons = _parseIconJson(jsonEncode(resp.data));
       }
-      
+
       if (icons.isNotEmpty) {
         setState(() {
           _libraries.add(IconLibrary(
@@ -275,15 +368,12 @@ class _IconSelectScreenState extends ConsumerState<IconSelectScreen> with Single
             icons: icons,
           ));
         });
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('成功加载 ${icons.length} 个图标')),
-        );
+
+        return '成功加载 ${icons.length} 个图标';
       }
+      return '未找到有效图标';
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('加载失败: ${e.toString()}')),
-      );
+      return '加载失败: ${e.toString()}';
     }
   }
   
@@ -315,6 +405,13 @@ class _IconSelectScreenState extends ConsumerState<IconSelectScreen> with Single
     );
     Navigator.pop(context);
   }
+}
+
+class _IconLibSource {
+  final String name;
+  final String url;
+
+  _IconLibSource({required this.name, required this.url});
 }
 
 class IconLibrary {

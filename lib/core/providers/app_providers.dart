@@ -188,3 +188,114 @@ final danmakuSpeedProvider = StateProvider<double>((ref) => 0.5);
 
 /// 弹幕密度Provider
 final danmakuDensityProvider = StateProvider<double>((ref) => 0.5);
+
+/// 弹幕屏蔽词列表Provider
+final danmakuBlockwordsProvider = StateNotifierProvider<DanmakuBlockwordsNotifier, List<String>>((ref) {
+  return DanmakuBlockwordsNotifier();
+});
+
+class DanmakuBlockwordsNotifier extends StateNotifier<List<String>> {
+  DanmakuBlockwordsNotifier() : super([]);
+
+  void addWord(String word) {
+    if (word.isNotEmpty && !state.contains(word)) {
+      state = [...state, word];
+    }
+  }
+
+  void removeWord(String word) {
+    state = state.where((w) => w != word).toList();
+  }
+
+  void importWords(List<String> words) {
+    final newWords = words.where((w) => w.isNotEmpty && !state.contains(w)).toList();
+    if (newWords.isNotEmpty) {
+      state = [...state, ...newWords];
+    }
+  }
+
+  void importUserBlocks(List<String> userIds) {
+    // 用户ID屏蔽也作为文本屏蔽词存储，前缀为 "uid:"
+    final prefixedIds = userIds.map((id) => 'uid:$id').toList();
+    importWords(prefixedIds);
+  }
+
+  void clear() {
+    state = [];
+  }
+}
+
+/// ==========================================
+/// 播放器设置Providers
+/// ==========================================
+
+/// 首选字幕语言Provider
+final preferredSubtitleLanguageProvider = StateProvider<String>((ref) => 'chi');
+
+/// 首选音频语言Provider
+final preferredAudioLanguageProvider = StateProvider<String>((ref) => 'jpn');
+
+/// 首选版本Provider
+final preferredVersionProvider = StateProvider<String>((ref) => '原盘');
+
+/// 记忆亮度Provider
+final rememberBrightnessProvider = StateProvider<bool>((ref) => true);
+
+/// 当前播放亮度值Provider (0.0 - 1.0)
+final playerBrightnessProvider = StateProvider<double>((ref) => 1.0);
+
+/// 字幕字体Provider
+final subtitleFontProvider = StateProvider<String>((ref) => '默认');
+
+/// MPV自动修正杜比视界颜色Provider
+final mpvDolbyVisionFixProvider = StateProvider<bool>((ref) => false);
+
+/// 启用Impeller渲染引擎Provider
+final impellerEnabledProvider = StateProvider<bool>((ref) => false);
+
+/// EXO播放器使用libass渲染ASS字幕Provider
+final exoLibassProvider = StateProvider<bool>((ref) => false);
+
+/// ==========================================
+/// 外观设置Providers
+/// ==========================================
+
+/// 隐藏每日推荐Provider
+final hideDailyRecommendationsProvider = StateProvider<bool>((ref) => false);
+
+/// ==========================================
+/// WebDAV备份Providers
+/// ==========================================
+
+/// WebDAV配置Provider
+final webdavConfigProvider = StateNotifierProvider<WebdavConfigNotifier, WebdavConfig?>((ref) {
+  return WebdavConfigNotifier();
+});
+
+class WebdavConfigNotifier extends StateNotifier<WebdavConfig?> {
+  WebdavConfigNotifier() : super(null);
+
+  void setConfig(String serverUrl, String username, String password) {
+    state = WebdavConfig(
+      serverUrl: serverUrl,
+      username: username,
+      password: password,
+    );
+  }
+
+  void clearConfig() {
+    state = null;
+  }
+}
+
+class WebdavConfig {
+  final String serverUrl;
+  final String username;
+  final String password;
+
+  WebdavConfig({
+    required this.serverUrl,
+    required this.username,
+    required this.password,
+  });
+}

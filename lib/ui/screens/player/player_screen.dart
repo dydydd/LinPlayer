@@ -60,6 +60,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
         ? PlayerCoreType.mediaKit
         : PlayerCoreType.videoPlayer;
     
+    // 读取播放器高级设置
+    final dolbyVisionFix = coreType == PlayerCoreType.mediaKit 
+        ? ref.read(mpvDolbyVisionFixProvider) 
+        : false;
+    final useLibass = coreType == PlayerCoreType.videoPlayer 
+        ? ref.read(exoLibassProvider) 
+        : false;
+    
     // 初始化播放器
     await _playerService.initialize(
       videoUrl: videoUrl,
@@ -67,6 +75,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
       mediaSourceId: mediaSource?.id,
       startPosition: startPosition,
       coreType: coreType,
+      dolbyVisionFix: dolbyVisionFix,
+      useLibass: useLibass,
       onStart: (info) async {
         try {
           await api.playback.reportPlaybackStart(info);

@@ -44,6 +44,8 @@ abstract class PlayerAdapter {
   Future<void> initialize({
     required String videoUrl,
     Duration? startPosition,
+    bool dolbyVisionFix = false,
+    bool useLibass = false,
   });
   
   /// 播放

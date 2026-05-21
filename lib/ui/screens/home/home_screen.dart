@@ -13,7 +13,8 @@ class HomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final currentServer = ref.watch(currentServerProvider);
-    
+    final hideDailyRecommendations = ref.watch(hideDailyRecommendationsProvider);
+
     return Scaffold(
       body: CustomScrollView(
         slivers: [
@@ -21,30 +22,31 @@ class HomeScreen extends ConsumerWidget {
           SliverToBoxAdapter(
             child: _HomeAppBar(serverName: currentServer?.name ?? '服务器'),
           ),
-          
-          // 随机推荐轮播
-          SliverToBoxAdapter(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SectionHeader(
-                  title: '随机推荐',
-                  onMoreTap: () => _showRandomRecommendations(context, ref),
-                ),
-                const RandomRecommendationCarousel(),
-              ],
+
+          // 随机推荐轮播（可被隐藏）
+          if (!hideDailyRecommendations)
+            SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SectionHeader(
+                    title: '随机推荐',
+                    onMoreTap: () => _showRandomRecommendations(context, ref),
+                  ),
+                  const RandomRecommendationCarousel(),
+                ],
+              ),
             ),
-          ),
-          
+
           // 继续观看
           const SliverToBoxAdapter(child: ContinueWatchingSection()),
-          
+
           // 媒体库
           const SliverToBoxAdapter(child: LibrariesSection()),
-          
+
           // 各媒体库最新内容
           const SliverToBoxAdapter(child: LatestItemsSections()),
-          
+
           const SliverPadding(padding: EdgeInsets.only(bottom: 32)),
         ],
       ),
@@ -293,27 +295,6 @@ class _RandomRecommendationCarouselState extends ConsumerState<RandomRecommendat
                 },
               ),
               
-              // 底部渐变
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: Container(
-                  height: 200,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.transparent,
-                        Theme.of(context).scaffoldBackgroundColor.withValues(alpha: 0.8),
-                        Theme.of(context).scaffoldBackgroundColor,
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              
               // 指示器
               Positioned(
                 bottom: 16,
@@ -374,7 +355,27 @@ class _CarouselItem extends ConsumerWidget {
             width: double.infinity,
             height: double.infinity,
           ),
-          
+
+          // 底部黑色渐变遮罩
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: 200,
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.transparent,
+                    Colors.black.withValues(alpha: 0.7),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
           // 底部信息
           Positioned(
             bottom: 40,
@@ -542,10 +543,13 @@ class _ContinueWatchingCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final api = ref.read(apiClientProvider);
-    final imageUrl = item.primaryImageTag != null
-        ? api.image.getPrimaryImageUrl(item.id, tag: item.primaryImageTag, maxWidth: 300)
-        : null;
-    
+    // 优先使用 backdrop 图（横向），否则使用 primary 图
+    final imageUrl = item.backdropImageTag != null
+        ? api.image.getBackdropImageUrl(item.id, tag: item.backdropImageTag, maxWidth: 400)
+        : item.primaryImageTag != null
+            ? api.image.getPrimaryImageUrl(item.id, tag: item.primaryImageTag, maxWidth: 400)
+            : null;
+
     return GestureDetector(
       onTap: () {
         if (item.type == 'Episode' && item.seriesId != null) {
@@ -560,8 +564,8 @@ class _ContinueWatchingCard extends ConsumerWidget {
           children: [
             MediaImage(
               imageUrl: imageUrl,
-              width: 120,
-              height: 180,
+              width: 160,
+              height: 90,
             ),
             // 右侧信息
             Expanded(
@@ -625,15 +629,15 @@ class _ContinueWatchingCard extends ConsumerWidget {
 /// 媒体库区块
 class LibrariesSection extends ConsumerWidget {
   const LibrariesSection({super.key});
-  
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final librariesAsync = ref.watch(librariesProvider);
-    
+
     return librariesAsync.when(
       data: (libraries) {
         if (libraries.isEmpty) return const SizedBox.shrink();
-        
+
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -643,37 +647,7 @@ class LibrariesSection extends ConsumerWidget {
               children: libraries.map((library) {
                 return SizedBox(
                   width: 140,
-                  child: GestureDetector(
-                    onTap: () => context.push('/library/${library.id}'),
-                    child: Column(
-                      children: [
-                        Expanded(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF5B8DEF).withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Center(
-                              child: Icon(
-                                library.collectionType == 'movies'
-                                    ? Icons.movie
-                                    : Icons.tv,
-                                size: 40,
-                                color: const Color(0xFF5B8DEF),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          library.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-                        ),
-                      ],
-                    ),
-                  ),
+                  child: _LibraryCard(library: library),
                 );
               }).toList(),
             ),
@@ -682,6 +656,60 @@ class LibrariesSection extends ConsumerWidget {
       },
       loading: () => const SizedBox.shrink(),
       error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+}
+
+class _LibraryCard extends ConsumerWidget {
+  final Library library;
+
+  const _LibraryCard({required this.library});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final api = ref.read(apiClientProvider);
+    final imageUrl = library.primaryImageTag != null
+        ? api.image.getPrimaryImageUrl(library.id, tag: library.primaryImageTag, maxWidth: 300)
+        : null;
+
+    return GestureDetector(
+      onTap: () => context.push('/library/${library.id}'),
+      child: Column(
+        children: [
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF5B8DEF).withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: imageUrl != null
+                  ? MediaImage(
+                      imageUrl: imageUrl,
+                      width: 140,
+                      height: double.infinity,
+                      borderRadius: BorderRadius.circular(12),
+                    )
+                  : Center(
+                      child: Icon(
+                        library.collectionType == 'movies'
+                            ? Icons.movie
+                            : Icons.tv,
+                        size: 40,
+                        color: const Color(0xFF5B8DEF),
+                      ),
+                    ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            library.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -75,6 +75,8 @@ class VideoPlayerAdapter implements PlayerAdapter {
   Future<void> initialize({
     required String videoUrl,
     Duration? startPosition,
+    bool dolbyVisionFix = false,
+    bool useLibass = false,
   }) async {
     try {
       await dispose();

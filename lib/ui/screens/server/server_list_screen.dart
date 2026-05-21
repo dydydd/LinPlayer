@@ -367,8 +367,8 @@ class _ServerCard extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    if (server.remark != null) ...[
-                      const SizedBox(height: 2),
+                    if (server.remark != null && server.remark!.isNotEmpty) ...[
+                      const SizedBox(height: 4),
                       Text(
                         server.remark!,
                         style: TextStyle(
@@ -377,16 +377,6 @@ class _ServerCard extends StatelessWidget {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 2),
-                    Text(
-                      server.activeLineUrl,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(context).colorScheme.outline,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
                   ],
                 ),
               ),

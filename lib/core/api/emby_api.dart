@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'api_interfaces.dart';
+import '../utils/danmaku_filter.dart';
 
 class EmbyApiClient implements ApiClientFactory {
   late Dio _dio;
@@ -25,6 +26,12 @@ class EmbyApiClient implements ApiClientFactory {
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
+        'User-Agent': 'Linplayer/1.0.0',
+        'X-Emby-Authorization': 'MediaBrowser Client="Linplayer", Device="Mobile", DeviceId="linplayer-mobile", Version="1.0.0"',
+        'X-Emby-Device-Name': 'Mobile',
+        'X-Emby-Device-Id': 'linplayer-mobile',
+        'X-Emby-Client': 'Linplayer',
+        'X-Emby-Client-Version': '1.0.0',
         if (authToken != null) 'X-Emby-Token': authToken,
       },
     ));
@@ -124,21 +131,33 @@ class EmbyAuthApi implements AuthApi {
 
   @override
   Future<AuthResult> login({required String username, required String password}) async {
-    final resp = await _client.post('/Users/AuthenticateByName', data: {
-      'Username': username,
-      'Pw': password,
-    });
-    final d = resp.data as Map<String, dynamic>;
-    final user = _parseUser(d['User'] as Map<String, dynamic>);
-    _client._userId = user.id;
-    final token = d['AccessToken'] as String;
-    _client.setAuthToken(token);
-    return AuthResult(
-      accessToken: token,
-      userId: user.id,
-      serverId: d['ServerId'] as String? ?? '',
-      user: user,
-    );
+    debugPrint('[EmbyAPI] login: username=$username, baseUrl=${_client.currentLine}');
+    
+    try {
+      final resp = await _client.post('/Users/AuthenticateByName', data: {
+        'Username': username,
+        'Pw': password,
+      });
+      debugPrint('[EmbyAPI] login success: ${resp.statusCode}');
+      final d = resp.data as Map<String, dynamic>;
+      final user = _parseUser(d['User'] as Map<String, dynamic>);
+      _client._userId = user.id;
+      final token = d['AccessToken'] as String;
+      _client.setAuthToken(token);
+      return AuthResult(
+        accessToken: token,
+        userId: user.id,
+        serverId: d['ServerId'] as String? ?? '',
+        user: user,
+      );
+    } on DioException catch (e) {
+      debugPrint('[EmbyAPI] login failed: ${e.type} | ${e.message}');
+      debugPrint('[EmbyAPI] request URL: ${e.requestOptions.uri}');
+      debugPrint('[EmbyAPI] request headers: ${e.requestOptions.headers}');
+      debugPrint('[EmbyAPI] request data: ${e.requestOptions.data}');
+      debugPrint('[EmbyAPI] response: ${e.response?.statusCode} | ${e.response?.data}');
+      rethrow;
+    }
   }
 
   @override
@@ -190,7 +209,19 @@ class EmbyServerApi implements ServerApi {
   Future<ServerInfo> getPublicInfo(String baseUrl) async {
     // 确保 baseUrl 以 / 结尾
     final normalizedBaseUrl = baseUrl.endsWith('/') ? baseUrl : '$baseUrl/';
-    final dio = Dio(BaseOptions(baseUrl: normalizedBaseUrl));
+    final dio = Dio(BaseOptions(
+      baseUrl: normalizedBaseUrl,
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'User-Agent': 'Linplayer/1.0.0',
+        'X-Emby-Authorization': 'MediaBrowser Client="Linplayer", Device="Mobile", DeviceId="linplayer-mobile", Version="1.0.0"',
+        'X-Emby-Device-Name': 'Mobile',
+        'X-Emby-Device-Id': 'linplayer-mobile',
+        'X-Emby-Client': 'Linplayer',
+        'X-Emby-Client-Version': '1.0.0',
+      },
+    ));
     
     debugPrint('[EmbyAPI] getPublicInfo: baseUrl=$normalizedBaseUrl');
     
@@ -217,7 +248,20 @@ class EmbyServerApi implements ServerApi {
     try {
       // 确保 baseUrl 以 / 结尾
       final normalizedBaseUrl = baseUrl.endsWith('/') ? baseUrl : '$baseUrl/';
-      final dio = Dio(BaseOptions(baseUrl: normalizedBaseUrl, connectTimeout: const Duration(seconds: 5)));
+      final dio = Dio(BaseOptions(
+        baseUrl: normalizedBaseUrl,
+        connectTimeout: const Duration(seconds: 5),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'User-Agent': 'Linplayer/1.0.0',
+          'X-Emby-Authorization': 'MediaBrowser Client="Linplayer", Device="Mobile", DeviceId="linplayer-mobile", Version="1.0.0"',
+          'X-Emby-Device-Name': 'Mobile',
+          'X-Emby-Device-Id': 'linplayer-mobile',
+          'X-Emby-Client': 'Linplayer',
+          'X-Emby-Client-Version': '1.0.0',
+        },
+      ));
       await dio.get('System/Info/Public');
       return true;
     } catch (_) {
@@ -586,6 +630,12 @@ class EmbyImageApi implements ImageApi {
 // ==================== Danmaku ====================
 
 class EmbyDanmakuApi implements DanmakuApi {
+  DanmakuFilter? _filter;
+
+  /// 设置弹幕过滤器
+  void setFilter(DanmakuFilter filter) {
+    _filter = filter;
+  }
 
   @override
   Future<List<DanmakuItem>> searchDanmaku({
@@ -612,7 +662,7 @@ class EmbyDanmakuApi implements DanmakuApi {
       final dio = Dio();
       final resp = await dio.get('https://api.dandanplay.com/api/v2/comment/$episodeId');
       final comments = (resp.data as Map<String, dynamic>)['comments'] as List<dynamic>;
-      return comments.map((e) {
+      final items = comments.map((e) {
         final d = e as Map<String, dynamic>;
         final p = (d['p'] as String?)?.split(',') ?? [];
         return DanmakuItem(
@@ -623,6 +673,15 @@ class EmbyDanmakuApi implements DanmakuApi {
           size: double.tryParse(p.length > 3 ? p[3] : '25') ?? 25,
         );
       }).toList();
+
+      // 应用屏蔽词过滤
+      if (_filter != null) {
+        return items.where((item) {
+          return !_filter!.shouldFilter(item.text);
+        }).toList();
+      }
+
+      return items;
     } catch (_) {
       return [];
     }
