@@ -21,12 +21,6 @@ jobs:
     name: Build FFmpeg Extension AAR
     runs-on: ubuntu-latest
     
-    strategy:
-      matrix:
-        # 只编译主流真机架构（arm64-v8a 覆盖 95%+ 设备）
-        # 跳过 x86_64 以避免 nasm/yasm 依赖和 NDK 工具链问题
-        arch: [arm64-v8a, armeabi-v7a]
-    
     steps:
       - name: Checkout LinPlayer code
         uses: actions/checkout@v4
@@ -36,14 +30,6 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '17'
-      
-      # 缓存 FFmpeg 源码
-      - name: Cache FFmpeg source
-        uses: actions/cache@v4
-        id: ffmpeg-cache
-        with:
-          path: ~/ffmpeg-src
-          key: ffmpeg-${{ env.FFMPEG_VERSION }}-${{ matrix.arch }}
       
       # 下载 Android NDK
       - name: Download Android NDK
@@ -58,21 +44,14 @@ jobs:
           git clone --depth 1 --branch ${{ env.EXOPLAYER_VERSION }} \
             https://github.com/androidx/media.git /tmp/media3
       
-      # 下载 FFmpeg 源码（如果被缓存则跳过）
+      # 下载 FFmpeg 源码
       - name: Download FFmpeg source
-        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         run: |
-          mkdir -p ~/ffmpeg-src
           git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} \
-            https://git.ffmpeg.org/ffmpeg.git ~/ffmpeg-src/ffmpeg
+            https://git.ffmpeg.org/ffmpeg.git /tmp/media3/libraries/decoder_ffmpeg/src/main/jni/ffmpeg
       
-      # 复制 FFmpeg 到 ExoPlayer 目录
-      - name: Setup FFmpeg in ExoPlayer
-        run: |
-          cp -r ~/ffmpeg-src/ffmpeg /tmp/media3/libraries/decoder_ffmpeg/src/main/jni/
-      
-      # 编译 FFmpeg（使用官方脚本风格）
-      - name: Build FFmpeg for ${{ matrix.arch }}
+      # 编译 FFmpeg（所有架构在一个 job 中完成）
+      - name: Build FFmpeg for all architectures
         run: |
           FFMPEG_MODULE_PATH="/tmp/media3/libraries/decoder_ffmpeg/src/main"
           NDK_PATH="/opt/android-ndk-${NDK_VERSION}"
@@ -109,48 +88,57 @@ jobs:
           
           cd "${FFMPEG_MODULE_PATH}/jni/ffmpeg"
           
-          cd "${FFMPEG_MODULE_PATH}/jni/ffmpeg"
-          
-          case ${{ matrix.arch }} in
-            arm64-v8a)
-              ./configure \
-                  --libdir=android-libs/arm64-v8a \
-                  --arch=aarch64 \
-                  --cpu=armv8-a \
-                  --cross-prefix="${TOOLCHAIN_PREFIX}/aarch64-linux-android${ANDROID_ABI}-" \
-                  --nm="${TOOLCHAIN_PREFIX}/llvm-nm" \
-                  --ar="${TOOLCHAIN_PREFIX}/llvm-ar" \
-                  --ranlib="${TOOLCHAIN_PREFIX}/llvm-ranlib" \
-                  --strip="${TOOLCHAIN_PREFIX}/llvm-strip" \
-                  ${COMMON_OPTIONS}
-              ;;
-            armeabi-v7a)
-              ./configure \
-                  --libdir=android-libs/armeabi-v7a \
-                  --arch=arm \
-                  --cpu=armv7-a \
-                  --cross-prefix="${TOOLCHAIN_PREFIX}/armv7a-linux-androideabi${ANDROID_ABI}-" \
-                  --nm="${TOOLCHAIN_PREFIX}/llvm-nm" \
-                  --ar="${TOOLCHAIN_PREFIX}/llvm-ar" \
-                  --ranlib="${TOOLCHAIN_PREFIX}/llvm-ranlib" \
-                  --strip="${TOOLCHAIN_PREFIX}/llvm-strip" \
-                  --extra-cflags="-march=armv7-a -mfloat-abi=softfp" \
-                  --extra-ldflags="-Wl,--fix-cortex-a8" \
-                  ${COMMON_OPTIONS}
-              ;;
-          esac
-          
+          # 编译 arm64-v8a
+          echo "Building for arm64-v8a..."
+          ./configure \
+              --libdir=android-libs/arm64-v8a \
+              --arch=aarch64 \
+              --cpu=armv8-a \
+              --cross-prefix="${TOOLCHAIN_PREFIX}/aarch64-linux-android${ANDROID_ABI}-" \
+              --nm="${TOOLCHAIN_PREFIX}/llvm-nm" \
+              --ar="${TOOLCHAIN_PREFIX}/llvm-ar" \
+              --ranlib="${TOOLCHAIN_PREFIX}/llvm-ranlib" \
+              --strip="${TOOLCHAIN_PREFIX}/llvm-strip" \
+              ${COMMON_OPTIONS}
           make -j${JOBS}
           
           # 手动复制静态库到 CMake 期望的路径
-          # 因为 make install-libs 可能不可靠
-          mkdir -p "android-libs/${{ matrix.arch }}"
-          cp libavutil/libavutil.a "android-libs/${{ matrix.arch }}/"
-          cp libswresample/libswresample.a "android-libs/${{ matrix.arch }}/"
-          cp libavcodec/libavcodec.a "android-libs/${{ matrix.arch }}/"
+          mkdir -p android-libs/arm64-v8a
+          cp libavutil/libavutil.a android-libs/arm64-v8a/
+          cp libswresample/libswresample.a android-libs/arm64-v8a/
+          cp libavcodec/libavcodec.a android-libs/arm64-v8a/
           
-          echo "FFmpeg libraries for ${{ matrix.arch }}:"
-          ls -la "android-libs/${{ matrix.arch }}/"
+          echo "FFmpeg libraries for arm64-v8a:"
+          ls -la android-libs/arm64-v8a/
+          
+          make clean
+          
+          # 编译 armeabi-v7a
+          echo "Building for armeabi-v7a..."
+          ./configure \
+              --libdir=android-libs/armeabi-v7a \
+              --arch=arm \
+              --cpu=armv7-a \
+              --cross-prefix="${TOOLCHAIN_PREFIX}/armv7a-linux-androideabi${ANDROID_ABI}-" \
+              --nm="${TOOLCHAIN_PREFIX}/llvm-nm" \
+              --ar="${TOOLCHAIN_PREFIX}/llvm-ar" \
+              --ranlib="${TOOLCHAIN_PREFIX}/llvm-ranlib" \
+              --strip="${TOOLCHAIN_PREFIX}/llvm-strip" \
+              --extra-cflags="-march=armv7-a -mfloat-abi=softfp" \
+              --extra-ldflags="-Wl,--fix-cortex-a8" \
+              ${COMMON_OPTIONS}
+          make -j${JOBS}
+          
+          # 手动复制静态库到 CMake 期望的路径
+          mkdir -p android-libs/armeabi-v7a
+          cp libavutil/libavutil.a android-libs/armeabi-v7a/
+          cp libswresample/libswresample.a android-libs/armeabi-v7a/
+          cp libavcodec/libavcodec.a android-libs/armeabi-v7a/
+          
+          echo "FFmpeg libraries for armeabi-v7a:"
+          ls -la android-libs/armeabi-v7a/
+          
+          make clean
       
       # 编译 AAR
       - name: Build AAR
@@ -162,59 +150,8 @@ jobs:
       - name: Upload AAR
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-extension-${{ matrix.arch }}
-          path: /tmp/media3/libraries/decoder_ffmpeg/build/outputs/aar/decoder_ffmpeg-release.aar
-          retention-days: 90
-  
-  # 合并所有架构的 AAR
-  merge-aar:
-    name: Merge AAR Artifacts
-    needs: build-ffmpeg
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: ./artifacts
-          pattern: ffmpeg-extension-*
-      
-      - name: List artifacts
-        run: |
-          echo "Available artifacts:"
-          find ./artifacts -name "*.aar"
-      
-      # 合并 AAR（使用 ar 命令解压并重新打包）
-      - name: Merge AAR files
-        run: |
-          mkdir -p ./merged
-          cd ./merged
-          
-          # 使用第一个 AAR 作为基础
-          cp ../artifacts/ffmpeg-extension-arm64-v8a/decoder_ffmpeg-release.aar ./ffmpeg-extension.aar
-          unzip -q ./ffmpeg-extension.aar -d ./aar-content
-          
-          # 合并其他架构的 .so 文件
-          for arch_dir in ../artifacts/ffmpeg-extension-*/; do
-            arch=$(basename "$arch_dir" | sed 's/ffmpeg-extension-//')
-            aar_file="${arch_dir}decoder_ffmpeg-release.aar"
-            if [ -f "$aar_file" ]; then
-              echo "Merging $arch..."
-              unzip -q "$aar_file" -d ./temp-aar
-              cp -r ./temp-aar/jni/* ./aar-content/jni/ 2>/dev/null || true
-              rm -rf ./temp-aar
-            fi
-          done
-          
-          # 重新打包
-          cd ./aar-content
-          zip -r ../ffmpeg-extension-merged.aar .
-      
-      - name: Upload merged AAR
-        uses: actions/upload-artifact@v4
-        with:
           name: ffmpeg-extension-all
-          path: ./merged/ffmpeg-extension-merged.aar
+          path: /tmp/media3/libraries/decoder_ffmpeg/build/outputs/aar/decoder_ffmpeg-release.aar
           retention-days: 90
       
       # 可选：创建 Release 并上传 AAR
@@ -236,7 +173,7 @@ jobs:
             1. 下载 `ffmpeg-extension-all` artifact
             2. 解压后将 `.aar` 文件放入 `android/exoplayer-ffmpeg/libs/`
             3. 在 `android/app/build.gradle.kts` 中添加依赖
-          files: ./merged/ffmpeg-extension-merged.aar
+          files: /tmp/media3/libraries/decoder_ffmpeg/build/outputs/aar/decoder_ffmpeg-release.aar
           draft: false
           prerelease: true
         env:
