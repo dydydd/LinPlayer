@@ -185,11 +185,21 @@ jobs:
            
            make clean
       
-      - name: Build AAR
-        if: steps.cache-aar.outputs.cache-hit != 'true'
-        run: |
-          cd /tmp/media3
-          ./gradlew :lib-decoder-ffmpeg:assembleRelease
+       - name: Limit ABIs to arm64-v8a and armeabi-v7a
+         if: steps.cache-aar.outputs.cache-hit != 'true'
+         run: |
+           BUILD_GRADLE="/tmp/media3/libraries/decoder_ffmpeg/build.gradle"
+           if [ -f "$BUILD_GRADLE" ]; then
+             sed -i '/defaultConfig {/a\        ndk {\n            abiFilters "arm64-v8a", "armeabi-v7a"\n        }' "$BUILD_GRADLE"
+             echo "Patched build.gradle with abiFilters"
+             grep -A 3 "abiFilters" "$BUILD_GRADLE" || true
+           fi
+       
+       - name: Build AAR
+         if: steps.cache-aar.outputs.cache-hit != 'true'
+         run: |
+           cd /tmp/media3
+           ./gradlew :lib-decoder-ffmpeg:assembleRelease
       
       - name: Copy AAR to project
         if: steps.cache-aar.outputs.cache-hit != 'true'

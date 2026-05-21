@@ -140,6 +140,18 @@ jobs:
           
           make clean
       
+      # 限制只编译我们需要的 ABI
+      - name: Limit ABIs to arm64-v8a and armeabi-v7a
+        run: |
+          # 在 ExoPlayer ffmpeg extension 的 build.gradle 中添加 abiFilters
+          BUILD_GRADLE="/tmp/media3/libraries/decoder_ffmpeg/build.gradle"
+          if [ -f "$BUILD_GRADLE" ]; then
+            # 在 android { defaultConfig { 后面添加 ndk.abiFilters
+            sed -i '/defaultConfig {/a\        ndk {\n            abiFilters "arm64-v8a", "armeabi-v7a"\n        }' "$BUILD_GRADLE"
+            echo "Patched build.gradle with abiFilters"
+            grep -A 3 "abiFilters" "$BUILD_GRADLE" || true
+          fi
+      
       # 编译 AAR
       - name: Build AAR
         run: |
