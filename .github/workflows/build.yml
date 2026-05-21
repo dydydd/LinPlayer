@@ -120,7 +120,8 @@ jobs:
                 ;;
               armeabi-v7a)
                 CPU=armv7-a
-                CROSS_PREFIX=arm-linux-androideabi21-
+                # NDK r25c 中 armv7a 的工具链前缀是 armv7a-linux-androideabi21-
+                CROSS_PREFIX=armv7a-linux-androideabi21-
                 ;;
             esac
             

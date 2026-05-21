@@ -77,6 +77,7 @@ jobs:
           cd /tmp/media3/libraries/decoder_ffmpeg/src/main/jni
           
           # 设置架构参数
+          # 注意：NDK r25c 使用 llvm 工具链，前缀需匹配实际文件名
           case ${{ matrix.arch }} in
             arm64-v8a)
               CPU=armv8-a
@@ -84,7 +85,8 @@ jobs:
               ;;
             armeabi-v7a)
               CPU=armv7-a
-              CROSS_PREFIX=arm-linux-androideabi21-
+              # NDK r25c 中 armv7a 的工具链前缀是 armv7a-linux-androideabi21-
+              CROSS_PREFIX=armv7a-linux-androideabi21-
               ;;
           esac
           
