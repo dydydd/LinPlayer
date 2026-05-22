@@ -221,11 +221,11 @@ jobs:
       # 查找 AAR 文件（兼容 build 和 buildout 两种路径）
       - name: Locate AAR file
         run: |
-          if [ -f "/tmp/media3/libraries/decoder_ffmpeg/build/outputs/aar/decoder_ffmpeg-release.aar" ]; then
-            echo "AAR_PATH=/tmp/media3/libraries/decoder_ffmpeg/build/outputs/aar/decoder_ffmpeg-release.aar" >> $GITHUB_ENV
+          if [ -f "/tmp/media3/libraries/decoder_ffmpeg/build/outputs/aar/lib-decoder-ffmpeg-release.aar" ]; then
+            echo "AAR_PATH=/tmp/media3/libraries/decoder_ffmpeg/build/outputs/aar/lib-decoder-ffmpeg-release.aar" >> $GITHUB_ENV
             echo "Found AAR at: build/outputs/aar/"
-          elif [ -f "/tmp/media3/libraries/decoder_ffmpeg/buildout/outputs/aar/decoder_ffmpeg-release.aar" ]; then
-            echo "AAR_PATH=/tmp/media3/libraries/decoder_ffmpeg/buildout/outputs/aar/decoder_ffmpeg-release.aar" >> $GITHUB_ENV
+          elif [ -f "/tmp/media3/libraries/decoder_ffmpeg/buildout/outputs/aar/lib-decoder-ffmpeg-release.aar" ]; then
+            echo "AAR_PATH=/tmp/media3/libraries/decoder_ffmpeg/buildout/outputs/aar/lib-decoder-ffmpeg-release.aar" >> $GITHUB_ENV
             echo "Found AAR at: buildout/outputs/aar/"
           else
             echo "ERROR: AAR file not found in expected locations"

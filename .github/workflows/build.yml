@@ -269,11 +269,11 @@ jobs:
         run: |
           mkdir -p android/exoplayer-ffmpeg/libs
           # Try both possible output paths
-          if [ -f "/tmp/media3/libraries/decoder_ffmpeg/build/outputs/aar/decoder_ffmpeg-release.aar" ]; then
-            cp /tmp/media3/libraries/decoder_ffmpeg/build/outputs/aar/decoder_ffmpeg-release.aar \
+          if [ -f "/tmp/media3/libraries/decoder_ffmpeg/build/outputs/aar/lib-decoder-ffmpeg-release.aar" ]; then
+            cp /tmp/media3/libraries/decoder_ffmpeg/build/outputs/aar/lib-decoder-ffmpeg-release.aar \
                android/exoplayer-ffmpeg/libs/ffmpeg-extension.aar
-          elif [ -f "/tmp/media3/libraries/decoder_ffmpeg/buildout/outputs/aar/decoder_ffmpeg-release.aar" ]; then
-            cp /tmp/media3/libraries/decoder_ffmpeg/buildout/outputs/aar/decoder_ffmpeg-release.aar \
+          elif [ -f "/tmp/media3/libraries/decoder_ffmpeg/buildout/outputs/aar/lib-decoder-ffmpeg-release.aar" ]; then
+            cp /tmp/media3/libraries/decoder_ffmpeg/buildout/outputs/aar/lib-decoder-ffmpeg-release.aar \
                android/exoplayer-ffmpeg/libs/ffmpeg-extension.aar
           else
             echo "ERROR: AAR file not found in expected locations"
