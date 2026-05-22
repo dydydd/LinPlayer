@@ -25,57 +25,47 @@ class ExoPlayerAdapter implements PlayerAdapter {
   String? _errorMessage;
 
   List<Map<dynamic, dynamic>> _tracks = [];
+  String _subtitleText = '';
+  String _subtitleBitmapBase64 = '';
 
   PlayerStateCallbacks? _callbacks;
   Timer? _positionTimer;
 
+  final ValueNotifier<String> subtitleNotifier = ValueNotifier('');
+
   @override
   bool get isInitialized => _isInitialized;
-
   @override
   bool get isPlaying => _isPlaying;
-
   @override
   bool get isBuffering => _isBuffering;
-
   @override
   bool get isCompleted => _isCompleted;
-
   @override
   Duration get position => _position;
-
   @override
   Duration get duration => _duration;
-
   @override
   double get speed => _speed;
-
   @override
   double get volume => _volume;
-
   @override
   double get progress {
     final dur = _duration.inMilliseconds;
     if (dur <= 0) return 0.0;
     return _position.inMilliseconds / dur;
   }
-
   @override
   bool get hasError => _errorMessage != null;
-
   @override
   String? get errorMessage => _errorMessage;
-
   @override
   bool get libassReady => false;
-
   @override
   int? get textureId => _textureId;
-
   @override
   List<Map<String, dynamic>> getTracksInfo() =>
       _tracks.map((e) => e.map((k, v) => MapEntry(k.toString(), v))).toList();
-
   @override
   void setCallbacks(PlayerStateCallbacks callbacks) {
     _callbacks = callbacks;
@@ -92,12 +82,12 @@ class ExoPlayerAdapter implements PlayerAdapter {
     _logger.i('ExoPlayer', '开始初始化 - videoUrl=$videoUrl');
     try {
       await dispose();
-
       _errorMessage = null;
       _isCompleted = false;
       _tracks = [];
+      _subtitleText = '';
+      _subtitleBitmapBase64 = '';
 
-      _logger.d('ExoPlayer', '调用原生 createPlayer...');
       final result = await _channel.invokeMethod<Map<dynamic, dynamic>>('createPlayer', {
         'videoUrl': videoUrl,
         'startPositionMs': startPosition?.inMilliseconds ?? 0,
@@ -111,10 +101,9 @@ class ExoPlayerAdapter implements PlayerAdapter {
 
       _playerId = result['playerId'] as String?;
       _textureId = result['textureId'] as int?;
-      _logger.i('ExoPlayer', '原生播放器创建成功 - playerId=$_playerId, textureId=$_textureId');
 
       if (_playerId == null || _textureId == null) {
-        throw Exception('Invalid player creation result: playerId=$_playerId, textureId=$_textureId');
+        throw Exception('Invalid player creation result');
       }
 
       _isInitialized = true;
@@ -124,7 +113,6 @@ class ExoPlayerAdapter implements PlayerAdapter {
         _onEvent,
         onError: _onEventError,
       );
-      _logger.d('ExoPlayer', '事件监听已启动');
 
       _positionTimer = Timer.periodic(
         const Duration(milliseconds: 200),
@@ -141,30 +129,29 @@ class ExoPlayerAdapter implements PlayerAdapter {
     }
   }
 
-  Future<List<Map<dynamic, dynamic>>> getTracks() async {
-    if (_playerId == null || !_isInitialized) return [];
-    try {
-      final result = await _channel.invokeMethod<List<dynamic>>('getTracks', {
-        'playerId': _playerId,
-      });
-      return result?.cast<Map<dynamic, dynamic>>() ?? [];
-    } catch (e) {
-      return [];
-    }
-  }
-
   @override
   Future<void> selectSubtitleTrack(String trackId) async {
     if (_playerId == null || !_isInitialized) return;
     _logger.i('ExoPlayer', '选择字幕轨道: $trackId');
     try {
-      final trackInfo = _tracks.where((t) =>
-          t['id']?.toString() == trackId || t['trackIndex']?.toString() == trackId).toList();
+      final allTracks = _tracks;
+      Map<dynamic, dynamic>? target;
 
-      if (trackInfo.isNotEmpty) {
-        final track = trackInfo.first;
-        final groupIndex = track['groupIndex'] ?? 0;
-        final trackIndex = track['trackIndex'] ?? 0;
+      for (final t in allTracks) {
+        if (t['id']?.toString() == trackId) { target = t; break; }
+      }
+      if (target == null) {
+        for (final t in allTracks) {
+          if (t['type'] == 'text' && t['trackIndex']?.toString() == trackId) {
+            target = t; break;
+          }
+        }
+      }
+
+      if (target != null) {
+        final groupIndex = target['groupIndex'] ?? 0;
+        final trackIndex = target['trackIndex'] ?? 0;
+        _logger.i('ExoPlayer', '调用selectTrack: group=$groupIndex, track=$trackIndex');
         await _channel.invokeMethod('selectTrack', {
           'playerId': _playerId,
           'groupIndex': groupIndex,
@@ -172,20 +159,7 @@ class ExoPlayerAdapter implements PlayerAdapter {
           'trackType': 3,
         });
       } else {
-        final tracks = await getTracks();
-        final textTracks = tracks.where((t) => t['type'] == 'text').toList();
-        final targetTrack = textTracks.where((t) =>
-            t['id']?.toString() == trackId || t['trackIndex']?.toString() == trackId).toList();
-
-        if (targetTrack.isNotEmpty) {
-          final track = targetTrack.first;
-          await _channel.invokeMethod('selectTrack', {
-            'playerId': _playerId,
-            'groupIndex': track['groupIndex'] ?? 0,
-            'trackIndex': track['trackIndex'] ?? 0,
-            'trackType': 3,
-          });
-        }
+        _logger.w('ExoPlayer', '未找到字幕轨道: $trackId, 可用: ${allTracks.where((t) => t['type'] == 'text').map((t) => t['id']).toList()}');
       }
     } catch (e, stackTrace) {
       _logger.eWithStack('ExoPlayer', '选择字幕轨道失败', e, stackTrace);
@@ -195,11 +169,12 @@ class ExoPlayerAdapter implements PlayerAdapter {
   @override
   Future<void> deselectSubtitleTrack() async {
     if (_playerId == null || !_isInitialized) return;
-    _logger.i('ExoPlayer', '关闭字幕');
     try {
       await _channel.invokeMethod('deselectSubtitleTrack', {
         'playerId': _playerId,
       });
+      _subtitleText = '';
+      subtitleNotifier.value = '';
     } catch (e, stackTrace) {
       _logger.eWithStack('ExoPlayer', '关闭字幕失败', e, stackTrace);
     }
@@ -208,19 +183,16 @@ class ExoPlayerAdapter implements PlayerAdapter {
   @override
   Future<void> selectAudioTrack(String trackId) async {
     if (_playerId == null || !_isInitialized) return;
-    _logger.i('ExoPlayer', '选择音频轨道: $trackId');
     try {
-      final trackInfo = _tracks.where((t) =>
+      final target = _tracks.where((t) =>
           (t['type'] == 'audio') &&
-          (t['id']?.toString() == trackId || t['trackIndex']?.toString() == trackId)).toList();
-
-      if (trackInfo.isNotEmpty) {
-        final track = trackInfo.first;
+          (t['id']?.toString() == trackId || t['trackIndex']?.toString() == trackId)).firstOrNull;
+      if (target != null) {
         await _channel.invokeMethod('selectTrack', {
           'playerId': _playerId,
-          'groupIndex': track['groupIndex'] ?? 0,
-          'trackIndex': track['trackIndex'] ?? 0,
-          'trackType': 2,
+          'groupIndex': target['groupIndex'] ?? 0,
+          'trackIndex': target['trackIndex'] ?? 0,
+          'trackType': 1,
         });
       }
     } catch (e, stackTrace) {
@@ -238,24 +210,16 @@ class ExoPlayerAdapter implements PlayerAdapter {
     _logger.w('ExoPlayer', '次字幕暂不支持，请使用 MPV 内核');
   }
 
-  bool supportsSubtitleFormat(String path) {
-    return true;
-  }
-
-  Future<void> loadSubtitle({
-    required String subtitleUrl,
-    String? mimeType,
-    String? language,
-  }) async {
+  @override
+  Future<void> loadLibassSubtitle(String path) async {
     if (_playerId == null || !_isInitialized) return;
-
-    _logger.i('ExoPlayer', '加载外挂字幕: $subtitleUrl (mime=$mimeType, lang=$language)');
+    final mimeType = _detectSubtitleMimeType(path);
+    _logger.i('ExoPlayer', '加载外挂字幕: $path (mime=$mimeType)');
     try {
       await _channel.invokeMethod('loadSubtitle', {
         'playerId': _playerId,
-        'subtitleUrl': subtitleUrl,
+        'subtitleUrl': path,
         'subtitleMimeType': mimeType,
-        'subtitleLanguage': language,
       });
     } catch (e, stackTrace) {
       _logger.eWithStack('ExoPlayer', '加载字幕失败', e, stackTrace);
@@ -263,30 +227,22 @@ class ExoPlayerAdapter implements PlayerAdapter {
   }
 
   @override
-  Future<void> loadLibassSubtitle(String path) async {
-    final mimeType = _detectSubtitleMimeType(path);
-    await loadSubtitle(subtitleUrl: path, mimeType: mimeType);
+  Future<void> loadLibassSubtitleMemory(Uint8List data, {String codec = 'ass'}) async {
+    _logger.w('ExoPlayer', 'loadLibassSubtitleMemory 不支持');
   }
 
   String? _detectSubtitleMimeType(String path) {
     var clean = path;
     final qIndex = clean.indexOf('?');
     if (qIndex >= 0) clean = clean.substring(0, qIndex);
-    final hIndex = clean.indexOf('#');
-    if (hIndex >= 0) clean = clean.substring(0, hIndex);
     final lower = clean.toLowerCase();
     if (lower.endsWith('.srt') || lower.endsWith('.subrip')) return 'application/x-subrip';
     if (lower.endsWith('.ass') || lower.endsWith('.ssa')) return 'text/x-ssa';
     if (lower.endsWith('.vtt') || lower.endsWith('.webvtt')) return 'text/vtt';
-    if (lower.endsWith('.ttml') || lower.endsWith('.xml') || lower.endsWith('.dfxp')) return 'application/ttml+xml';
+    if (lower.endsWith('.ttml') || lower.endsWith('.dfxp')) return 'application/ttml+xml';
     if (lower.endsWith('.pgs') || lower.endsWith('.sup')) return 'application/pgs';
     if (lower.endsWith('.vob')) return 'application/vobsub';
-    return null;
-  }
-
-  @override
-  Future<void> loadLibassSubtitleMemory(Uint8List data, {String codec = 'ass'}) async {
-    _logger.w('ExoPlayer', 'loadLibassSubtitleMemory 已废弃');
+    return 'application/x-subrip';
   }
 
   void _onEvent(dynamic event) {
@@ -321,12 +277,24 @@ class ExoPlayerAdapter implements PlayerAdapter {
         }
         break;
       case 'subtitle':
+        _subtitleText = event['value'] as String? ?? '';
+        subtitleNotifier.value = _subtitleText;
         break;
       case 'subtitleBitmap':
+        final data = event['value'] as Map?;
+        if (data != null) {
+          final images = data['images'] as List?;
+          if (images != null && images.isNotEmpty) {
+            _subtitleBitmapBase64 = images.first as String;
+          }
+          _subtitleText = data['text'] as String? ?? '';
+          subtitleNotifier.value = _subtitleBitmapBase64.isNotEmpty
+              ? 'BITMAP:${_subtitleBitmapBase64.substring(0, 20)}...'
+              : _subtitleText;
+        }
         break;
       case 'subtitleType':
-        final subType = event['value'] as String?;
-        _logger.d('ExoPlayer', '字幕类型: $subType');
+        _logger.d('ExoPlayer', '字幕类型: ${event['value']}');
         break;
     }
   }
@@ -349,14 +317,12 @@ class ExoPlayerAdapter implements PlayerAdapter {
       if (dur != null && dur > 0) {
         _duration = Duration(milliseconds: dur);
       }
-    } catch (e) {
-    }
+    } catch (_) {}
   }
 
   @override
   Future<void> play() async {
     if (_playerId == null) return;
-    _logger.d('ExoPlayer', '播放');
     await _channel.invokeMethod('play', {'playerId': _playerId});
     _isCompleted = false;
   }
@@ -364,7 +330,6 @@ class ExoPlayerAdapter implements PlayerAdapter {
   @override
   Future<void> pause() async {
     if (_playerId == null) return;
-    _logger.d('ExoPlayer', '暂停');
     await _channel.invokeMethod('pause', {'playerId': _playerId});
   }
 
@@ -418,7 +383,6 @@ class ExoPlayerAdapter implements PlayerAdapter {
   @override
   Future<void> setSubtitleDelay(double seconds) async {
     if (_playerId == null) return;
-    _logger.d('ExoPlayer', '设置字幕延迟: ${seconds}s');
     await _channel.invokeMethod('setSubtitleDelay', {
       'playerId': _playerId,
       'seconds': seconds,
@@ -428,7 +392,6 @@ class ExoPlayerAdapter implements PlayerAdapter {
   @override
   Future<void> setAudioDelay(double seconds) async {
     if (_playerId == null) return;
-    _logger.d('ExoPlayer', '设置音频延迟: ${seconds}s');
     await _channel.invokeMethod('setAudioDelay', {
       'playerId': _playerId,
       'seconds': seconds,
@@ -438,7 +401,6 @@ class ExoPlayerAdapter implements PlayerAdapter {
   @override
   Future<void> setSubtitleFont(String fontName) async {
     if (_playerId == null) return;
-    _logger.d('ExoPlayer', '设置字幕字体: $fontName');
     await _channel.invokeMethod('setSubtitleFont', {
       'playerId': _playerId,
       'fontName': fontName,
@@ -448,7 +410,6 @@ class ExoPlayerAdapter implements PlayerAdapter {
   @override
   Future<void> setSubtitleSize(double size) async {
     if (_playerId == null) return;
-    _logger.d('ExoPlayer', '设置字幕大小: $size');
     await _channel.invokeMethod('setSubtitleSize', {
       'playerId': _playerId,
       'size': size,
@@ -467,7 +428,6 @@ class ExoPlayerAdapter implements PlayerAdapter {
   @override
   Future<void> setSubtitleBackground(bool enabled) async {
     if (_playerId == null) return;
-    _logger.d('ExoPlayer', '设置字幕黑色背景: $enabled');
     await _channel.invokeMethod('setSubtitleBackground', {
       'playerId': _playerId,
       'enabled': enabled,
@@ -477,7 +437,6 @@ class ExoPlayerAdapter implements PlayerAdapter {
   @override
   Future<void> setAspectRatio(String ratio) async {
     if (_playerId == null) return;
-    _logger.d('ExoPlayer', '设置画面比例: $ratio');
     await _channel.invokeMethod('setAspectRatio', {
       'playerId': _playerId,
       'ratio': ratio,
@@ -487,34 +446,61 @@ class ExoPlayerAdapter implements PlayerAdapter {
   @override
   Widget buildVideo() {
     if (_textureId != null) {
-      return Texture(textureId: _textureId!);
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          Texture(textureId: _textureId!),
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 48,
+            child: ValueListenableBuilder<String>(
+              valueListenable: subtitleNotifier,
+              builder: (context, text, _) {
+                if (text.isEmpty) return const SizedBox.shrink();
+                if (text.startsWith('BITMAP:')) return const SizedBox.shrink();
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.7),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    text,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      height: 1.4,
+                      decoration: TextDecoration.none,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      );
     }
-    return const Center(
-      child: CircularProgressIndicator(),
-    );
+    return const Center(child: CircularProgressIndicator());
   }
 
   @override
-  Future<void> applySuperResolution(bool enable) async {
-  }
+  Future<void> applySuperResolution(bool enable) async {}
 
   @override
   Future<void> dispose() async {
-    _logger.i('ExoPlayer', '释放资源...');
-
     _positionTimer?.cancel();
     _positionTimer = null;
     _eventSub?.cancel();
     _eventSub = null;
     _eventChannel = null;
-
     if (_playerId != null) {
       try {
         await _channel.invokeMethod('disposePlayer', {'playerId': _playerId});
       } catch (_) {}
       _playerId = null;
     }
-
     _textureId = null;
     _isInitialized = false;
     _isPlaying = false;
@@ -522,6 +508,8 @@ class ExoPlayerAdapter implements PlayerAdapter {
     _position = Duration.zero;
     _duration = Duration.zero;
     _tracks = [];
-    _logger.i('ExoPlayer', '资源已释放');
+    _subtitleText = '';
+    _subtitleBitmapBase64 = '';
+    subtitleNotifier.value = '';
   }
 }

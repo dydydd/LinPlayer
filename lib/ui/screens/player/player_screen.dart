@@ -140,8 +140,22 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
 
     // 加载字幕（内封/外挂）—— 两个内核都支持
     if (mediaSource != null) {
-      await Future.delayed(const Duration(milliseconds: 1500));
+      await _waitForTracksReady();
       await _loadSubtitles(item, mediaSource);
+    }
+  }
+
+  Future<void> _waitForTracksReady() async {
+    if (_playerService.coreType == PlayerCoreType.mpv) {
+      for (int i = 0; i < 20; i++) {
+        final tracks = _playerService.tracksInfo;
+        final subtitleTracks = tracks.where((t) => t['type'] == 'text').toList();
+        if (subtitleTracks.length > 2) return;
+        await Future.delayed(const Duration(milliseconds: 300));
+      }
+      AppLogger().w('Player', '等待轨道就绪超时，继续加载');
+    } else {
+      await Future.delayed(const Duration(milliseconds: 2000));
     }
   }
 

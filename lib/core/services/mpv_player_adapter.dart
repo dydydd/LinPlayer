@@ -212,23 +212,46 @@ class MpvPlayerAdapter implements PlayerAdapter {
       _tracks = trackList;
       _logger.d('MpvAdapter',
           '轨道变更: video=${tracks.video.length}, audio=${tracks.audio.length}, subtitle=${tracks.subtitle.length}');
+      _tryPendingSubtitleSelection();
     }));
   }
+
+  String? _pendingSubtitleLang;
 
   @override
   Future<void> selectSubtitleTrack(String trackId) async {
     if (_player == null || !_isInitialized) return;
-    _logger.i('MpvAdapter', '选择字幕轨道: id=$trackId');
+    _logger.i('MpvAdapter', '选择字幕轨道: id=$trackId, 已知轨道数=${_subtitleTracks.length}');
     try {
+      if (_subtitleTracks.isEmpty) {
+        _logger.w('MpvAdapter', '轨道列表为空，先用SubtitleTrack.auto()兜底');
+        await _player!.setSubtitleTrack(SubtitleTrack.auto());
+        _pendingSubtitleLang = trackId;
+        return;
+      }
       final target = _subtitleTracks.where((t) => t.id == trackId).firstOrNull;
       if (target != null) {
         await _player!.setSubtitleTrack(target);
         _logger.i('MpvAdapter', '字幕轨道已选择: id=${target.id}, title=${target.title}, lang=${target.language}');
       } else {
-        _logger.w('MpvAdapter', '未找到字幕轨道: id=$trackId, 可用: ${_subtitleTracks.map((t) => t.id).toList()}');
+        _logger.w('MpvAdapter', '未找到字幕轨道: id=$trackId, 可用: ${_subtitleTracks.map((t) => '${t.id}/${t.language}').toList()}');
+        await _player!.setSubtitleTrack(SubtitleTrack.auto());
       }
+      await _applySubtitleRuntimeProperties();
     } catch (e, stackTrace) {
       _logger.eWithStack('MpvAdapter', '选择字幕轨道失败', e, stackTrace);
+    }
+  }
+
+  Future<void> _tryPendingSubtitleSelection() async {
+    if (_pendingSubtitleLang == null || _subtitleTracks.isEmpty) return;
+    final targetId = _pendingSubtitleLang;
+    _pendingSubtitleLang = null;
+    _logger.i('MpvAdapter', '延迟选择字幕轨道: id=$targetId');
+    final target = _subtitleTracks.where((t) => t.id == targetId).firstOrNull;
+    if (target != null) {
+      await _player!.setSubtitleTrack(target);
+      await _applySubtitleRuntimeProperties();
     }
   }
 
@@ -241,7 +264,6 @@ class MpvPlayerAdapter implements PlayerAdapter {
       _logger.eWithStack('MpvAdapter', '关闭字幕失败', e, stackTrace);
     }
   }
-
   @override
   Future<void> selectAudioTrack(String trackId) async {
     if (_player == null || !_isInitialized) return;
