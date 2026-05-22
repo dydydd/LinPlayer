@@ -200,27 +200,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     }
 
     if (isGraphical) {
-      if (_playerService.coreType == PlayerCoreType.mpv) {
-        logger.i('Player', '图形外挂字幕 (PGS/SUP)，MPV内核通过轨道选择加载');
-        try {
-          if (_playerService.coreType == PlayerCoreType.mpv) {
-            await _selectInternalSubtitleMPV(target, preferredLang, logger);
-          } else {
-            await _selectInternalSubtitleEXO(target, preferredLang, logger);
-          }
-        } catch (e) {
-          logger.e('Player', '图形字幕选择失败: $e');
+      logger.i('Player', '图形外挂字幕 (PGS/SUP)，通过播放器加载');
+      try {
+        if (_playerService.coreType == PlayerCoreType.mpv) {
+          await _selectInternalSubtitleMPV(target, preferredLang, logger);
+        } else {
+          await _selectInternalSubtitleEXO(target, preferredLang, logger);
         }
-        return;
-      } else {
-        logger.w('Player', 'EXO内核不支持PGS/SUP外挂字幕，请切换到MPV内核');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('PGS/SUP字幕需MPV内核支持，请在设置中切换')),
-          );
-        }
-        return;
+      } catch (e) {
+        logger.e('Player', '图形字幕选择失败: $e');
       }
+      return;
     }
 
     try {
@@ -412,8 +402,41 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
           logger.i('Player', '切换字幕轨道: id=$trackId');
         }
       } else {
-        if (_playerService.coreType == PlayerCoreType.mpv) {
-          final embyCodec = _embySubtitleCodec(codec);
+        final embyCodec = _embySubtitleCodec(codec);
+        final isGraphicalExternal = codec == 'pgssub' || codec == 'sup' || codec == 'pgs' || codec == 'dvdsub' || codec == 'vobsub';
+
+        if (_playerService.coreType == PlayerCoreType.mpv || isGraphicalExternal) {
+          final subUrl = api.playback.getSubtitleStreamUrl(
+            item.id,
+            mediaSource.id,
+            target.index,
+            embyCodec,
+          );
+
+          if (isGraphicalExternal) {
+            await _playerService.loadLibassSubtitle(subUrl);
+          } else {
+            final tempDir = await getTemporaryDirectory();
+            final ext = codec == 'srt' || codec == 'subrip' ? 'srt' : 'ass';
+            final subFile = File('${tempDir.path}/subtitle_${item.id}_${target.index}.$ext');
+
+            if (!subFile.existsSync() || await subFile.length() == 0) {
+              final dio = Dio(BaseOptions(
+                connectTimeout: const Duration(seconds: 15),
+                receiveTimeout: const Duration(seconds: 60),
+              ));
+              if (server?.authToken != null) {
+                dio.options.headers['X-Emby-Token'] = server!.authToken;
+                dio.options.headers['X-MediaBrowser-Token'] = server.authToken;
+              }
+              await dio.download(subUrl, subFile.path);
+            }
+
+            if (subFile.existsSync() && await subFile.length() > 0) {
+              await _playerService.loadLibassSubtitle(subFile.path);
+            }
+          }
+        } else {
           final subUrl = api.playback.getSubtitleStreamUrl(
             item.id,
             mediaSource.id,
@@ -421,34 +444,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
             embyCodec,
           );
           await _playerService.loadLibassSubtitle(subUrl);
-        } else {
-          final embyCodec = _embySubtitleCodec(codec);
-          final subUrl = api.playback.getSubtitleStreamUrl(
-            item.id,
-            mediaSource.id,
-            target.index,
-            embyCodec,
-          );
-
-          final tempDir = await getTemporaryDirectory();
-          final ext = codec == 'srt' || codec == 'subrip' ? 'srt' : 'ass';
-          final subFile = File('${tempDir.path}/subtitle_${item.id}_${target.index}.$ext');
-
-          if (!subFile.existsSync() || await subFile.length() == 0) {
-            final dio = Dio(BaseOptions(
-              connectTimeout: const Duration(seconds: 15),
-              receiveTimeout: const Duration(seconds: 60),
-            ));
-            if (server?.authToken != null) {
-              dio.options.headers['X-Emby-Token'] = server!.authToken;
-              dio.options.headers['X-MediaBrowser-Token'] = server.authToken;
-            }
-            await dio.download(subUrl, subFile.path);
-          }
-
-          if (subFile.existsSync() && await subFile.length() > 0) {
-            await _playerService.loadLibassSubtitle(subFile.path);
-          }
         }
       }
     } catch (e) {

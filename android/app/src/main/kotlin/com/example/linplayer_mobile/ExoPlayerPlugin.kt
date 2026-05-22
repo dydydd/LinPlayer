@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.util.Base64
 import android.view.Surface
 import androidx.annotation.OptIn
 import androidx.media3.common.C
@@ -28,6 +29,7 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.view.TextureRegistry
+import java.io.ByteArrayOutputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
@@ -108,12 +110,12 @@ class ExoPlayerPlugin(
             }
             "getPosition" -> {
                 val playerId = call.argument<String>("playerId") ?: ""
-                val pos = getPlayer(playerId)?.currentPosition?.toInt() ?: 0
+                val pos = getPlayer(playerId)?.exoPlayer?.currentPosition?.toInt() ?: 0
                 result.success(pos)
             }
             "getDuration" -> {
                 val playerId = call.argument<String>("playerId") ?: ""
-                val dur = getPlayer(playerId)?.duration?.toInt() ?: 0
+                val dur = getPlayer(playerId)?.exoPlayer?.duration?.toInt() ?: 0
                 result.success(if (dur > 0) dur else 0)
             }
             "getTracks" -> {
@@ -357,14 +359,15 @@ class ExoPlayerPlugin(
         }
 
         fun loadSubtitle(subtitleUrl: String, subtitleMimeType: String?, subtitleLanguage: String?) {
-            val lowerUrl = subtitleUrl.lowercase()
-            val isGraphicalSubtitle = lowerUrl.endsWith(".pgs") || lowerUrl.endsWith(".sup")
-            if (isGraphicalSubtitle) {
-                emitEvent("error", "PGS/SUP subtitles require FFmpeg extension. Please switch to MPV kernel.")
-                return
+            val mimeType = subtitleMimeType ?: Companion.detectMimeType(subtitleUrl)
+            val isGraphical = mimeType == MimeTypes.APPLICATION_PGS || mimeType == MimeTypes.APPLICATION_VOBSUB || mimeType == MimeTypes.APPLICATION_DVBSUBS
+
+            if (isGraphical) {
+                emitEvent("subtitleType", "bitmap")
+            } else {
+                emitEvent("subtitleType", "text")
             }
 
-            val mimeType = subtitleMimeType ?: Companion.detectMimeType(subtitleUrl)
             val subtitleConfig = MediaItem.SubtitleConfiguration.Builder(Uri.parse(subtitleUrl))
                 .setMimeType(mimeType)
                 .setLanguage(subtitleLanguage)
@@ -451,8 +454,38 @@ class ExoPlayerPlugin(
         }
 
         override fun onCues(cues: List<Cue>) {
-            val text = cues.mapNotNull { cue -> cue.text?.toString() }.joinToString("\n")
-            emitEvent("subtitle", text)
+            val textParts = mutableListOf<String>()
+            val bitmapParts = mutableListOf<String>()
+
+            for (cue in cues) {
+                val bmp = cue.bitmap
+                if (bmp != null) {
+                    try {
+                        val stream = ByteArrayOutputStream()
+                        bmp.compress(Bitmap.CompressFormat.PNG, 100, stream)
+                        val bytes = stream.toByteArray()
+                        bmp.recycle()
+                        val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                        bitmapParts.add(base64)
+                    } catch (_: Exception) {
+                    }
+                }
+                val txt = cue.text
+                if (txt != null && txt.isNotEmpty()) {
+                    textParts.add(txt.toString())
+                }
+            }
+
+            if (bitmapParts.isNotEmpty()) {
+                emitEvent("subtitleBitmap", mapOf(
+                    "images" to bitmapParts,
+                    "text" to textParts.joinToString("\n")
+                ))
+            } else if (textParts.isNotEmpty()) {
+                emitEvent("subtitle", textParts.joinToString("\n"))
+            } else {
+                emitEvent("subtitle", "")
+            }
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {

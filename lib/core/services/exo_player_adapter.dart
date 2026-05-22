@@ -239,15 +239,7 @@ class ExoPlayerAdapter implements PlayerAdapter {
   }
 
   bool supportsSubtitleFormat(String path) {
-    final lower = path.toLowerCase();
-    if (lower.endsWith('.srt') ||
-        lower.endsWith('.ass') ||
-        lower.endsWith('.ssa') ||
-        lower.endsWith('.vtt') ||
-        lower.endsWith('.ttml')) {
-      return true;
-    }
-    return false;
+    return true;
   }
 
   Future<void> loadSubtitle({
@@ -256,12 +248,6 @@ class ExoPlayerAdapter implements PlayerAdapter {
     String? language,
   }) async {
     if (_playerId == null || !_isInitialized) return;
-
-    final lowerUrl = subtitleUrl.toLowerCase();
-    if (lowerUrl.endsWith('.pgs') || lowerUrl.endsWith('.sup')) {
-      _logger.w('ExoPlayer', 'PGS/SUP 图形字幕需要 FFmpeg 扩展支持，请切换到 MPV 内核');
-      throw Exception('PGS/SUP subtitles are not supported by ExoPlayer. Please switch to MPV kernel.');
-    }
 
     _logger.i('ExoPlayer', '加载外挂字幕: $subtitleUrl (mime=$mimeType, lang=$language)');
     try {
@@ -278,7 +264,19 @@ class ExoPlayerAdapter implements PlayerAdapter {
 
   @override
   Future<void> loadLibassSubtitle(String path) async {
-    await loadSubtitle(subtitleUrl: path);
+    final mimeType = _detectSubtitleMimeType(path);
+    await loadSubtitle(subtitleUrl: path, mimeType: mimeType);
+  }
+
+  String? _detectSubtitleMimeType(String path) {
+    final lower = path.toLowerCase();
+    if (lower.endsWith('.srt') || lower.endsWith('.subrip')) return 'application/x-subrip';
+    if (lower.endsWith('.ass') || lower.endsWith('.ssa')) return 'text/x-ssa';
+    if (lower.endsWith('.vtt') || lower.endsWith('.webvtt')) return 'text/vtt';
+    if (lower.endsWith('.ttml') || lower.endsWith('.xml') || lower.endsWith('.dfxp')) return 'application/ttml+xml';
+    if (lower.endsWith('.pgs') || lower.endsWith('.sup')) return 'application/pgs';
+    if (lower.endsWith('.vob')) return 'application/vobsub';
+    return null;
   }
 
   @override
@@ -318,6 +316,12 @@ class ExoPlayerAdapter implements PlayerAdapter {
         }
         break;
       case 'subtitle':
+        break;
+      case 'subtitleBitmap':
+        break;
+      case 'subtitleType':
+        final subType = event['value'] as String?;
+        _logger.d('ExoPlayer', '字幕类型: $subType');
         break;
     }
   }
