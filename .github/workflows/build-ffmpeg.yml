@@ -199,18 +199,47 @@ jobs:
           
           python3 /tmp/patch_gradle.py
       
+      # 清理 CMake 缓存（防止之前失败的配置被复用）
+      - name: Clean CMake cache before build
+        run: |
+          rm -rf /tmp/media3/libraries/decoder_ffmpeg/.cxx
+          echo "Cleaned CMake cache"
+      
       # 编译 AAR
       - name: Build AAR
         run: |
           cd /tmp/media3
-          ./gradlew :lib-decoder-ffmpeg:assembleRelease
+          ./gradlew :lib-decoder-ffmpeg:assembleRelease --stacktrace || {
+            echo "=== Gradle build failed, searching for any generated AAR ==="
+            find /tmp/media3/libraries/decoder_ffmpeg -name "*.aar" 2>/dev/null || true
+            echo "=== Build outputs directory ==="
+            ls -la /tmp/media3/libraries/decoder_ffmpeg/build/outputs/aar/ 2>/dev/null || true
+            ls -la /tmp/media3/libraries/decoder_ffmpeg/buildout/outputs/aar/ 2>/dev/null || true
+            exit 1
+          }
+      
+      # 查找 AAR 文件（兼容 build 和 buildout 两种路径）
+      - name: Locate AAR file
+        run: |
+          if [ -f "/tmp/media3/libraries/decoder_ffmpeg/build/outputs/aar/decoder_ffmpeg-release.aar" ]; then
+            echo "AAR_PATH=/tmp/media3/libraries/decoder_ffmpeg/build/outputs/aar/decoder_ffmpeg-release.aar" >> $GITHUB_ENV
+            echo "Found AAR at: build/outputs/aar/"
+          elif [ -f "/tmp/media3/libraries/decoder_ffmpeg/buildout/outputs/aar/decoder_ffmpeg-release.aar" ]; then
+            echo "AAR_PATH=/tmp/media3/libraries/decoder_ffmpeg/buildout/outputs/aar/decoder_ffmpeg-release.aar" >> $GITHUB_ENV
+            echo "Found AAR at: buildout/outputs/aar/"
+          else
+            echo "ERROR: AAR file not found in expected locations"
+            find /tmp/media3/libraries/decoder_ffmpeg -name "*.aar" 2>/dev/null || true
+            exit 1
+          fi
+          ls -la "$AAR_PATH"
       
       # 上传 AAR Artifact
       - name: Upload AAR
         uses: actions/upload-artifact@v4
         with:
           name: ffmpeg-extension-all
-          path: /tmp/media3/libraries/decoder_ffmpeg/build/outputs/aar/decoder_ffmpeg-release.aar
+          path: ${{ env.AAR_PATH }}
           retention-days: 90
       
       # 可选：创建 Release 并上传 AAR
@@ -232,7 +261,7 @@ jobs:
             1. 下载 `ffmpeg-extension-all` artifact
             2. 解压后将 `.aar` 文件放入 `android/exoplayer-ffmpeg/libs/`
             3. 在 `android/app/build.gradle.kts` 中添加依赖
-          files: /tmp/media3/libraries/decoder_ffmpeg/build/outputs/aar/decoder_ffmpeg-release.aar
+          files: ${{ env.AAR_PATH }}
           draft: false
           prerelease: true
         env:
