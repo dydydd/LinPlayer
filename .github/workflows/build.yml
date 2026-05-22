@@ -336,6 +336,23 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
       
+      - name: Fix plugin namespaces for AGP 8
+        run: |
+          # brightness_volume 1.0.3 doesn't have namespace (required by AGP 8.x)
+          PLUGIN_DIR="/home/runner/.pub-cache/hosted/pub.dev/brightness_volume-1.0.3/android"
+          if [ -f "$PLUGIN_DIR/build.gradle" ] && ! grep -q "namespace" "$PLUGIN_DIR/build.gradle"; then
+            if [ -f "$PLUGIN_DIR/src/main/AndroidManifest.xml" ]; then
+              PACKAGE=$(grep -o 'package="[^"]*"' "$PLUGIN_DIR/src/main/AndroidManifest.xml" | head -1 | cut -d'"' -f2)
+              if [ -n "$PACKAGE" ]; then
+                echo "Adding namespace '$PACKAGE' to brightness_volume"
+                # Add namespace after 'android {' line
+                sed -i "/^android {/a\\    namespace '$PACKAGE'" "$PLUGIN_DIR/build.gradle"
+                echo "Patched build.gradle:"
+                cat "$PLUGIN_DIR/build.gradle"
+              fi
+            fi
+          fi
+      
       - name: Analyze code
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
       
