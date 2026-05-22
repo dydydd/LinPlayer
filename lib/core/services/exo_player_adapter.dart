@@ -30,11 +30,13 @@ class ExoPlayerAdapter implements PlayerAdapter {
   double _subtitleSize = 0.5;
   double _subtitlePosition = 0.0;
   bool _subtitleBackground = false;
+  String _subtitleFont = '默认';
 
   PlayerStateCallbacks? _callbacks;
   Timer? _positionTimer;
 
   final ValueNotifier<String> subtitleNotifier = ValueNotifier('');
+  final ValueNotifier<int> _subtitleSettingsVersion = ValueNotifier(0);
 
   @override
   bool get isInitialized => _isInitialized;
@@ -205,6 +207,11 @@ class ExoPlayerAdapter implements PlayerAdapter {
 
   @override
   Future<void> loadSecondarySubtitle(String path) async {
+    _logger.w('ExoPlayer', '次字幕暂不支持，请使用 MPV 内核');
+  }
+
+  @override
+  Future<void> selectSecondarySubtitleTrack(String trackId) async {
     _logger.w('ExoPlayer', '次字幕暂不支持，请使用 MPV 内核');
   }
 
@@ -403,6 +410,8 @@ class ExoPlayerAdapter implements PlayerAdapter {
 
   @override
   Future<void> setSubtitleFont(String fontName) async {
+    _subtitleFont = fontName;
+    _subtitleSettingsVersion.value++;
     if (_playerId == null) return;
     await _channel.invokeMethod('setSubtitleFont', {
       'playerId': _playerId,
@@ -412,9 +421,9 @@ class ExoPlayerAdapter implements PlayerAdapter {
 
   @override
   Future<void> setSubtitleSize(double size) async {
-    if (_playerId == null) return;
     _subtitleSize = size;
-    subtitleNotifier.value = subtitleNotifier.value;
+    _subtitleSettingsVersion.value++;
+    if (_playerId == null) return;
     await _channel.invokeMethod('setSubtitleSize', {
       'playerId': _playerId,
       'size': size,
@@ -423,9 +432,9 @@ class ExoPlayerAdapter implements PlayerAdapter {
 
   @override
   Future<void> setSubtitlePosition(double position) async {
-    if (_playerId == null) return;
     _subtitlePosition = position;
-    subtitleNotifier.value = subtitleNotifier.value;
+    _subtitleSettingsVersion.value++;
+    if (_playerId == null) return;
     await _channel.invokeMethod('setSubtitlePosition', {
       'playerId': _playerId,
       'position': position,
@@ -434,9 +443,9 @@ class ExoPlayerAdapter implements PlayerAdapter {
 
   @override
   Future<void> setSubtitleBackground(bool enabled) async {
-    if (_playerId == null) return;
     _subtitleBackground = enabled;
-    subtitleNotifier.value = subtitleNotifier.value;
+    _subtitleSettingsVersion.value++;
+    if (_playerId == null) return;
     await _channel.invokeMethod('setSubtitleBackground', {
       'playerId': _playerId,
       'enabled': enabled,
@@ -462,40 +471,47 @@ class ExoPlayerAdapter implements PlayerAdapter {
           Positioned(
             left: 24,
             right: 24,
-            bottom: 40 + (_subtitlePosition * 120),
-            child: ValueListenableBuilder<String>(
-              valueListenable: subtitleNotifier,
-              builder: (context, text, _) {
-                if (text.isEmpty) return const SizedBox.shrink();
-                if (text.startsWith('BITMAP:')) return const SizedBox.shrink();
-                final fontSize = 14.0 + (_subtitleSize * 18.0);
-                return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: _subtitleBackground
-                      ? BoxDecoration(
-                          color: Colors.black.withOpacity(0.7),
-                          borderRadius: BorderRadius.circular(4),
-                        )
-                      : const BoxDecoration(),
-                  child: Text(
-                    text,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: fontSize,
-                      height: 1.4,
-                      decoration: TextDecoration.none,
-                      shadows: _subtitleBackground
-                          ? []
-                          : [
-                              Shadow(
-                                offset: const Offset(1, 1),
-                                blurRadius: 2,
-                                color: Colors.black.withOpacity(0.8),
-                              ),
-                            ],
-                    ),
-                  ),
+            bottom: 20.0 + (_subtitlePosition * 180.0),
+            child: ValueListenableBuilder<int>(
+              valueListenable: _subtitleSettingsVersion,
+              builder: (context, _, __) {
+                return ValueListenableBuilder<String>(
+                  valueListenable: subtitleNotifier,
+                  builder: (context, text, _) {
+                    if (text.isEmpty) return const SizedBox.shrink();
+                    if (text.startsWith('BITMAP:')) return const SizedBox.shrink();
+                    final fontSize = 14.0 + (_subtitleSize * 18.0);
+                    return Container(
+                      key: ValueKey('sub_$_subtitleSettingsVersion.value'),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: _subtitleBackground
+                          ? BoxDecoration(
+                              color: Colors.black.withOpacity(0.7),
+                              borderRadius: BorderRadius.circular(4),
+                            )
+                          : const BoxDecoration(),
+                      child: Text(
+                        text,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: fontSize,
+                          fontFamily: (_subtitleFont.isNotEmpty && _subtitleFont != '默认') ? _subtitleFont : null,
+                          height: 1.4,
+                          decoration: TextDecoration.none,
+                          shadows: _subtitleBackground
+                              ? []
+                              : [
+                                  Shadow(
+                                    offset: const Offset(1, 1),
+                                    blurRadius: 2,
+                                    color: Colors.black.withOpacity(0.8),
+                                  ),
+                                ],
+                        ),
+                      ),
+                    );
+                  },
                 );
               },
             ),
@@ -532,5 +548,6 @@ class ExoPlayerAdapter implements PlayerAdapter {
     _subtitleText = '';
     _subtitleBitmapBase64 = '';
     subtitleNotifier.value = '';
+    _subtitleSettingsVersion.value = 0;
   }
 }

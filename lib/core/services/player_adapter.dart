@@ -100,6 +100,9 @@ abstract class PlayerAdapter {
   /// 加载次字幕文件
   Future<void> loadSecondarySubtitle(String path) async {}
 
+  /// 通过轨道ID选择内封字幕作为次字幕
+  Future<void> selectSecondarySubtitleTrack(String trackId) async {}
+
   /// 取消次字幕
   Future<void> deselectSecondarySubtitle() async {}
 

@@ -227,6 +227,12 @@ class VideoPlayerService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 通过轨道ID选择内封字幕作为次字幕
+  Future<void> selectSecondarySubtitleTrack(String trackId) async {
+    await _adapter?.selectSecondarySubtitleTrack(trackId);
+    notifyListeners();
+  }
+
   /// 取消次字幕
   Future<void> deselectSecondarySubtitle() async {
     await _adapter?.deselectSecondarySubtitle();

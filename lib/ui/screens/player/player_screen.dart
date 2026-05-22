@@ -143,6 +143,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
       await _waitForTracksReady();
       await _loadSubtitles(item, mediaSource);
     }
+
+    _playerService.setSubtitleSize(ref.read(subtitleSizeProvider));
+    _playerService.setSubtitlePosition(ref.read(subtitlePositionProvider));
+    _playerService.setSubtitleDelay(ref.read(subtitleDelayProvider));
+    _playerService.setSubtitleFont(ref.read(subtitleFontProvider));
+    _playerService.setSubtitleBackground(ref.read(subtitleBackgroundProvider));
   }
 
   Future<void> _waitForTracksReady() async {
@@ -501,8 +507,34 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
       final codec = target.codec?.toLowerCase() ?? 'ass';
       final isGraphical = codec == 'pgssub' || codec == 'sup' || codec == 'pgs';
 
-      if (!isExternal || isGraphical) {
-        logger.w('Player', '次字幕: 内封/图形字幕暂不支持作为次字幕');
+      if (isGraphical) {
+        logger.w('Player', '次字幕: 图形字幕暂不支持作为次字幕');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('图形字幕(PGS/SUP)暂不支持作为次字幕')),
+          );
+        }
+        return;
+      }
+
+      if (!isExternal) {
+        logger.i('Player', '次字幕: 内封字幕，通过MPV轨道ID直接设置');
+        final tracks = _playerService.tracksInfo;
+        final subtitleTracks = tracks.where((t) => t['type'] == 'text').toList();
+
+        final preferredLang = target.language;
+        final langMatch = subtitleTracks.where((t) =>
+            t['language'] == preferredLang ||
+            (preferredLang != null && t['title']?.toString().contains(preferredLang) == true)).toList();
+        final trackTarget = langMatch.isNotEmpty ? langMatch.first : (subtitleTracks.isNotEmpty ? subtitleTracks.first : null);
+
+        if (trackTarget != null) {
+          final trackId = trackTarget['id']?.toString() ?? '';
+          await _playerService.selectSecondarySubtitleTrack(trackId);
+          logger.i('Player', '内封次字幕已设置: trackId=$trackId');
+        } else {
+          logger.w('Player', '未找到匹配的MPV字幕轨道');
+        }
         return;
       }
 
@@ -1601,6 +1633,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     ref.read(playerCoreProvider.notifier).state = core;
     await _playerService.dispose();
     _playerService = VideoPlayerService();
+    _activePlayerService = _playerService;
     _playerService.addListener(_onPlayerUpdate);
     await _initializePlayer();
     if (savedPosition > Duration.zero) {
@@ -1644,8 +1677,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
                   // 重新初始化播放器以应用新线路
                   final savedPosition = _playerService.position;
                   await _playerService.dispose();
-                  _playerService = VideoPlayerService();
-                  _playerService.addListener(_onPlayerUpdate);
+    _playerService = VideoPlayerService();
+    _activePlayerService = _playerService;
+    _playerService.addListener(_onPlayerUpdate);
                   await _initializePlayer();
                   if (savedPosition > Duration.zero) {
                     await _playerService.seekTo(savedPosition);
