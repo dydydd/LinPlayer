@@ -183,29 +183,53 @@ jobs:
            cp libswresample/libswresample.a android-libs/armeabi-v7a/
            cp libavcodec/libavcodec.a android-libs/armeabi-v7a/
            
-            make clean
-            
-            # 编译 x86（Gradle 默认会构建此 ABI）
-            ./configure \
-                --libdir=android-libs/x86 \
-                --arch=x86 \
-                --cpu=i686 \
-                --cross-prefix="${TOOLCHAIN_PREFIX}/i686-linux-android${ANDROID_ABI}-" \
-                --nm="${TOOLCHAIN_PREFIX}/llvm-nm" \
-                --ar="${TOOLCHAIN_PREFIX}/llvm-ar" \
-                --ranlib="${TOOLCHAIN_PREFIX}/llvm-ranlib" \
-                --strip="${TOOLCHAIN_PREFIX}/llvm-strip" \
-                --extra-cflags="-march=i686 -mtune=intel -mstackrealign -mfpmath=sse -msse -msse2 -msse3 -mssse3" \
-                ${COMMON_OPTIONS}
-            make -j${JOBS}
-            
-            # 手动复制静态库到 CMake 期望的路径
-            mkdir -p android-libs/x86
-            cp libavutil/libavutil.a android-libs/x86/
-            cp libswresample/libswresample.a android-libs/x86/
-            cp libavcodec/libavcodec.a android-libs/x86/
-            
-            make clean
+             make clean
+       
+       - name: Debug NDK compilers
+         if: steps.cache-aar.outputs.cache-hit != 'true'
+         run: |
+           echo "Available x86 compilers in NDK:"
+           ls -la /opt/android-ndk-r25c/toolchains/llvm/prebuilt/linux-x86_64/bin/*clang* | grep -E "(i686|x86)" || true
+       
+       - name: Check and patch ExoPlayer build.gradle
+         if: steps.cache-aar.outputs.cache-hit != 'true'
+         run: |
+           BUILD_GRADLE="/tmp/media3/libraries/decoder_ffmpeg/build.gradle"
+           echo "=== Build.gradle content ==="
+           cat "$BUILD_GRADLE"
+           echo "=== End ==="
+           
+           cat > /tmp/patch_gradle.py << 'EOF'
+           import re
+           
+           build_gradle = "/tmp/media3/libraries/decoder_ffmpeg/build.gradle"
+           
+           with open(build_gradle, 'r') as f:
+               content = f.read()
+           
+           if 'abiFilters' in content:
+               print("Found existing abiFilters, replacing...")
+               content = re.sub(
+                   r'abiFilters\s*"[^"]*"(?:\s*,\s*"[^"]*")*',
+                   'abiFilters "arm64-v8a", "armeabi-v7a"',
+                   content
+               )
+           else:
+               print("No existing abiFilters found, adding...")
+               content = content.replace(
+                   'defaultConfig {',
+                   'defaultConfig {\n        ndk {\n            abiFilters "arm64-v8a", "armeabi-v7a"\n        }'
+               )
+           
+           with open(build_gradle, 'w') as f:
+               f.write(content)
+           
+           print("=== Patched content ===")
+           with open(build_gradle, 'r') as f:
+               print(f.read())
+           EOF
+           
+           python3 /tmp/patch_gradle.py
        
        - name: Build AAR
          if: steps.cache-aar.outputs.cache-hit != 'true'

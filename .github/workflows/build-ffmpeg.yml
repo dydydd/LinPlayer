@@ -140,31 +140,65 @@ jobs:
           
           make clean
           
-          # 编译 x86（Gradle 默认会构建此 ABI）
-          echo "Building for x86..."
-          ./configure \
-              --libdir=android-libs/x86 \
-              --arch=x86 \
-              --cpu=i686 \
-              --cross-prefix="${TOOLCHAIN_PREFIX}/i686-linux-android${ANDROID_ABI}-" \
-              --nm="${TOOLCHAIN_PREFIX}/llvm-nm" \
-              --ar="${TOOLCHAIN_PREFIX}/llvm-ar" \
-              --ranlib="${TOOLCHAIN_PREFIX}/llvm-ranlib" \
-              --strip="${TOOLCHAIN_PREFIX}/llvm-strip" \
-              --extra-cflags="-march=i686 -mtune=intel -mstackrealign -mfpmath=sse -msse -msse2 -msse3 -mssse3" \
-              ${COMMON_OPTIONS}
-          make -j${JOBS}
-          
-          # 手动复制静态库到 CMake 期望的路径
-          mkdir -p android-libs/x86
-          cp libavutil/libavutil.a android-libs/x86/
-          cp libswresample/libswresample.a android-libs/x86/
-          cp libavcodec/libavcodec.a android-libs/x86/
-          
-          echo "FFmpeg libraries for x86:"
-          ls -la android-libs/x86/
-          
           make clean
+      
+      # 调试：检查 NDK 中可用的编译器
+      - name: Debug NDK compilers
+        run: |
+          echo "Available compilers in NDK:"
+          ls -la /opt/android-ndk-r25c/toolchains/llvm/prebuilt/linux-x86_64/bin/*clang* | grep -E "(i686|x86)" || true
+          echo "---"
+          ls -la /opt/android-ndk-r25c/toolchains/llvm/prebuilt/linux-x86_64/bin/ | head -30
+      
+      # 检查并打印 ExoPlayer build.gradle 内容
+      - name: Check ExoPlayer build.gradle
+        run: |
+          BUILD_GRADLE="/tmp/media3/libraries/decoder_ffmpeg/build.gradle"
+          echo "=== Build.gradle content ==="
+          cat "$BUILD_GRADLE"
+          echo "=== End ==="
+      
+      # 使用 Python 脚本正确修改 build.gradle 以限制 ABI
+      - name: Patch ExoPlayer build.gradle to limit ABIs
+        run: |
+          cat > /tmp/patch_gradle.py << 'EOF'
+          import re
+          
+          build_gradle = "/tmp/media3/libraries/decoder_ffmpeg/build.gradle"
+          
+          with open(build_gradle, 'r') as f:
+              content = f.read()
+          
+          print("Original content (first 500 chars):")
+          print(content[:500])
+          print("...")
+          
+          # Check if already has abiFilters
+          if 'abiFilters' in content:
+              print("Found existing abiFilters, replacing...")
+              # Replace existing abiFilters
+              content = re.sub(
+                  r'abiFilters\s*"[^"]*"(?:\s*,\s*"[^"]*")*',
+                  'abiFilters "arm64-v8a", "armeabi-v7a"',
+                  content
+              )
+          else:
+              print("No existing abiFilters found, adding...")
+              # Add ndk block after defaultConfig {
+              content = content.replace(
+                  'defaultConfig {',
+                  'defaultConfig {\n        ndk {\n            abiFilters "arm64-v8a", "armeabi-v7a"\n        }'
+              )
+          
+          with open(build_gradle, 'w') as f:
+              f.write(content)
+          
+          print("Patched content (first 600 chars):")
+          with open(build_gradle, 'r') as f:
+              print(f.read()[:600])
+          EOF
+          
+          python3 /tmp/patch_gradle.py
       
       # 编译 AAR
       - name: Build AAR
