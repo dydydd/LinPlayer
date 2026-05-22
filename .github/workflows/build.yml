@@ -358,12 +358,35 @@ jobs:
               fi
             fi
           fi
+
+      - name: Fix plugin compileSdk for androidx
+        run: |
+          # Many Flutter plugins use low compileSdk, but androidx dependencies require 36+
+          for dir in /home/runner/.pub-cache/hosted/pub.dev/*/android; do
+            if [ -f "$dir/build.gradle" ]; then
+              # Fix compileSdkVersion in Groovy-based build.gradle
+              sed -i -E "s/compileSdkVersion [0-9]+/compileSdkVersion 36/g" "$dir/build.gradle"
+              sed -i -E "s/compileSdk = [0-9]+/compileSdk = 36/g" "$dir/build.gradle"
+              # Fix compileSdk in Kotlin DSL build.gradle.kts
+              if [ -f "$dir/build.gradle.kts" ]; then
+                sed -i -E "s/compileSdkVersion = [0-9]+/compileSdkVersion = 36/g" "$dir/build.gradle.kts"
+                sed -i -E "s/compileSdk = [0-9]+/compileSdk = 36/g" "$dir/build.gradle.kts"
+              fi
+            fi
+            if [ -f "$dir/build.gradle.kts" ]; then
+              sed -i -E "s/compileSdkVersion = [0-9]+/compileSdkVersion = 36/g" "$dir/build.gradle.kts"
+              sed -i -E "s/compileSdk = [0-9]+/compileSdk = 36/g" "$dir/build.gradle.kts"
+            fi
+          done
       
       - name: Analyze code
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
       
       - name: Build Release APK (split per ABI)
         run: |
+          # Install Android SDK Platform 36 for compileSdk 36
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-36" 2>/dev/null || true
+          
           flutter build apk --release --split-per-abi \
             --dart-define=DANDANPLAY_APP_ID=${{ secrets.DANDANPLAY_APP_ID }} \
             --dart-define=DANDANPLAY_APP_SECRET=${{ secrets.DANDANPLAY_APP_SECRET }}
