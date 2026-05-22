@@ -56,12 +56,17 @@ class ExoPlayerPlugin(
         }
 
         fun detectMimeType(url: String): String {
-            val lower = url.lowercase()
+            var clean = url
+            val qIdx = clean.indexOf('?')
+            if (qIdx >= 0) clean = clean.substring(0, qIdx)
+            val hIdx = clean.indexOf('#')
+            if (hIdx >= 0) clean = clean.substring(0, hIdx)
+            val lower = clean.lowercase()
             return when {
                 lower.endsWith(".srt") -> MimeTypes.APPLICATION_SUBRIP
                 lower.endsWith(".ass") || lower.endsWith(".ssa") -> MimeTypes.TEXT_SSA
                 lower.endsWith(".vtt") -> MimeTypes.TEXT_VTT
-                lower.endsWith(".ttml") || lower.endsWith(".xml") || lower.endsWith(".dfxp") -> MimeTypes.APPLICATION_TTML
+                lower.endsWith(".ttml") || lower.endsWith(".dfxp") || lower.endsWith(".xml") -> MimeTypes.APPLICATION_TTML
                 lower.endsWith(".pgs") || lower.endsWith(".sup") -> MimeTypes.APPLICATION_PGS
                 else -> MimeTypes.APPLICATION_SUBRIP
             }

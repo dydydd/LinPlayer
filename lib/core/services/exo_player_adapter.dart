@@ -269,7 +269,12 @@ class ExoPlayerAdapter implements PlayerAdapter {
   }
 
   String? _detectSubtitleMimeType(String path) {
-    final lower = path.toLowerCase();
+    var clean = path;
+    final qIndex = clean.indexOf('?');
+    if (qIndex >= 0) clean = clean.substring(0, qIndex);
+    final hIndex = clean.indexOf('#');
+    if (hIndex >= 0) clean = clean.substring(0, hIndex);
+    final lower = clean.toLowerCase();
     if (lower.endsWith('.srt') || lower.endsWith('.subrip')) return 'application/x-subrip';
     if (lower.endsWith('.ass') || lower.endsWith('.ssa')) return 'text/x-ssa';
     if (lower.endsWith('.vtt') || lower.endsWith('.webvtt')) return 'text/vtt';
