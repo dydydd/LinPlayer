@@ -91,7 +91,7 @@ class _SeasonDetailScreenState extends ConsumerState<SeasonDetailScreen> {
                       height: 60,
                       color: Theme.of(context).colorScheme.surfaceContainerHighest,
                       child: imageUrl != null
-                          ? Image.network(imageUrl, fit: BoxFit.cover)
+                          ? MediaImage(imageUrl: imageUrl, width: 100, height: 60, fit: BoxFit.cover)
                           : const Center(child: Icon(Icons.play_arrow)),
                     ),
                   ),
@@ -1057,7 +1057,7 @@ class _PersonCard extends ConsumerWidget {
             height: 72,
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
             child: imageUrl != null
-                ? Image.network(imageUrl, fit: BoxFit.cover)
+                ? MediaImage(imageUrl: imageUrl, width: 72, height: 72, fit: BoxFit.cover)
                 : const Icon(Icons.person, size: 32, color: Colors.grey),
           ),
         ),

@@ -13,6 +13,7 @@ import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
 import '../../widgets/common/danmaku_search_widget.dart';
 import '../../widgets/common/danmaku_overlay.dart';
+import '../../widgets/common/media_widgets.dart';
 import '../../../core/services/video_player_service.dart';
 import '../../../core/services/libass_bridge.dart';
 import '../../../core/services/app_logger.dart';
@@ -2534,7 +2535,7 @@ class _EpisodeSelectorContentState extends ConsumerState<_EpisodeSelectorContent
                   height: 48,
                   color: Theme.of(context).colorScheme.surfaceContainerHighest,
                   child: imageUrl != null
-                      ? Image.network(imageUrl, fit: BoxFit.cover)
+                      ? MediaImage(imageUrl: imageUrl, width: 80, height: 48, fit: BoxFit.cover)
                       : const Center(child: Icon(Icons.play_arrow, size: 20)),
                 ),
               ),

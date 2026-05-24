@@ -459,6 +459,9 @@ class ExoPlayerPlugin(
             }
         }
 
+        private var lastBitmapBase64: String? = null
+        private var lastBitmapHash: Int = 0
+
         override fun onCues(cueGroup: CueGroup) {
             onCues(cueGroup.cues)
         }
@@ -471,11 +474,33 @@ class ExoPlayerPlugin(
                 val bmp = cue.bitmap
                 if (bmp != null) {
                     try {
+                        val hash = bmp.hashCode()
+                        if (hash == lastBitmapHash && lastBitmapBase64 != null) {
+                            bitmapParts.add(lastBitmapBase64!!)
+                            bmp.recycle()
+                            continue
+                        }
+
+                        var src = bmp
+                        val maxDim = 720
+                        if (src.width > maxDim || src.height > maxDim) {
+                            val scale = minOf(maxDim.toFloat() / src.width, maxDim.toFloat() / src.height)
+                            val newW = (src.width * scale).toInt()
+                            val newH = (src.height * scale).toInt()
+                            val scaled = Bitmap.createScaledBitmap(src, newW, newH, true)
+                            if (scaled != src) {
+                                src.recycle()
+                            }
+                            src = scaled
+                        }
+
                         val stream = ByteArrayOutputStream()
-                        bmp.compress(Bitmap.CompressFormat.PNG, 100, stream)
+                        src.compress(Bitmap.CompressFormat.JPEG, 75, stream)
                         val bytes = stream.toByteArray()
-                        bmp.recycle()
+                        src.recycle()
                         val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                        lastBitmapBase64 = base64
+                        lastBitmapHash = hash
                         bitmapParts.add(base64)
                     } catch (_: Exception) {
                     }

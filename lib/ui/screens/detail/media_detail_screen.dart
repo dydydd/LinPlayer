@@ -340,7 +340,7 @@ class _OverviewSectionState extends State<_OverviewSection> {
 }
 
 /// 季选择区块
-class _SeasonsSection extends StatelessWidget {
+class _SeasonsSection extends ConsumerWidget {
   final AsyncValue<List<Season>> seasonsAsync;
   final Function(Season) onSeasonTap;
   
@@ -350,7 +350,7 @@ class _SeasonsSection extends StatelessWidget {
   });
   
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return seasonsAsync.when(
       data: (seasons) {
         if (seasons.isEmpty) return const SizedBox.shrink();
@@ -370,22 +370,7 @@ class _SeasonsSection extends StatelessWidget {
                     child: Column(
                       children: [
                         Expanded(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF5B8DEF).withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Center(
-                              child: Text(
-                                'S${season.indexNumber}',
-                                style: const TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF5B8DEF),
-                                ),
-                              ),
-                            ),
-                          ),
+                          child: _SeasonCard(season: season),
                         ),
                         const SizedBox(height: 6),
                         Text(
@@ -405,6 +390,50 @@ class _SeasonsSection extends StatelessWidget {
       },
       loading: () => const SizedBox.shrink(),
       error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+}
+
+class _SeasonCard extends ConsumerWidget {
+  final Season season;
+
+  const _SeasonCard({required this.season});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final api = ref.read(apiClientProvider);
+    final imageUrl = season.primaryImageTag != null
+        ? api.image.getPrimaryImageUrl(season.id, tag: season.primaryImageTag, maxWidth: 300)
+        : null;
+
+    if (imageUrl != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: MediaImage(
+          imageUrl: imageUrl,
+          width: 120,
+          height: 120,
+          fit: BoxFit.cover,
+          borderRadius: BorderRadius.circular(8),
+        ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF5B8DEF).withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Center(
+        child: Text(
+          'S${season.indexNumber}',
+          style: const TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF5B8DEF),
+          ),
+        ),
+      ),
     );
   }
 }

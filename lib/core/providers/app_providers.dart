@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../api/api_interfaces.dart';
 import '../api/emby_api.dart';
 import '../api/mock_api.dart';
+import '../services/cache_service.dart';
 
 /// 当前API客户端Provider
 /// 
@@ -348,7 +349,6 @@ class DanmakuBlockwordsNotifier extends StateNotifier<List<String>> {
   }
 
   void importUserBlocks(List<String> userIds) {
-    // 用户ID屏蔽也作为文本屏蔽词存储，前缀为 "uid:"
     final prefixedIds = userIds.map((id) => 'uid:$id').toList();
     importWords(prefixedIds);
   }
@@ -452,6 +452,31 @@ class HiddenLibrariesNotifier extends StateNotifier<Set<String>> {
     state = {};
   }
 }
+
+/// ==========================================
+/// 缓存设置Providers
+/// ==========================================
+
+final imageCacheExpiryDaysProvider = StateProvider<int>((ref) => 14);
+
+final videoCacheMaxSizeMBProvider = StateProvider<int>((ref) => 1024);
+
+class CacheSizeInfo {
+  final int imageBytes;
+  final int videoBytes;
+  CacheSizeInfo({required this.imageBytes, required this.videoBytes});
+  int get totalBytes => imageBytes + videoBytes;
+  String get imageFormatted => CacheService.formatBytes(imageBytes);
+  String get videoFormatted => CacheService.formatBytes(videoBytes);
+  String get totalFormatted => CacheService.formatBytes(totalBytes);
+}
+
+final cacheSizeProvider = FutureProvider<CacheSizeInfo>((ref) async {
+  return CacheSizeInfo(
+    imageBytes: await CacheService.getImageCacheSize(),
+    videoBytes: await CacheService.getVideoCacheSize(),
+  );
+});
 
 /// ==========================================
 /// WebDAV备份Providers

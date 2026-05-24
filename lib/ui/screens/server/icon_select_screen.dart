@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:dio/dio.dart';
 import '../../../core/providers/app_providers.dart';
+import '../../widgets/common/media_widgets.dart';
 
 /// 图标选择页面
 class IconSelectScreen extends ConsumerStatefulWidget {
@@ -449,10 +450,12 @@ class _IconGridItem extends StatelessWidget {
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: Image.network(
-                  icon.url,
+                child: MediaImage(
+                  imageUrl: icon.url,
+                  width: 64,
+                  height: 64,
                   fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+                  errorWidget: const Center(child: Icon(Icons.broken_image)),
                 ),
               ),
             ),

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/api/emby_api.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../widgets/common/media_widgets.dart';
 
 /// 服务器列表页面
 class ServerListScreen extends ConsumerStatefulWidget {
@@ -363,7 +364,7 @@ class _ServerCard extends StatelessWidget {
                 child: server.iconUrl != null
                     ? ClipRRect(
                         borderRadius: BorderRadius.circular(12),
-                        child: Image.network(server.iconUrl!, fit: BoxFit.cover),
+                        child: MediaImage(imageUrl: server.iconUrl, width: 48, height: 48, fit: BoxFit.cover),
                       )
                     : const Icon(Icons.dns, color: Color(0xFF5B8DEF)),
               ),

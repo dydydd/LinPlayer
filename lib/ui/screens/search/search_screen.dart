@@ -5,6 +5,7 @@ import '../../../core/api/api_interfaces.dart';
 import '../../../core/api/emby_api.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
+import '../../widgets/common/media_widgets.dart';
 
 /// 搜索页（含聚合搜索）
 class SearchScreen extends ConsumerStatefulWidget {
@@ -149,7 +150,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                       height: 90,
                       color: Theme.of(context).colorScheme.surfaceContainerHighest,
                       child: imageUrl != null
-                          ? Image.network(imageUrl, fit: BoxFit.cover)
+                          ? MediaImage(imageUrl: imageUrl, width: 60, height: 90, fit: BoxFit.cover)
                           : const Icon(Icons.image),
                     ),
                   ),

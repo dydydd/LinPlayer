@@ -267,7 +267,7 @@ class _HomeAppBarState extends ConsumerState<_HomeAppBar> {
                               child: server.iconUrl != null
                                   ? ClipRRect(
                                       borderRadius: BorderRadius.circular(8),
-                                      child: Image.network(server.iconUrl!, fit: BoxFit.cover),
+                                      child: MediaImage(imageUrl: server.iconUrl, width: 36, height: 36, fit: BoxFit.cover),
                                     )
                                   : const Icon(Icons.dns, size: 18, color: Color(0xFF5B8DEF)),
                             ),

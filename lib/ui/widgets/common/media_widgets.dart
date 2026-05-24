@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/api/api_interfaces.dart';
 import '../../../core/providers/app_providers.dart';
 
-/// 通用图片组件 - 自动处理加载状态、错误、缓存
 class MediaImage extends StatelessWidget {
   final String? imageUrl;
   final double? width;
@@ -14,6 +13,8 @@ class MediaImage extends StatelessWidget {
   final Widget? placeholder;
   final Widget? errorWidget;
   final String? heroTag;
+  final int? cacheWidth;
+  final int? cacheHeight;
   
   const MediaImage({
     super.key,
@@ -25,6 +26,8 @@ class MediaImage extends StatelessWidget {
     this.placeholder,
     this.errorWidget,
     this.heroTag,
+    this.cacheWidth,
+    this.cacheHeight,
   });
   
   @override
@@ -34,12 +37,22 @@ class MediaImage extends StatelessWidget {
     if (imageUrl == null || imageUrl!.isEmpty) {
       image = _buildPlaceholder(context);
     } else {
+      final dpr = MediaQuery.of(context).devicePixelRatio;
+      final cw = cacheWidth ?? (width != null && width!.isFinite
+          ? (width! * dpr).ceil()
+          : null);
+      final ch = cacheHeight ?? (height != null && height!.isFinite
+          ? (height! * dpr).ceil()
+          : null);
+
       image = ExtendedImage.network(
         imageUrl!,
         width: width,
         height: height,
         fit: fit,
         cache: true,
+        cacheWidth: cw,
+        cacheHeight: ch,
         loadStateChanged: (state) {
           switch (state.extendedImageLoadState) {
             case LoadState.loading:

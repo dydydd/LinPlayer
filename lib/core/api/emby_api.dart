@@ -425,7 +425,7 @@ class EmbyMediaApi implements MediaApi {
     final uid = _requireUserId(_client);
     final resp = await _client.get('/Shows/$seriesId/Seasons', queryParameters: {
       'UserId': uid,
-      'Fields': 'Overview',
+      'Fields': 'Overview,ImageTags',
     });
     final items = (resp.data as Map<String, dynamic>)['Items'] as List<dynamic>;
     return items.map((e) => _parseSeason(e as Map<String, dynamic>, seriesId)).toList();
@@ -436,7 +436,7 @@ class EmbyMediaApi implements MediaApi {
     final uid = _requireUserId(_client);
     final params = <String, dynamic>{
       'UserId': uid,
-      'Fields': 'Overview,RunTimeTicks',
+      'Fields': 'Overview,RunTimeTicks,ImageTags',
     };
     if (seasonId != null) params['SeasonId'] = seasonId;
     final resp = await _client.get('/Shows/$seriesId/Episodes', queryParameters: params);
@@ -620,7 +620,7 @@ class EmbyImageApi implements ImageApi {
     if (maxWidth != null) params['maxWidth'] = maxWidth.toString();
     if (maxHeight != null) params['maxHeight'] = maxHeight.toString();
     params['quality'] = quality.round().toString();
-    if (_client._authToken != null) params['tag'] = _client._authToken!;
+    if (_client._authToken != null) params['api_key'] = _client._authToken!;
     if (imageTag != null) params['tag'] = imageTag;
     if (params.isNotEmpty) {
       buf.write('?');

@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/services/webdav_service.dart';
 import '../../../core/services/app_logger.dart';
+import '../../../core/services/cache_service.dart';
 import '../../../core/utils/danmaku_filter.dart';
 import '../../../core/api/danmaku/danmaku_source.dart';
 import '../../../core/api/danmaku/danmaku_service.dart';
@@ -173,13 +174,39 @@ class _SettingsCard extends StatelessWidget {
 }
 
 /// 通用设置页
-class GeneralSettingsScreen extends ConsumerWidget {
+class GeneralSettingsScreen extends ConsumerStatefulWidget {
   const GeneralSettingsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<GeneralSettingsScreen> createState() => _GeneralSettingsScreenState();
+}
+
+class _GeneralSettingsScreenState extends ConsumerState<GeneralSettingsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    Future.microtask(() {
+      _loadCacheSettings();
+      ref.read(cacheSizeProvider);
+    });
+  }
+
+  Future<void> _loadCacheSettings() async {
+    final expiryDays = await CacheService.getImageCacheExpiryDays();
+    final maxSizeMB = await CacheService.getVideoCacheMaxSizeMB();
+    if (mounted) {
+      ref.read(imageCacheExpiryDaysProvider.notifier).state = expiryDays;
+      ref.read(videoCacheMaxSizeMBProvider.notifier).state = maxSizeMB;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeProvider);
     final hideDailyRecommendations = ref.watch(hideDailyRecommendationsProvider);
+    final imageExpiryDays = ref.watch(imageCacheExpiryDaysProvider);
+    final videoMaxSizeMB = ref.watch(videoCacheMaxSizeMBProvider);
+    final cacheSizeAsync = ref.watch(cacheSizeProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('通用设置')),
@@ -189,7 +216,7 @@ class GeneralSettingsScreen extends ConsumerWidget {
           ListTile(
             title: const Text('外观'),
             subtitle: Text(themeMode.name),
-            onTap: () => _showThemeSelector(context, ref),
+            onTap: () => _showThemeSelector(context),
           ),
           ListTile(
             title: const Text('语言'),
@@ -207,20 +234,200 @@ class GeneralSettingsScreen extends ConsumerWidget {
             value: hideDailyRecommendations,
             onChanged: (value) => ref.read(hideDailyRecommendationsProvider.notifier).state = value,
           ),
+
+          const Divider(),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Text(
+              '缓存管理',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey,
+              ),
+            ),
+          ),
+
           ListTile(
-            title: const Text('缓存管理'),
-            subtitle: const Text('1.2 GB'),
+            title: const Text('图片缓存'),
+            subtitle: cacheSizeAsync.when(
+              data: (info) => Text('已用 ${info.imageFormatted}，${imageExpiryDays}天后过期'),
+              loading: () => const Text('计算中...'),
+              error: (_, __) => const Text('获取失败'),
+            ),
             trailing: TextButton(
-              onPressed: () => _showClearCacheDialog(context),
+              onPressed: () => _clearImageCache(context),
               child: const Text('清除'),
             ),
           ),
+          ListTile(
+            title: const Text('图片缓存过期天数'),
+            subtitle: Text('$imageExpiryDays 天'),
+            onTap: () => _showImageCacheExpirySelector(context),
+          ),
+
+          ListTile(
+            title: const Text('视频缓存'),
+            subtitle: cacheSizeAsync.when(
+              data: (info) => Text('已用 ${info.videoFormatted}，上限 ${videoMaxSizeMB >= 1024 ? '${(videoMaxSizeMB / 1024).toStringAsFixed(0)} GB' : '$videoMaxSizeMB MB'}'),
+              loading: () => const Text('计算中...'),
+              error: (_, __) => const Text('获取失败'),
+            ),
+            trailing: TextButton(
+              onPressed: () => _clearVideoCache(context),
+              child: const Text('清除'),
+            ),
+          ),
+          ListTile(
+            title: const Text('视频缓存上限'),
+            subtitle: Text(videoMaxSizeMB >= 1024
+                ? '${(videoMaxSizeMB / 1024).toStringAsFixed(0)} GB'
+                : '$videoMaxSizeMB MB'),
+            onTap: () => _showVideoCacheMaxSizeSelector(context),
+          ),
+
+          ListTile(
+            title: const Text('总缓存'),
+            subtitle: cacheSizeAsync.when(
+              data: (info) => Text(info.totalFormatted),
+              loading: () => const Text('计算中...'),
+              error: (_, __) => const Text('获取失败'),
+            ),
+            trailing: TextButton(
+              onPressed: () => _clearAllCache(context),
+              child: const Text('全部清除'),
+            ),
+          ),
+
+          const Divider(),
           ListTile(
             title: const Text('聚合搜索优先级'),
             subtitle: const Text('服务器名称优先'),
             onTap: () => _showSearchPrioritySelector(context),
           ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _clearImageCache(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清除图片缓存'),
+        content: const Text('确定清除所有图片磁盘缓存？下次加载需重新下载。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('清除')),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await CacheService.clearAllImageCache();
+      ref.invalidate(cacheSizeProvider);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('图片缓存已清除')),
+        );
+      }
+    }
+  }
+
+  Future<void> _clearVideoCache(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清除视频缓存'),
+        content: const Text('确定清除所有已下载的视频？此操作不可恢复。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('清除')),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await CacheService.clearVideoCache();
+      ref.invalidate(cacheSizeProvider);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('视频缓存已清除')),
+        );
+      }
+    }
+  }
+
+  Future<void> _clearAllCache(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清除全部缓存'),
+        content: const Text('确定清除所有图片和视频缓存？此操作不可恢复。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('全部清除')),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await CacheService.clearAllCache();
+      ref.invalidate(cacheSizeProvider);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('所有缓存已清除')),
+        );
+      }
+    }
+  }
+
+  void _showImageCacheExpirySelector(BuildContext context) {
+    final days = [7, 14, 30, 60, 90];
+    final current = ref.read(imageCacheExpiryDaysProvider);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('图片缓存过期天数'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: days.map((d) => RadioListTile<int>(
+            title: Text('$d 天'),
+            value: d,
+            groupValue: current,
+            onChanged: (value) async {
+              if (value != null) {
+                ref.read(imageCacheExpiryDaysProvider.notifier).state = value;
+                await CacheService.setImageCacheExpiryDays(value);
+              }
+              Navigator.pop(ctx);
+            },
+          )).toList(),
+        ),
+      ),
+    );
+  }
+
+  void _showVideoCacheMaxSizeSelector(BuildContext context) {
+    final sizes = [256, 512, 1024, 2048, 4096, 8192];
+    final labels = sizes.map((s) => s >= 1024 ? '${(s / 1024).toStringAsFixed(0)} GB' : '$s MB').toList();
+    final current = ref.read(videoCacheMaxSizeMBProvider);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('视频缓存上限'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(sizes.length, (i) => RadioListTile<int>(
+            title: Text(labels[i]),
+            value: sizes[i],
+            groupValue: current,
+            onChanged: (value) async {
+              if (value != null) {
+                ref.read(videoCacheMaxSizeMBProvider.notifier).state = value;
+                await CacheService.setVideoCacheMaxSizeMB(value);
+              }
+              Navigator.pop(ctx);
+            },
+          )),
+        ),
       ),
     );
   }
@@ -289,28 +496,6 @@ class GeneralSettingsScreen extends ConsumerWidget {
     );
   }
 
-  void _showClearCacheDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('清除缓存'),
-        content: const Text('确定要清除所有缓存吗？'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('缓存已清除')),
-              );
-            },
-            child: const Text('清除'),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _showSearchPrioritySelector(BuildContext context) {
     showDialog(
       context: context,
@@ -337,7 +522,7 @@ class GeneralSettingsScreen extends ConsumerWidget {
     );
   }
 
-  void _showThemeSelector(BuildContext context, WidgetRef ref) {
+  void _showThemeSelector(BuildContext context) {
     final current = ref.read(themeModeProvider);
     showDialog(
       context: context,

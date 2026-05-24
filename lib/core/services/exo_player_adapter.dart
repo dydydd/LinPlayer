@@ -32,6 +32,7 @@ class ExoPlayerAdapter implements PlayerAdapter {
   double _subtitlePosition = 0.0;
   bool _subtitleBackground = false;
   String _subtitleFont = '默认';
+  String? _lastRenderedBitmapB64;
 
   PlayerStateCallbacks? _callbacks;
   Timer? _positionTimer;
@@ -483,6 +484,9 @@ class ExoPlayerAdapter implements PlayerAdapter {
                   valueListenable: bitmapNotifier,
                   builder: (context, bitmapB64, _) {
                     if (bitmapB64 != null && bitmapB64.isNotEmpty) {
+                      final isDuplicate = bitmapB64 == _lastRenderedBitmapB64;
+                      _lastRenderedBitmapB64 = bitmapB64;
+                      if (isDuplicate) return const SizedBox.shrink();
                       try {
                         final bytes = base64Decode(bitmapB64);
                         return Center(
@@ -495,7 +499,8 @@ class ExoPlayerAdapter implements PlayerAdapter {
                               bytes,
                               fit: BoxFit.contain,
                               gaplessPlayback: true,
-                              filterQuality: FilterQuality.high,
+                              filterQuality: FilterQuality.medium,
+                              cacheWidth: 720,
                             ),
                           ),
                         );
