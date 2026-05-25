@@ -16,6 +16,7 @@ import '../../widgets/common/danmaku_overlay.dart';
 import '../../widgets/common/media_widgets.dart';
 import '../../../core/services/video_player_service.dart';
 import '../../../core/services/mpv_player_adapter.dart';
+import '../../../core/services/exo_player_adapter.dart';
 import '../../../core/services/libass_bridge.dart';
 import '../../../core/services/app_logger.dart';
 
@@ -843,8 +844,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     final danmakuDelay = ref.watch(danmakuDelayProvider);
 
     final overlays = <Widget>[];
-    if (_playerService.coreType == PlayerCoreType.exoPlayer && _playerService.libassReady) {
-      overlays.add(Positioned.fill(child: _LibassOverlay(playerService: _playerService)));
+    if (_playerService.coreType == PlayerCoreType.exoPlayer) {
+      final adapter = _playerService.adapter;
+      if (adapter is ExoPlayerAdapter) {
+        overlays.add(
+          ValueListenableBuilder<bool>(
+            valueListenable: adapter.libassOverlayNotifier,
+            builder: (context, showLibass, _) {
+              if (!showLibass) return const SizedBox.shrink();
+              return Positioned.fill(child: _LibassOverlay(playerService: _playerService));
+            },
+          ),
+        );
+      }
     }
     if (danmakuEnabled && danmakuItems.isNotEmpty) {
       final delayedPosition = _playerService.position - Duration(milliseconds: (danmakuDelay * 1000).round());

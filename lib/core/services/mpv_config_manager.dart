@@ -4,8 +4,14 @@ import 'app_logger.dart';
 
 /// MPV 配置管理器
 ///
-/// 负责管理 mpv 配置文件（mpv.conf），用于预设字幕、音频、视频等默认配置。
-/// media_kit 创建的 Player 实例在初始化时会读取这些配置。
+/// 负责管理 mpv 配置文件（mpv.conf）和字体目录。
+///
+/// ⚠️ 注意：media_kit 默认不读取 mpv.conf（config=no）。
+/// mpv.conf 中的配置项不会被 media_kit Player 实例消费。
+/// 所有运行时属性必须通过 NativePlayer.setProperty() 设置才生效。
+/// mpv.conf 仅作为配置意图的持久化记录，供未来可能的手动调试使用。
+///
+/// fontsDirectory 属性用于设置 sub-fonts-dir 运行时属性。
 class MpvConfigManager {
   static final _logger = AppLogger();
   static final _instance = MpvConfigManager._internal();

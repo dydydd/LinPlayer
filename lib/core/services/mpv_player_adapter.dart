@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' show max, min;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -133,12 +134,25 @@ class MpvPlayerAdapter implements PlayerAdapter {
         subtitleBackground: _subtitleBackground,
       );
 
-      _player = Player();
+      _player = Player(
+        configuration: const PlayerConfiguration(
+          libass: true,
+          logLevel: MPVLogLevel.warn,
+        ),
+      );
       _videoController = VideoController(_player!);
       _setupStreamListeners();
 
       final np = _nativePlayer;
       if (np != null) {
+        final fontsDir = _configManager.fontsDirectory;
+        final systemFontsDir = '/system/fonts';
+        final dir = Directory(fontsDir);
+        if (dir.listSync().isNotEmpty) {
+          await np.setProperty('sub-fonts-dir', fontsDir);
+        } else {
+          await np.setProperty('sub-fonts-dir', systemFontsDir);
+        }
         await np.setProperty('secondary-sub-visibility', 'yes');
       }
 
@@ -441,22 +455,28 @@ class MpvPlayerAdapter implements PlayerAdapter {
       if (_subtitleFont != null && _subtitleFont!.isNotEmpty && _subtitleFont != '默认') {
         await np.setProperty('sub-font', _subtitleFont!);
       }
-      await np.setProperty('sub-back-color',
-          _subtitleBackground ? '#000000C0' : '#00000000');
       await np.setProperty('sub-delay', _subtitleDelay.toStringAsFixed(3));
 
       if (_hasBitmapSubtitle) {
-        await np.setProperty('sub-ass', 'no');
+        await np.setProperty('sub-ass', 'yes');
         await np.setProperty('sub-ass-override', 'no');
+        await np.setProperty('sub-back-color', '#00000000');
       } else if (_currentSubIsAss) {
         await np.setProperty('sub-ass', 'yes');
         await np.setProperty('sub-ass-override', 'no');
-        if (_subtitleFont != null && _subtitleFont!.isNotEmpty && _subtitleFont != '默认') {
-          await np.setProperty('sub-ass-override', 'scale');
+        if (_subtitleBackground) {
+          await np.setProperty('sub-back-color', '#000000C0');
+        } else {
+          await np.setProperty('sub-back-color', '#00000000');
         }
       } else {
         await np.setProperty('sub-ass', 'yes');
         await np.setProperty('sub-ass-override', 'strip');
+        if (_subtitleBackground) {
+          await np.setProperty('sub-back-color', '#000000C0');
+        } else {
+          await np.setProperty('sub-back-color', '#00000000');
+        }
       }
 
       if (_secondarySid != null) {
@@ -618,11 +638,7 @@ class MpvPlayerAdapter implements PlayerAdapter {
   @override
   Future<void> setSubtitleBackground(bool enabled) async {
     _subtitleBackground = enabled;
-    final np = _nativePlayer;
-    if (np != null) {
-      await np.setProperty('sub-back-color',
-          enabled ? '#000000C0' : '#00000000');
-    }
+    await _applySubtitleRuntimeProperties();
     await _configManager.updateConfigValue(
       'sub-back-color', enabled ? '#000000C0' : '#00000000',
     );

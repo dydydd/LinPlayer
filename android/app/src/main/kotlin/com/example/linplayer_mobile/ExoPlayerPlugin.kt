@@ -372,6 +372,9 @@ class ExoPlayerPlugin(
                     if (actualTrackType == C.TRACK_TYPE_TEXT || actualTrackType == C.TRACK_TYPE_IMAGE) {
                         paramsBuilder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                         paramsBuilder.setTrackTypeDisabled(C.TRACK_TYPE_IMAGE, false)
+                        val mime = group.getTrackFormat(trackIndex).sampleMimeType ?: ""
+                        val subType = if (mime.contains("pgs", ignoreCase = true) || mime.contains("vobsub", ignoreCase = true) || mime.contains("dvb", ignoreCase = true)) "bitmap" else if (mime.contains("ssa", ignoreCase = true) || mime.contains("ass", ignoreCase = true)) "ass" else "text"
+                        emitEvent("subtitleType", subType)
                     }
                     trackSelector.parameters = paramsBuilder.build()
                 }
@@ -390,9 +393,12 @@ class ExoPlayerPlugin(
         fun loadSubtitle(subtitleUrl: String, subtitleMimeType: String?, subtitleLanguage: String?) {
             val mimeType = subtitleMimeType ?: Companion.detectMimeType(subtitleUrl)
             val isGraphical = mimeType == MimeTypes.APPLICATION_PGS || mimeType == MimeTypes.APPLICATION_VOBSUB || mimeType == MimeTypes.APPLICATION_DVBSUBS
+            val isAss = mimeType == MimeTypes.TEXT_SSA
 
             if (isGraphical) {
                 emitEvent("subtitleType", "bitmap")
+            } else if (isAss) {
+                emitEvent("subtitleType", "ass")
             } else {
                 emitEvent("subtitleType", "text")
             }
@@ -475,6 +481,8 @@ class ExoPlayerPlugin(
                     paramsBuilder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                     paramsBuilder.setTrackTypeDisabled(C.TRACK_TYPE_IMAGE, false)
                     trackSelector.parameters = paramsBuilder.build()
+                    val selectedMime = group.getTrackFormat(bestTrackIdx).sampleMimeType ?: "unknown"
+                    emitEvent("subtitleType", if (selectedMime.contains("pgs", ignoreCase = true) || selectedMime.contains("vobsub", ignoreCase = true) || selectedMime.contains("dvb", ignoreCase = true)) "bitmap" else if (selectedMime.contains("ssa", ignoreCase = true) || selectedMime.contains("ass", ignoreCase = true)) "ass" else "text")
                 }
             } catch (e: Exception) {
                 emitEvent("subtitleError", "forceSelect failed: ${e.message}")
@@ -558,7 +566,7 @@ class ExoPlayerPlugin(
                     try {
                         var src = bmp
 
-                        val maxDim = 720
+                        val maxDim = 1280
                         if (src.width > maxDim || src.height > maxDim) {
                             val scale = minOf(maxDim.toFloat() / src.width, maxDim.toFloat() / src.height)
                             val newW = (src.width * scale).toInt()
@@ -570,7 +578,7 @@ class ExoPlayerPlugin(
                             src = scaled
                         }
 
-                        val processed = makeBlackPixelsTransparent(src)
+                        val processed = ensureArgb8888(src)
                         if (processed != src) {
                             src.recycle()
                         }
@@ -581,7 +589,8 @@ class ExoPlayerPlugin(
                         processed.recycle()
                         val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
                         bitmapParts.add(base64)
-                    } catch (_: Exception) {
+                    } catch (e: Exception) {
+                        emitEvent("subtitleError", "bitmap processing failed: ${e.message}")
                     }
                 }
                 val txt = cue.text
@@ -593,16 +602,17 @@ class ExoPlayerPlugin(
                 }
             }
 
-            if (hasBitmap && bitmapParts.isNotEmpty()) {
+            if (hasBitmap) {
                 isBitmapSubtitle = true
-                emitEvent("subtitleBitmap", mapOf(
-                    "images" to bitmapParts,
-                    "text" to textParts.joinToString("\n")
-                ))
-            } else if (hasBitmap && bitmapParts.isEmpty() && textParts.isNotEmpty()) {
-                isBitmapSubtitle = false
-                emitEvent("subtitle", textParts.joinToString("\n"))
-            } else if (!hasBitmap && textParts.isNotEmpty()) {
+                if (bitmapParts.isNotEmpty()) {
+                    emitEvent("subtitleBitmap", mapOf(
+                        "images" to bitmapParts,
+                        "text" to textParts.joinToString("\n")
+                    ))
+                } else {
+                    emitEvent("subtitle", textParts.joinToString("\n"))
+                }
+            } else if (textParts.isNotEmpty()) {
                 isBitmapSubtitle = false
                 emitEvent("subtitle", textParts.joinToString("\n"))
             } else {
@@ -611,45 +621,12 @@ class ExoPlayerPlugin(
             }
         }
 
-        private fun makeBlackPixelsTransparent(src: Bitmap): Bitmap {
-            val w = src.width
-            val h = src.height
-            val result: Bitmap
-
-            if (!src.hasAlpha()) {
-                result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-                val canvas = Canvas(result)
-                val paint = Paint()
-                canvas.drawBitmap(src, 0f, 0f, paint)
-            } else {
-                if (src.config == Bitmap.Config.ARGB_8888) {
-                    result = src
-                } else {
-                    result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-                    val canvas = Canvas(result)
-                    val paint = Paint()
-                    canvas.drawBitmap(src, 0f, 0f, paint)
-                }
-            }
-
-            val pixels = IntArray(w * h)
-            result.getPixels(pixels, 0, w, 0, 0, w, h)
-
-            for (i in pixels.indices) {
-                val pixel = pixels[i]
-                val a = (pixel ushr 24) and 0xFF
-                val r = (pixel shr 16) and 0xFF
-                val g = (pixel shr 8) and 0xFF
-                val b = pixel and 0xFF
-                if (a == 0) continue
-                val brightness = (r * 77 + g * 150 + b * 29) shr 8
-                if (brightness < 25) {
-                    val alpha = (brightness * 255 / 25).coerceIn(0, 255)
-                    pixels[i] = (alpha shl 24) or (r shl 16) or (g shl 8) or b
-                }
-            }
-
-            result.setPixels(pixels, 0, w, 0, 0, w, h)
+        private fun ensureArgb8888(src: Bitmap): Bitmap {
+            if (src.config == Bitmap.Config.ARGB_8888) return src
+            val result = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(result)
+            val paint = Paint()
+            canvas.drawBitmap(src, 0f, 0f, paint)
             return result
         }
 
@@ -706,6 +683,8 @@ class ExoPlayerPlugin(
                             mimeType.contains("vobsub", ignoreCase = true) ||
                             mimeType.contains("dvd", ignoreCase = true) ||
                             mimeType.contains("dvb", ignoreCase = true)
+                    val isAss = mimeType.contains("ssa", ignoreCase = true) ||
+                            mimeType.contains("ass", ignoreCase = true)
                     val resolvedType = if (isBitmap && type == "text") "bitmap" else type
                     trackList.add(mapOf(
                         "id" to "${groupIndex}_$i",
@@ -717,6 +696,8 @@ class ExoPlayerPlugin(
                         "label" to (format.label ?: ""),
                         "mimeType" to mimeType,
                         "codec" to (format.codecs ?: ""),
+                        "isAss" to isAss,
+                        "isBitmap" to isBitmap,
                         "isSelected" to group.isTrackSelected(i)
                     ))
                 }

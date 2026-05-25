@@ -4,6 +4,7 @@ import 'dart:math' show max, min;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'player_adapter.dart';
+import 'libass_bridge.dart';
 import 'app_logger.dart';
 
 class ExoPlayerAdapter implements PlayerAdapter {
@@ -40,6 +41,10 @@ class ExoPlayerAdapter implements PlayerAdapter {
   final ValueNotifier<String> subtitleNotifier = ValueNotifier('');
   final ValueNotifier<String?> bitmapNotifier = ValueNotifier(null);
   final ValueNotifier<int> _subtitleSettingsVersion = ValueNotifier(0);
+  final ValueNotifier<bool> libassOverlayNotifier = ValueNotifier(false);
+
+  bool _useLibassForCurrentSub = false;
+  bool _libassInited = false;
 
   @override
   bool get isInitialized => _isInitialized;
@@ -68,7 +73,20 @@ class ExoPlayerAdapter implements PlayerAdapter {
   @override
   String? get errorMessage => _errorMessage;
   @override
-  bool get libassReady => false;
+  bool get libassReady => _libassAvailable;
+
+  static bool _libassAvailable = false;
+  static bool _libassChecked = false;
+
+  static Future<void> checkLibassAvailability() async {
+    if (_libassChecked) return;
+    _libassChecked = true;
+    try {
+      _libassAvailable = await LibassBridge.isAvailable();
+    } catch (_) {
+      _libassAvailable = false;
+    }
+  }
   @override
   int? get textureId => _textureId;
   @override
@@ -161,7 +179,13 @@ class ExoPlayerAdapter implements PlayerAdapter {
         final groupIndex = target['groupIndex'] ?? 0;
         final trackIndex = target['trackIndex'] ?? 0;
         final nativeTrackType = target['trackType'] ?? 3;
-        _logger.i('ExoPlayer', '调用selectTrack: group=$groupIndex, track=$trackIndex, nativeType=$nativeTrackType');
+        final isBitmap = target['isBitmap'] == true || target['type'] == 'bitmap';
+
+        _isBitmapSubtitle = isBitmap;
+        _useLibassForCurrentSub = false;
+        libassOverlayNotifier.value = false;
+
+        _logger.i('ExoPlayer', '调用selectTrack: group=$groupIndex, track=$trackIndex, nativeType=$nativeTrackType, isBitmap=$isBitmap');
         await _channel.invokeMethod('selectTrack', {
           'playerId': _playerId,
           'groupIndex': groupIndex,
@@ -229,7 +253,42 @@ class ExoPlayerAdapter implements PlayerAdapter {
   Future<void> loadLibassSubtitle(String path) async {
     if (_playerId == null || !_isInitialized) return;
     final mimeType = _detectSubtitleMimeType(path);
-    _logger.i('ExoPlayer', '加载外挂字幕: $path (mime=$mimeType)');
+    final ext = _extractExtension(path);
+    final isAss = ext == 'ass' || ext == 'ssa';
+    final isPgs = ext == 'pgs' || ext == 'sup';
+    _logger.i('ExoPlayer', '加载外挂字幕: $path (mime=$mimeType, isAss=$isAss, isPgs=$isPgs)');
+
+    _isBitmapSubtitle = isPgs;
+
+    if (isAss && _libassAvailable) {
+      if (!_libassInited) {
+        await _initLibass();
+      }
+      if (_libassInited) {
+        final loaded = await LibassBridge.loadSubFile(path);
+        if (loaded) {
+          _useLibassForCurrentSub = true;
+          libassOverlayNotifier.value = true;
+          _logger.i('ExoPlayer', 'ASS字幕通过libass加载成功，特效将正确渲染');
+          return;
+        }
+        _logger.w('ExoPlayer', 'libass加载ASS字幕失败，回退ExoPlayer文本渲染');
+      }
+    }
+
+    if (isPgs) {
+      _useLibassForCurrentSub = false;
+      libassOverlayNotifier.value = false;
+      _logger.w('ExoPlayer', 'PGS/SUP图形字幕需要FFmpeg扩展支持，如无法显示请切换MPV内核');
+    } else if (isAss) {
+      _useLibassForCurrentSub = false;
+      libassOverlayNotifier.value = false;
+      emitEvent('subtitleType', 'ass');
+    } else {
+      _useLibassForCurrentSub = false;
+      libassOverlayNotifier.value = false;
+    }
+
     try {
       await _channel.invokeMethod('loadSubtitle', {
         'playerId': _playerId,
@@ -240,6 +299,21 @@ class ExoPlayerAdapter implements PlayerAdapter {
     } catch (e, stackTrace) {
       _logger.eWithStack('ExoPlayer', '加载字幕失败', e, stackTrace);
     }
+  }
+
+  String _extractExtension(String path) {
+    var clean = path;
+    final qIndex = clean.indexOf('?');
+    if (qIndex >= 0) clean = clean.substring(0, qIndex);
+    final hIndex = clean.indexOf('#');
+    if (hIndex >= 0) clean = clean.substring(0, hIndex);
+    final dotIndex = clean.lastIndexOf('.');
+    if (dotIndex < 0 || dotIndex < clean.lastIndexOf('/')) return '';
+    return clean.substring(dotIndex + 1).toLowerCase();
+  }
+
+  void emitEvent(String type, dynamic value) {
+    _logger.d('ExoPlayer', '内部事件: type=$type, value=$value');
   }
 
   @override
@@ -296,14 +370,16 @@ class ExoPlayerAdapter implements PlayerAdapter {
         break;
       case 'subtitle':
         _subtitleText = event['value'] as String? ?? '';
-        subtitleNotifier.value = _subtitleText;
-        if (!_isBitmapSubtitle) {
-          bitmapNotifier.value = null;
-          _subtitleBitmapBase64 = '';
-        } else if (_subtitleText.isEmpty) {
+        if (_useLibassForCurrentSub) {
+          subtitleNotifier.value = '';
+          _subtitleText = '';
+        } else {
+          subtitleNotifier.value = _subtitleText;
+        }
+        bitmapNotifier.value = null;
+        _subtitleBitmapBase64 = '';
+        if (_subtitleText.isEmpty) {
           _isBitmapSubtitle = false;
-          bitmapNotifier.value = null;
-          _subtitleBitmapBase64 = '';
         }
         break;
       case 'subtitleBitmap':
@@ -320,11 +396,51 @@ class ExoPlayerAdapter implements PlayerAdapter {
           }
           _subtitleText = data['text'] as String? ?? '';
           subtitleNotifier.value = _subtitleText;
+          if (_isBitmapSubtitle) {
+            _useLibassForCurrentSub = false;
+            libassOverlayNotifier.value = false;
+          }
         }
         break;
       case 'subtitleType':
-        _logger.d('ExoPlayer', '字幕类型: ${event['value']}');
+        final subType = event['value'] as String?;
+        _logger.d('ExoPlayer', '字幕类型: $subType');
+        if (subType == 'bitmap') {
+          _isBitmapSubtitle = true;
+          _useLibassForCurrentSub = false;
+          libassOverlayNotifier.value = false;
+        } else {
+          _isBitmapSubtitle = false;
+          _useLibassForCurrentSub = false;
+          libassOverlayNotifier.value = false;
+        }
         break;
+    }
+  }
+
+  Future<void> _initLibass() async {
+    if (_libassInited) return;
+    try {
+      final available = await LibassBridge.isAvailable();
+      if (!available) {
+        _logger.w('ExoPlayer', 'libass 不可用，回退纯文本渲染');
+        _useLibassForCurrentSub = false;
+        libassOverlayNotifier.value = false;
+        return;
+      }
+      final success = await LibassBridge.init(width: 1920, height: 1080);
+      if (!success) {
+        _logger.w('ExoPlayer', 'libass 初始化失败');
+        _useLibassForCurrentSub = false;
+        libassOverlayNotifier.value = false;
+        return;
+      }
+      _libassInited = true;
+      _logger.i('ExoPlayer', 'libass 初始化成功');
+    } catch (e) {
+      _logger.e('ExoPlayer', 'libass 初始化异常: $e');
+      _useLibassForCurrentSub = false;
+      libassOverlayNotifier.value = false;
     }
   }
 
@@ -497,14 +613,14 @@ class ExoPlayerAdapter implements PlayerAdapter {
                     try {
                       final bytes = base64Decode(bitmapB64);
                       return Positioned(
-                        left: 24,
-                        right: 24,
-                        bottom: 20.0 + (_subtitlePosition * 180.0),
+                        left: 0,
+                        right: 0,
+                        bottom: 20.0 + (_subtitlePosition * 120.0),
                         child: Center(
                           child: ConstrainedBox(
                             constraints: BoxConstraints(
-                              maxWidth: MediaQuery.of(context).size.width - 48,
-                              maxHeight: 300 * (0.5 + _subtitleSize),
+                              maxWidth: MediaQuery.of(context).size.width - 16,
+                              maxHeight: MediaQuery.of(context).size.height * 0.35,
                             ),
                             child: Image.memory(
                               bytes,
@@ -525,10 +641,10 @@ class ExoPlayerAdapter implements PlayerAdapter {
                       if (text.isEmpty) return const SizedBox.shrink();
                       final cleanText = _stripAssTags(text);
                       if (cleanText.isEmpty) return const SizedBox.shrink();
-                      final fontSize = 14.0 + (_subtitleSize * 18.0);
+                      final fontSize = 16.0 + (_subtitleSize * 10.0);
                       return Positioned(
-                        left: 24,
-                        right: 24,
+                        left: 16,
+                        right: 16,
                         bottom: 20.0 + (_subtitlePosition * 180.0),
                         child: Center(
                           child: Container(
@@ -611,7 +727,8 @@ class ExoPlayerAdapter implements PlayerAdapter {
       r' Bord(?:er)?\d+|Shad(?:ow)?\d+'
       r')'
     ), '');
-    result = result.replaceAll(RegExp(r'\\[nN]'), '\n');
+    result = result.replaceAll('\\N', '\n');
+    result = result.replaceAll('\\n', '\n');
     result = result.replaceAll(RegExp(r'[^\S\n]+'), ' ').trim();
     return result;
   }
@@ -632,6 +749,14 @@ class ExoPlayerAdapter implements PlayerAdapter {
       } catch (_) {}
       _playerId = null;
     }
+    if (_libassInited) {
+      try {
+        await LibassBridge.dispose();
+      } catch (_) {}
+      _libassInited = false;
+    }
+    _useLibassForCurrentSub = false;
+    libassOverlayNotifier.value = false;
     _textureId = null;
     _isInitialized = false;
     _isPlaying = false;
@@ -641,6 +766,7 @@ class ExoPlayerAdapter implements PlayerAdapter {
     _tracks = [];
     _subtitleText = '';
     _subtitleBitmapBase64 = '';
+    _isBitmapSubtitle = false;
     subtitleNotifier.value = '';
     bitmapNotifier.value = null;
     _subtitleSettingsVersion.value = 0;
