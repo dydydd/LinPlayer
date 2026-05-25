@@ -437,6 +437,37 @@ class MediaStream {
   bool get isVideo => type == 'Video';
   bool get isAudio => type == 'Audio';
   bool get isSubtitle => type == 'Subtitle';
+
+  String readableLabel({List<MediaStream>? siblings}) {
+    if (displayTitle != null && displayTitle!.isNotEmpty) return displayTitle!;
+    if (title != null && title!.isNotEmpty) return title!;
+    final lang = _languageName(language);
+    final codecStr = codec?.toUpperCase() ?? '';
+    final ext = isExternal == true ? '外挂' : '内封';
+    if (siblings != null && siblings.length > 1) {
+      final pos = siblings.indexWhere((s) => s.index == index);
+      if (pos >= 0) {
+        final label = codecStr.isNotEmpty ? '$lang $codecStr #${pos + 1} ($ext)' : '$lang #${pos + 1} ($ext)';
+        return label;
+      }
+    }
+    if (codecStr.isNotEmpty) return '$lang $codecStr ($ext)';
+    return '$lang ($ext)';
+  }
+
+  static String _languageName(String? code) {
+    if (code == null || code.isEmpty) return '未知';
+    const map = {
+      'chi': '中文', 'zh': '中文', 'chs': '简体中文', 'cht': '繁体中文',
+      'zho': '中文', 'eng': '英语', 'en': '英语', 'jpn': '日语', 'ja': '日语',
+      'kor': '韩语', 'ko': '韩语', 'fre': '法语', 'fra': '法语',
+      'ger': '德语', 'deu': '德语', 'spa': '西班牙语', 'por': '葡萄牙语',
+      'rus': '俄语', 'ita': '意大利语', 'tha': '泰语', 'vie': '越南语',
+      'und': '未知',
+    };
+    return map[code.toLowerCase()] ?? code;
+  }
+
   String get resolution {
     final w = width;
     final h = height;

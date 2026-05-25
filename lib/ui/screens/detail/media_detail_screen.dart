@@ -940,7 +940,7 @@ class _VersionInfoSection extends ConsumerWidget {
                               children: [
                                 Icon(Icons.subtitles, size: 16, color: Theme.of(context).colorScheme.tertiary),
                                 const SizedBox(width: 6),
-                                Text(subtitle.displayTitle ?? subtitle.language ?? '', style: const TextStyle(fontSize: 13)),
+                                Text(subtitle.readableLabel(), style: const TextStyle(fontSize: 13)),
                               ],
                             ),
                           ],

@@ -209,20 +209,59 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     ref.read(subtitleTrackProvider.notifier).state = targetIndex;
 
     if (!isExternal) {
-      logger.i('Player', '内封字幕，通过播放器轨道选择');
-      try {
-        if (_playerService.coreType == PlayerCoreType.mpv) {
-          await _selectInternalSubtitleMPV(target, preferredLang, logger);
+      final isAss = codec == 'ass' || codec == 'ssa';
+      final useLibass = _playerService.coreType == PlayerCoreType.exoPlayer &&
+          ref.read(exoLibassProvider) &&
+          isAss && !isGraphical;
+
+      if (useLibass) {
+        final adapter = _playerService.adapter;
+        if (adapter is ExoPlayerAdapter && adapter.libassReady) {
+          logger.i('Player', '内封ASS字幕，通过libass渲染（保留特效）');
+          try {
+            final api = ref.read(apiClientProvider);
+            final server = ref.read(currentServerProvider);
+            final embyCodec = _embySubtitleCodec(codec);
+            final subUrl = api.playback.getSubtitleStreamUrl(
+              item.id, mediaSource.id, targetIndex, embyCodec,
+            );
+            final tempDir = await getTemporaryDirectory();
+            final subFile = File('${tempDir.path}/subtitle_${item.id}_${targetIndex}.ass');
+            if (!subFile.existsSync() || await subFile.length() == 0) {
+              final dio = Dio(BaseOptions(
+                connectTimeout: const Duration(seconds: 15),
+                receiveTimeout: const Duration(seconds: 60),
+              ));
+              if (server?.authToken != null) {
+                dio.options.headers['X-Emby-Token'] = server!.authToken;
+                dio.options.headers['X-MediaBrowser-Token'] = server.authToken;
+              }
+              await dio.download(subUrl, subFile.path);
+              logger.i('Player', 'ASS字幕下载完成 - ${subFile.lengthSync()} bytes');
+            }
+            if (subFile.existsSync() && await subFile.length() > 0) {
+              await _playerService.loadLibassSubtitle(subFile.path);
+              logger.i('Player', '内封ASS字幕通过libass加载成功');
+            }
+          } catch (e, stackTrace) {
+            logger.eWithStack('Player', 'libass加载内封ASS失败，回退原生选择', e, stackTrace);
+            await _selectInternalSubtitleEXO(target, preferredLang, logger);
+          }
         } else {
+          logger.i('Player', '内封字幕，通过播放器轨道选择（libass不可用）');
           await _selectInternalSubtitleEXO(target, preferredLang, logger);
         }
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('内封字幕: ${target.language ?? '默认'}')),
-          );
+      } else {
+        logger.i('Player', '内封字幕，通过播放器轨道选择');
+        try {
+          if (_playerService.coreType == PlayerCoreType.mpv) {
+            await _selectInternalSubtitleMPV(target, preferredLang, logger);
+          } else {
+            await _selectInternalSubtitleEXO(target, preferredLang, logger);
+          }
+        } catch (e, stackTrace) {
+          logger.eWithStack('Player', '内封字幕轨道选择失败', e, stackTrace);
         }
-      } catch (e, stackTrace) {
-        logger.eWithStack('Player', '内封字幕轨道选择失败', e, stackTrace);
       }
       return;
     }
@@ -359,7 +398,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
       logger.w('Player', 'MPV 无可用字幕轨道 - 设置pending等待轨道就绪');
       final mpvAdapter = _playerService.adapter;
       if (mpvAdapter is MpvPlayerAdapter) {
-        mpvAdapter.setPendingSubtitle(target.codec?.toLowerCase() ?? 'ass');
+        mpvAdapter.setPendingSubtitle(
+          target.codec?.toLowerCase() ?? 'ass',
+          title: target.displayTitle ?? target.title,
+        );
       }
       await _playerService.selectSubtitleTrack('auto');
       return;
@@ -373,13 +415,28 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
       final bitmapMatches = subtitleTracks.where((t) =>
           t['type'] == 'bitmap' || (t['isBitmap'] == true)).toList();
       if (bitmapMatches.isNotEmpty) {
-        final langMatch = bitmapMatches.where((t) =>
-            t['language'] == preferredLang || t['language'] == 'chi' || t['language'] == 'zh').toList();
-        trackId = (langMatch.isNotEmpty ? langMatch : bitmapMatches).first['id']?.toString();
+        final targetTitle = target.displayTitle ?? target.title;
+        if (targetTitle != null && targetTitle.isNotEmpty) {
+          for (final t in bitmapMatches) {
+            final tTitle = t['title']?.toString() ?? '';
+            if (tTitle.isNotEmpty && _titlesMatch(targetTitle, tTitle)) {
+              trackId = t['id']?.toString();
+              break;
+            }
+          }
+        }
+        if (trackId == null) {
+          final langMatch = bitmapMatches.where((t) =>
+              t['language'] == preferredLang || t['language'] == 'chi' || t['language'] == 'zh').toList();
+          trackId = (langMatch.isNotEmpty ? langMatch : bitmapMatches).first['id']?.toString();
+        }
       }
     }
 
-    trackId ??= _findTrackByLanguage(subtitleTracks, preferredLang);
+    trackId ??= _matchMpvSubtitleTrack(
+      subtitleTracks, target.language, target.displayTitle ?? target.title,
+      target.codec, target.index,
+    );
 
     if (trackId != null) {
       await _playerService.selectSubtitleTrack(trackId);
@@ -403,47 +460,221 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     final codec = target.codec?.toLowerCase() ?? '';
     final isGraphical = codec == 'pgssub' || codec == 'sup' || codec == 'pgs' || codec == 'dvdsub' || codec == 'vobsub';
 
-    Map<String, dynamic>? trackTarget;
+    String? trackId;
+
     if (isGraphical) {
-      final bitmapTracks = subtitleTracks.where((t) => t['type'] == 'bitmap').toList();
+      final bitmapTracks = subtitleTracks.where((t) => t['type'] == 'bitmap' || t['isBitmap'] == true).toList();
       if (bitmapTracks.isNotEmpty) {
-        final langMatch = bitmapTracks.where((t) =>
-            t['language'] == preferredLang || t['language'] == 'chi' || t['language'] == 'zh').toList();
-        trackTarget = langMatch.isNotEmpty ? langMatch.first : bitmapTracks.first;
+        final targetTitle = target.displayTitle ?? target.title;
+        if (targetTitle != null && targetTitle.isNotEmpty) {
+          for (final t in bitmapTracks) {
+            final tTitle = t['title']?.toString() ?? t['label']?.toString() ?? '';
+            if (tTitle.isNotEmpty && _titlesMatch(targetTitle, tTitle)) {
+              trackId = t['id']?.toString();
+              break;
+            }
+          }
+        }
+        if (trackId == null) {
+          final langMatch = bitmapTracks.where((t) =>
+              t['language'] == preferredLang || t['language'] == 'chi' || t['language'] == 'zh').toList();
+          final targetList = langMatch.isNotEmpty ? langMatch : bitmapTracks;
+          trackId = targetList.first['id']?.toString();
+        }
       }
     }
 
-    trackTarget ??= _findTrackTargetByLanguage(subtitleTracks, preferredLang);
+    trackId ??= _matchExoSubtitleTrack(
+      subtitleTracks, target.language, target.displayTitle ?? target.title,
+      target.codec, target.index,
+    );
 
-    final trackId = trackTarget?['id']?.toString() ?? '';
-    if (trackId.isNotEmpty) {
+    if (trackId != null && trackId.isNotEmpty) {
       await _playerService.selectSubtitleTrack(trackId);
       logger.i('Player', 'EXO 已选择内封字幕轨道: id=$trackId');
     }
   }
 
-  String? _findTrackByLanguage(List<Map<String, dynamic>> tracks, String? preferredLang) {
-    if (preferredLang != null) {
-      final exact = tracks.where((t) => t['language'] == preferredLang).toList();
-      if (exact.isNotEmpty) return exact.first['id']?.toString();
+  String? _matchMpvSubtitleTrack(
+    List<Map<String, dynamic>> subtitleTracks,
+    String? targetLang,
+    String? targetTitle,
+    String? targetCodec,
+    int targetStreamIndex,
+  ) {
+    final codec = targetCodec?.toLowerCase() ?? '';
+    final isGraphical = codec == 'pgssub' || codec == 'sup' || codec == 'pgs' || codec == 'dvdsub' || codec == 'vobsub';
+    final isAss = codec == 'ass' || codec == 'ssa';
+
+    final candidates = isGraphical
+        ? subtitleTracks.where((t) => t['type'] == 'bitmap' || t['isBitmap'] == true).toList()
+        : isAss
+            ? subtitleTracks.where((t) => t['isAss'] == true || t['type'] == 'text').toList()
+            : subtitleTracks;
+
+    if (candidates.isEmpty) return subtitleTracks.first['id']?.toString();
+
+    if (targetTitle != null && targetTitle.isNotEmpty) {
+      for (final t in candidates) {
+        final tTitle = t['title']?.toString() ?? '';
+        if (tTitle.isNotEmpty && _titlesMatch(targetTitle, tTitle)) {
+          return t['id']?.toString();
+        }
+      }
     }
-    final chiMatch = tracks.where((t) => t['language'] == 'chi' || t['language'] == 'zh').toList();
-    if (chiMatch.isNotEmpty) return chiMatch.first['id']?.toString();
-    final engMatch = tracks.where((t) => t['language'] == 'eng' || t['language'] == 'en').toList();
-    if (engMatch.isNotEmpty) return engMatch.first['id']?.toString();
-    return tracks.first['id']?.toString();
+
+    if (targetLang != null) {
+      final langMatches = candidates.where((t) =>
+          t['language'] == targetLang ||
+          t['language'] == 'chi' || t['language'] == 'zh').toList();
+      if (langMatches.length == 1) return langMatches.first['id']?.toString();
+        if (langMatches.length > 1 && targetTitle != null && targetTitle.isNotEmpty) {
+          for (final t in langMatches) {
+            final tTitle = t['title']?.toString() ?? '';
+            if (tTitle.isNotEmpty && _titlesMatch(targetTitle, tTitle)) {
+              return t['id']?.toString();
+            }
+          }
+          if (targetStreamIndex >= 0 && targetStreamIndex < langMatches.length) {
+            return langMatches[targetStreamIndex]['id']?.toString();
+          }
+          return langMatches.first['id']?.toString();
+        }
+    }
+
+    final embySubIndex = _computeEmbySubtitleIndex(targetStreamIndex, subtitleTracks);
+    if (embySubIndex >= 0 && embySubIndex < candidates.length) {
+      return candidates[embySubIndex]['id']?.toString();
+    }
+
+    return candidates.first['id']?.toString();
   }
 
-  Map<String, dynamic>? _findTrackTargetByLanguage(List<Map<String, dynamic>> tracks, String? preferredLang) {
-    if (preferredLang != null) {
-      final exact = tracks.where((t) => t['language'] == preferredLang).toList();
-      if (exact.isNotEmpty) return exact.first;
+  String? _matchExoSubtitleTrack(
+    List<Map<String, dynamic>> subtitleTracks,
+    String? targetLang,
+    String? targetTitle,
+    String? targetCodec,
+    int targetStreamIndex,
+  ) {
+    final codec = targetCodec?.toLowerCase() ?? '';
+    final isGraphical = codec == 'pgssub' || codec == 'sup' || codec == 'pgs' || codec == 'dvdsub' || codec == 'vobsub';
+
+    final candidates = isGraphical
+        ? subtitleTracks.where((t) => t['type'] == 'bitmap' || t['isBitmap'] == true).toList()
+        : subtitleTracks;
+
+    if (candidates.isEmpty) return null;
+
+    for (final t in candidates) {
+      final groupIndex = t['groupIndex'];
+      if (groupIndex != null && groupIndex == targetStreamIndex) {
+        return t['id']?.toString();
+      }
     }
-    final chiMatch = tracks.where((t) => t['language'] == 'chi' || t['language'] == 'zh').toList();
-    if (chiMatch.isNotEmpty) return chiMatch.first;
-    final engMatch = tracks.where((t) => t['language'] == 'eng' || t['language'] == 'en').toList();
-    if (engMatch.isNotEmpty) return engMatch.first;
-    return tracks.firstOrNull;
+
+    if (targetTitle != null && targetTitle.isNotEmpty) {
+      for (final t in candidates) {
+        final tTitle = t['title']?.toString() ?? t['label']?.toString() ?? '';
+        if (tTitle.isNotEmpty && _titlesMatch(targetTitle, tTitle)) {
+          return t['id']?.toString();
+        }
+      }
+    }
+
+    if (targetLang != null) {
+      final langMatches = candidates.where((t) => t['language'] == targetLang).toList();
+      if (langMatches.length == 1) return langMatches.first['id']?.toString();
+      if (langMatches.length > 1) {
+        final idx = _computeEmbySubtitleIndex(targetStreamIndex, subtitleTracks);
+        if (idx >= 0 && idx < langMatches.length) {
+          return langMatches[idx]['id']?.toString();
+        }
+        return langMatches.first['id']?.toString();
+      }
+    }
+
+    final idx = _computeEmbySubtitleIndex(targetStreamIndex, subtitleTracks);
+    if (idx >= 0 && idx < candidates.length) {
+      return candidates[idx]['id']?.toString();
+    }
+
+    return candidates.first['id']?.toString();
+  }
+
+  int _computeEmbySubtitleIndex(int embyStreamIndex, List<Map<String, dynamic>> subtitleTracks) {
+    if (subtitleTracks.isEmpty) return -1;
+    final ids = subtitleTracks.map((t) => t['id']?.toString() ?? '').toList();
+    for (int i = 0; i < ids.length; i++) {
+      final parts = ids[i].split('_');
+      if (parts.length == 2 && int.tryParse(parts[0]) == embyStreamIndex) {
+        return i;
+      }
+    }
+    final sorted = List<Map<String, dynamic>>.from(subtitleTracks);
+    sorted.sort((a, b) {
+      final aId = a['id']?.toString() ?? '0';
+      final bId = b['id']?.toString() ?? '0';
+      final aGroup = int.tryParse(aId.split('_').first) ?? 0;
+      final bGroup = int.tryParse(bId.split('_').first) ?? 0;
+      if (aGroup != bGroup) return aGroup.compareTo(bGroup);
+      final aTrack = int.tryParse(aId.split('_').last) ?? 0;
+      final bTrack = int.tryParse(bId.split('_').last) ?? 0;
+      return aTrack.compareTo(bTrack);
+    });
+    int subCounter = 0;
+    for (int i = 0; i < sorted.length; i++) {
+      final groupStr = sorted[i]['id'].toString().split('_').first;
+      final group = int.tryParse(groupStr) ?? 0;
+      if (group == embyStreamIndex) return subCounter;
+      subCounter++;
+    }
+    return -1;
+  }
+
+  bool _titlesMatch(String embyTitle, String playerTitle) {
+    final e = embyTitle.toLowerCase();
+    final p = playerTitle.toLowerCase();
+    if (e == p) return true;
+    if (p.contains(e) || e.contains(p)) return true;
+    final simpKeywords = ['简', 'chs', '简体', '简日', 'gb', '简中'];
+    final tradKeywords = ['繁', 'cht', '繁体', '繁日', 'big5', '繁中'];
+    final eIsSimp = simpKeywords.any((k) => e.contains(k));
+    final eIsTrad = tradKeywords.any((k) => e.contains(k));
+    final pIsSimp = simpKeywords.any((k) => p.contains(k));
+    final pIsTrad = tradKeywords.any((k) => p.contains(k));
+    if (eIsSimp && pIsSimp) return true;
+    if (eIsTrad && pIsTrad) return true;
+    return false;
+  }
+
+  Future<void> _selectInternalSubtitleViaTrack(MediaStream target, int next, AppLogger logger) async {
+    final tracks = _playerService.tracksInfo;
+    final subtitleTracks = tracks.where((t) =>
+        (t['type'] == 'text' || t['type'] == 'bitmap') &&
+        t['id'] != 'auto' && t['id'] != 'no').toList();
+
+    String? trackId;
+    final targetDisplayTitle = target.displayTitle ?? target.title;
+
+    if (_playerService.coreType == PlayerCoreType.mpv) {
+      trackId = _matchMpvSubtitleTrack(
+        subtitleTracks, target.language, targetDisplayTitle,
+        target.codec, next,
+      );
+    } else {
+      trackId = _matchExoSubtitleTrack(
+        subtitleTracks, target.language, targetDisplayTitle,
+        target.codec, next,
+      );
+    }
+
+    if (trackId != null) {
+      await _playerService.selectSubtitleTrack(trackId);
+      logger.i('Player', '切换字幕轨道: id=$trackId');
+    } else {
+      logger.w('Player', '切换字幕轨道: 未找到匹配轨道, targetIndex=$next, lang=${target.language}, title=$targetDisplayTitle');
+    }
   }
 
   Future<void> _onSubtitleTrackChanged(int? prev, int? next) async {
@@ -475,21 +706,52 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
       final isGraphical = codec == 'pgssub' || codec == 'sup' || codec == 'pgs' || codec == 'dvdsub' || codec == 'vobsub';
 
       if (!isExternal) {
-        final tracks = _playerService.tracksInfo;
-        final subtitleTracks = tracks.where((t) =>
-            (t['type'] == 'text' || t['type'] == 'bitmap') &&
-            t['id'] != 'auto' && t['id'] != 'no').toList();
+        final isAss = codec == 'ass' || codec == 'ssa';
+        final useLibass = _playerService.coreType == PlayerCoreType.exoPlayer &&
+            ref.read(exoLibassProvider) &&
+            isAss && !isGraphical;
 
-        final preferredLang = target.language;
-        final langMatch = subtitleTracks.where((t) =>
-            t['language'] == preferredLang ||
-            (preferredLang != null && t['title']?.toString().contains(preferredLang) == true)).toList();
-        final trackTarget = langMatch.isNotEmpty ? langMatch.first : (subtitleTracks.isNotEmpty ? subtitleTracks.first : null);
+        if (useLibass) {
+          final adapter = _playerService.adapter;
+          if (adapter is ExoPlayerAdapter && adapter.libassReady) {
+            try {
+              await _playerService.deselectSubtitleTrack();
+              final embyCodec = _embySubtitleCodec(codec);
+              final subUrl = api.playback.getSubtitleStreamUrl(
+                item.id,
+                mediaSource.id,
+                target.index,
+                embyCodec,
+              );
+              final tempDir = await getTemporaryDirectory();
+              final subFile = File('${tempDir.path}/subtitle_${item.id}_${target.index}.ass');
 
-        if (trackTarget != null) {
-          final trackId = trackTarget['id']?.toString() ?? '';
-          await _playerService.selectSubtitleTrack(trackId);
-          logger.i('Player', '切换字幕轨道: id=$trackId');
+              if (!subFile.existsSync() || await subFile.length() == 0) {
+                final dio = Dio(BaseOptions(
+                  connectTimeout: const Duration(seconds: 15),
+                  receiveTimeout: const Duration(seconds: 60),
+                ));
+                if (server?.authToken != null) {
+                  dio.options.headers['X-Emby-Token'] = server!.authToken;
+                  dio.options.headers['X-MediaBrowser-Token'] = server.authToken;
+                }
+                await dio.download(subUrl, subFile.path);
+                logger.i('Player', 'EXO+libass: ASS字幕下载完成 - ${subFile.lengthSync()} bytes');
+              }
+
+              if (subFile.existsSync() && await subFile.length() > 0) {
+                await _playerService.loadLibassSubtitle(subFile.path);
+                logger.i('Player', 'EXO+libass: 内封ASS字幕通过libass加载，特效将正确渲染');
+              }
+            } catch (e, stackTrace) {
+              logger.eWithStack('Player', 'EXO+libass加载内封ASS字幕失败，回退原生轨道选择', e, stackTrace);
+              await _selectInternalSubtitleViaTrack(target, next, logger);
+            }
+          } else {
+            await _selectInternalSubtitleViaTrack(target, next, logger);
+          }
+        } else {
+          await _selectInternalSubtitleViaTrack(target, next, logger);
         }
       } else {
         final embyCodec = _embySubtitleCodec(codec);
@@ -2127,6 +2389,8 @@ class _SubtitleSettingsContentState extends ConsumerState<_SubtitleSettingsConte
     return subtitleAsync.when(
       data: (info) {
         final subtitles = info.mediaSources.firstOrNull?.mediaStreams.where((s) => s.isSubtitle).toList() ?? [];
+        final playerService = _PlayerScreenState.activePlayerService;
+        final nameMap = _buildSubtitleNameMap(subtitles, playerService);
 
         return _SettingsSection(
           children: [
@@ -2139,7 +2403,7 @@ class _SubtitleSettingsContentState extends ConsumerState<_SubtitleSettingsConte
             else
               ...subtitles.map((stream) => RadioListTile<int>(
                 title: Text(
-                  stream.displayTitle ?? stream.language ?? '轨道 ${stream.index}',
+                  nameMap[stream.index] ?? stream.readableLabel(siblings: subtitles),
                   style: const TextStyle(color: Colors.white, fontSize: 14),
                 ),
                 subtitle: stream.codec != null
@@ -2175,7 +2439,7 @@ class _SubtitleSettingsContentState extends ConsumerState<_SubtitleSettingsConte
             else
               ...subtitles.map((stream) => RadioListTile<int?>(
                 title: Text(
-                  stream.displayTitle ?? stream.language ?? '轨道 ${stream.index}',
+                  nameMap[stream.index] ?? stream.readableLabel(siblings: subtitles),
                   style: const TextStyle(color: Colors.white70, fontSize: 13),
                 ),
                 value: stream.index,
@@ -2365,6 +2629,73 @@ class _SubtitleSettingsContentState extends ConsumerState<_SubtitleSettingsConte
       ),
     );
   }
+
+  Map<int, String> _buildSubtitleNameMap(
+    List<MediaStream> embySubtitles,
+    VideoPlayerService? playerService,
+  ) {
+    final result = <int, String>{};
+    if (playerService == null) return result;
+
+    final playerTracks = playerService.tracksInfo
+        .where((t) => (t['type'] == 'text' || t['type'] == 'bitmap') && t['id'] != 'auto' && t['id'] != 'no')
+        .toList();
+
+    if (playerTracks.isEmpty) return result;
+
+    for (final stream in embySubtitles) {
+      if (stream.displayTitle != null && stream.displayTitle!.isNotEmpty) continue;
+      if (stream.title != null && stream.title!.isNotEmpty) {
+        result[stream.index] = stream.title!;
+        continue;
+      }
+
+      String? playerTitle;
+      if (playerService.coreType == PlayerCoreType.exoPlayer) {
+        for (final t in playerTracks) {
+          if (t['groupIndex'] == stream.index) {
+            playerTitle = t['label']?.toString() ?? t['title']?.toString();
+            break;
+          }
+        }
+      }
+
+      if (playerTitle == null) {
+        final lang = stream.language ?? '';
+        final sameLang = playerTracks.where((t) =>
+            t['language'] == lang ||
+            (lang == 'chi' && (t['language'] == 'chi' || t['language'] == 'zh'))).toList();
+        if (sameLang.isNotEmpty) {
+          final sameCodecEmby = embySubtitles
+              .where((s) => s.language == lang || (lang == 'chi' && (s.language == 'chi' || s.language == 'zh')))
+              .toList();
+          final posInEmby = sameCodecEmby.indexWhere((s) => s.index == stream.index);
+          if (posInEmby >= 0 && posInEmby < sameLang.length) {
+            playerTitle = sameLang[posInEmby]['title']?.toString();
+          }
+          if (playerTitle == null || playerTitle.isEmpty) {
+            for (final t in sameLang) {
+              final tTitle = t['title']?.toString() ?? '';
+              if (tTitle.isNotEmpty) {
+                final codec = stream.codec?.toLowerCase() ?? '';
+                final isAss = codec == 'ass' || codec == 'ssa';
+                final isBitmap = codec == 'pgssub' || codec == 'sup' || codec == 'pgs';
+                final tIsAss = (t['isAss'] == true) || (t['codec']?.toString().toLowerCase().contains('ass') == true);
+                final tIsBitmap = t['isBitmap'] == true || t['type'] == 'bitmap';
+                if (isAss && tIsAss && !tIsBitmap) { playerTitle = tTitle; break; }
+                if (isBitmap && tIsBitmap) { playerTitle = tTitle; break; }
+              }
+            }
+          }
+        }
+      }
+
+      if (playerTitle != null && playerTitle.isNotEmpty) {
+        result[stream.index] = playerTitle;
+      }
+    }
+    return result;
+  }
 }
 
 /// 音频设置内容
@@ -2404,7 +2735,7 @@ class _AudioSettingsContentState extends ConsumerState<_AudioSettingsContent> {
             else
               ...audios.map((stream) => RadioListTile<int>(
                 title: Text(
-                  stream.displayTitle ?? stream.language ?? '轨道 ${stream.index}',
+                  stream.readableLabel(),
                   style: const TextStyle(color: Colors.white, fontSize: 14),
                 ),
                 subtitle: stream.codec != null

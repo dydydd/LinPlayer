@@ -631,8 +631,7 @@ class _PlaybackOptions extends ConsumerWidget {
               ...streams.map((stream) {
                 final isSelected = currentIndex == stream.index;
                 return ListTile(
-                  title: Text(stream.displayTitle ?? stream.language ?? '轨道 ${stream.index}'),
-                  subtitle: stream.codec != null ? Text('编码: ${stream.codec}') : null,
+                  title: Text(stream.readableLabel(siblings: streams)),                  subtitle: stream.codec != null ? Text('编码: ${stream.codec}') : null,
                   trailing: isSelected
                       ? const Icon(Icons.check, color: Color(0xFF5B8DEF))
                       : null,
@@ -698,8 +697,7 @@ class _PlaybackOptions extends ConsumerWidget {
               ...streams.map((stream) {
                 final isSelected = ref.read(secondarySubtitleTrackProvider) == stream.index;
                 return ListTile(
-                  title: Text(stream.displayTitle ?? stream.language ?? '轨道 ${stream.index}'),
-                  subtitle: stream.codec != null ? Text('编码: ${stream.codec}') : null,
+                  title: Text(stream.readableLabel(siblings: streams)),                  subtitle: stream.codec != null ? Text('编码: ${stream.codec}') : null,
                   trailing: isSelected
                       ? const Icon(Icons.check, color: Color(0xFF5B8DEF))
                       : null,

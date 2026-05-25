@@ -251,10 +251,12 @@ class MpvPlayerAdapter implements PlayerAdapter {
 
   String? _pendingSubtitleLang;
   String? _pendingSubtitleCodec;
+  String? _pendingSubtitleTitle;
 
-  void setPendingSubtitle(String codec) {
+  void setPendingSubtitle(String codec, {String? title}) {
     _pendingSubtitleLang = null;
     _pendingSubtitleCodec = codec;
+    _pendingSubtitleTitle = title;
   }
 
   @override
@@ -267,7 +269,6 @@ class MpvPlayerAdapter implements PlayerAdapter {
         _logger.w('MpvAdapter', '轨道列表为空，先用SubtitleTrack.auto()兜底');
         await _player!.setSubtitleTrack(SubtitleTrack.auto());
         _pendingSubtitleLang = trackId;
-        _pendingSubtitleCodec = null;
         return;
       }
       var target = realTracks.where((t) => t.id == trackId).firstOrNull;
@@ -325,9 +326,11 @@ class MpvPlayerAdapter implements PlayerAdapter {
     if (realTracks.isEmpty) return;
     final targetId = _pendingSubtitleLang;
     final targetCodec = _pendingSubtitleCodec;
+    final targetTitle = _pendingSubtitleTitle;
     _pendingSubtitleLang = null;
     _pendingSubtitleCodec = null;
-    _logger.i('MpvAdapter', '延迟选择字幕轨道: id=$targetId, codec=$targetCodec, 可用=${realTracks.length}个');
+    _pendingSubtitleTitle = null;
+    _logger.i('MpvAdapter', '延迟选择字幕轨道: id=$targetId, codec=$targetCodec, title=$targetTitle, 可用=${realTracks.length}个');
 
     var target = realTracks.where((t) => t.id == targetId).firstOrNull;
     if (target == null) {
@@ -339,15 +342,38 @@ class MpvPlayerAdapter implements PlayerAdapter {
       }
     }
 
+    if (target == null && targetTitle != null && targetTitle.isNotEmpty) {
+      for (final t in realTracks) {
+        final tTitle = t.title?.toLowerCase() ?? '';
+        if (tTitle.isNotEmpty && _matchTitles(targetTitle, tTitle)) {
+          target = t;
+          break;
+        }
+      }
+    }
+
     if (target == null && targetCodec != null) {
       final isBitmap = targetCodec.contains('pgs') || targetCodec.contains('hdmv');
       final isAss = targetCodec.contains('ass') || targetCodec.contains('ssa');
+      final candidates = <SubtitleTrack>[];
       for (final t in realTracks) {
         final c = t.codec?.toLowerCase() ?? '';
         final tIsBitmap = c.contains('pgs') || c.contains('hdmv');
         final tIsAss = c.contains('ass') || c.contains('ssa');
-        if (isBitmap && tIsBitmap) { target = t; break; }
-        if (isAss && tIsAss) { target = t; break; }
+        if (isBitmap && tIsBitmap) candidates.add(t);
+        if (isAss && tIsAss) candidates.add(t);
+      }
+      if (candidates.length == 1) {
+        target = candidates.first;
+      } else if (candidates.length > 1 && targetTitle != null && targetTitle.isNotEmpty) {
+        for (final t in candidates) {
+          final tTitle = t.title?.toLowerCase() ?? '';
+          if (tTitle.isNotEmpty && _matchTitles(targetTitle, tTitle)) {
+            target = t;
+            break;
+          }
+        }
+        target ??= candidates.first;
       }
       target ??= realTracks.first;
     }
@@ -359,8 +385,24 @@ class MpvPlayerAdapter implements PlayerAdapter {
       _currentSubIsAss = _detectAssCodec(target);
       await _player!.setSubtitleTrack(target);
       await _applySubtitleRuntimeProperties();
-      _logger.i('MpvAdapter', '延迟字幕选择成功: id=${target.id}, codec=${target.codec}');
+      _logger.i('MpvAdapter', '延迟字幕选择成功: id=${target.id}, title=${target.title}, codec=${target.codec}');
     }
+  }
+
+  bool _matchTitles(String embyTitle, String playerTitle) {
+    final e = embyTitle.toLowerCase();
+    final p = playerTitle.toLowerCase();
+    if (e == p) return true;
+    if (p.contains(e) || e.contains(p)) return true;
+    final simpKeywords = ['简', 'chs', '简体', '简日', 'gb', '简中'];
+    final tradKeywords = ['繁', 'cht', '繁体', '繁日', 'big5', '繁中'];
+    final eIsSimp = simpKeywords.any((k) => e.contains(k));
+    final eIsTrad = tradKeywords.any((k) => e.contains(k));
+    final pIsSimp = simpKeywords.any((k) => p.contains(k));
+    final pIsTrad = tradKeywords.any((k) => p.contains(k));
+    if (eIsSimp && pIsSimp) return true;
+    if (eIsTrad && pIsTrad) return true;
+    return false;
   }
 
   @override
@@ -458,7 +500,7 @@ class MpvPlayerAdapter implements PlayerAdapter {
       await np.setProperty('sub-delay', _subtitleDelay.toStringAsFixed(3));
 
       if (_hasBitmapSubtitle) {
-        await np.setProperty('sub-ass', 'yes');
+        await np.setProperty('sub-ass', 'no');
         await np.setProperty('sub-ass-override', 'no');
         await np.setProperty('sub-back-color', '#00000000');
       } else if (_currentSubIsAss) {
