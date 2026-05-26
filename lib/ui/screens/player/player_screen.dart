@@ -210,11 +210,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     ref.read(subtitleTrackProvider.notifier).state = targetIndex;
 
     if (!isExternal) {
-      final useLibass = _playerService.coreType == PlayerCoreType.exoPlayer &&
-          ref.read(exoLibassProvider) &&
-          isAss && !isGraphical;
+      final isExoAss = isAss && !isGraphical && _playerService.coreType == PlayerCoreType.exoPlayer;
 
-      if (useLibass) {
+      if (isExoAss) {
         final adapter = _playerService.adapter;
         if (adapter is ExoPlayerAdapter && adapter.libassReady) {
           logger.i('Player', '内封ASS字幕，通过libass渲染（保留特效）');
@@ -249,45 +247,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
             await _selectInternalSubtitleEXO(target, preferredLang, logger);
           }
         } else {
-          logger.i('Player', '内封字幕，通过播放器轨道选择（libass不可用）');
+          logger.i('Player', '内封ASS字幕，libass不可用，通过原生轨道选择（特效可能丢失）');
           await _selectInternalSubtitleEXO(target, preferredLang, logger);
         }
-      } else if (isAss && _playerService.coreType == PlayerCoreType.exoPlayer) {
-        logger.i('Player', '内封ASS字幕（未启用libass），下载后通过libass渲染保留特效');
-        try {
-          final adapter = _playerService.adapter;
-          if (adapter is ExoPlayerAdapter && adapter.libassReady) {
-            await _playerService.deselectSubtitleTrack();
-            final api = ref.read(apiClientProvider);
-            final server = ref.read(currentServerProvider);
-            final embyCodec = _embySubtitleCodec(codec);
-            final subUrl = api.playback.getSubtitleStreamUrl(
-              item.id, mediaSource.id, targetIndex, embyCodec,
-            );
-            final tempDir = await getTemporaryDirectory();
-            final subFile = File('${tempDir.path}/subtitle_${item.id}_${targetIndex}.ass');
-            if (!subFile.existsSync() || await subFile.length() == 0) {
-              final dio = Dio(BaseOptions(
-                connectTimeout: const Duration(seconds: 15),
-                receiveTimeout: const Duration(seconds: 60),
-              ));
-              if (server?.authToken != null) {
-                dio.options.headers['X-Emby-Token'] = server!.authToken;
-                dio.options.headers['X-MediaBrowser-Token'] = server.authToken;
-              }
-              await dio.download(subUrl, subFile.path);
-              logger.i('Player', 'ASS字幕下载完成 - ${subFile.lengthSync()} bytes');
-            }
-            if (subFile.existsSync() && await subFile.length() > 0) {
-              await _playerService.loadLibassSubtitle(subFile.path);
-              logger.i('Player', '内封ASS字幕通过libass加载成功（特效保留）');
-              return;
-            }
-          }
-        } catch (e, stackTrace) {
-          logger.eWithStack('Player', 'ASS字幕下载失败，回退原生轨道选择', e, stackTrace);
-        }
-        await _selectInternalSubtitleEXO(target, preferredLang, logger);
       } else {
         logger.i('Player', '内封字幕，通过播放器轨道选择');
         try {
@@ -489,13 +451,26 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
 
   Future<void> _selectInternalSubtitleEXO(MediaStream target, String? preferredLang, AppLogger logger) async {
     final tracks = _playerService.tracksInfo;
-    final subtitleTracks = tracks.where((t) =>
+    var subtitleTracks = tracks.where((t) =>
         t['type'] == 'text' || t['type'] == 'bitmap').toList();
     logger.i('Player', 'EXO 可用字幕轨道: ${subtitleTracks.length} 个');
 
     if (subtitleTracks.isEmpty) {
-      logger.w('Player', 'EXO 无可用字幕轨道 - 轨道可能尚未就绪');
-      return;
+      logger.w('Player', 'EXO 无可用字幕轨道 - 等待轨道就绪后重试');
+      for (int i = 0; i < 20; i++) {
+        await Future.delayed(const Duration(milliseconds: 300));
+        final retryTracks = _playerService.tracksInfo.where((t) =>
+            t['type'] == 'text' || t['type'] == 'bitmap').toList();
+        if (retryTracks.isNotEmpty) {
+          subtitleTracks = retryTracks;
+          logger.i('Player', 'EXO 轨道就绪 - 可用字幕轨道: ${subtitleTracks.length} 个');
+          break;
+        }
+      }
+      if (subtitleTracks.isEmpty) {
+        logger.w('Player', 'EXO 等待轨道超时，放弃字幕选择');
+        return;
+      }
     }
 
     final codec = target.codec?.toLowerCase() ?? '';
@@ -748,11 +723,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
 
       if (!isExternal) {
         final isAss = codec == 'ass' || codec == 'ssa';
-        final useLibass = _playerService.coreType == PlayerCoreType.exoPlayer &&
-            ref.read(exoLibassProvider) &&
+        final isExoAss = _playerService.coreType == PlayerCoreType.exoPlayer &&
             isAss && !isGraphical;
 
-        if (useLibass) {
+        if (isExoAss) {
           final adapter = _playerService.adapter;
           if (adapter is ExoPlayerAdapter && adapter.libassReady) {
             try {

@@ -556,7 +556,7 @@ class ExoPlayerPlugin(
 
         override fun onCues(cues: List<Cue>) {
             val textParts = mutableListOf<String>()
-            val bitmapParts = mutableListOf<String>()
+            val bitmapParts = mutableListOf<Map<String, Any>>()
             var hasBitmap = false
 
             for (cue in cues) {
@@ -588,7 +588,13 @@ class ExoPlayerPlugin(
                         val bytes = stream.toByteArray()
                         processed.recycle()
                         val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                        bitmapParts.add(base64)
+                        val bmpInfo = mutableMapOf<String, Any>("data" to base64)
+                        try {
+                            if (cue.position != Cue.DIMEN_UNSET) bmpInfo["left"] = cue.position
+                            if (cue.line != Cue.DIMEN_UNSET) bmpInfo["top"] = cue.line
+                            if (cue.size != Cue.DIMEN_UNSET) bmpInfo["width"] = cue.size
+                        } catch (_: Exception) {}
+                        bitmapParts.add(bmpInfo)
                     } catch (e: Exception) {
                         emitEvent("subtitleError", "bitmap processing failed: ${e.message}")
                     }
@@ -605,9 +611,19 @@ class ExoPlayerPlugin(
             if (hasBitmap) {
                 isBitmapSubtitle = true
                 if (bitmapParts.isNotEmpty()) {
+                    val images = bitmapParts.map { it["data"] as String }
+                    val positions = bitmapParts.mapNotNull { m ->
+                        val left = m["left"] as? Float
+                        val top = m["top"] as? Float
+                        val width = m["width"] as? Float
+                        if (left != null || top != null || width != null) mapOf(
+                            "left" to (left ?: 0f), "top" to (top ?: 0f), "width" to (width ?: 1f)
+                        ) else null
+                    }
                     emitEvent("subtitleBitmap", mapOf(
-                        "images" to bitmapParts,
-                        "text" to textParts.joinToString("\n")
+                        "images" to images,
+                        "text" to textParts.joinToString("\n"),
+                        "positions" to positions
                     ))
                 } else {
                     emitEvent("subtitle", textParts.joinToString("\n"))

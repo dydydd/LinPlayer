@@ -34,6 +34,10 @@ class ExoPlayerAdapter implements PlayerAdapter {
   bool _subtitleBackground = false;
   String _subtitleFont = '默认';
   bool _isBitmapSubtitle = false;
+  bool _hasBitmapPosition = false;
+  double _bitmapLeft = 0.0;
+  double _bitmapTop = 0.0;
+  double _bitmapWidth = 1.0;
 
   PlayerStateCallbacks? _callbacks;
   Timer? _positionTimer;
@@ -113,6 +117,8 @@ class ExoPlayerAdapter implements PlayerAdapter {
       _tracks = [];
       _subtitleText = '';
       _subtitleBitmapBase64 = '';
+
+      await checkLibassAvailability();
 
       final result = await _channel.invokeMethod<Map<dynamic, dynamic>>('createPlayer', {
         'videoUrl': videoUrl,
@@ -390,9 +396,20 @@ class ExoPlayerAdapter implements PlayerAdapter {
             _subtitleBitmapBase64 = images.first as String;
             bitmapNotifier.value = _subtitleBitmapBase64;
             _isBitmapSubtitle = true;
+            final positions = data['positions'] as List?;
+            if (positions != null && positions.isNotEmpty) {
+              final pos = positions.first as Map?;
+              _bitmapLeft = (pos?['left'] as num?)?.toDouble() ?? 0.0;
+              _bitmapTop = (pos?['top'] as num?)?.toDouble() ?? 0.0;
+              _bitmapWidth = (pos?['width'] as num?)?.toDouble() ?? 1.0;
+              _hasBitmapPosition = true;
+            } else {
+              _hasBitmapPosition = false;
+            }
           } else {
             _subtitleBitmapBase64 = '';
             bitmapNotifier.value = null;
+            _hasBitmapPosition = false;
           }
           _subtitleText = data['text'] as String? ?? '';
           subtitleNotifier.value = _subtitleText;
@@ -612,6 +629,21 @@ class ExoPlayerAdapter implements PlayerAdapter {
                   if (bitmapB64 != null && bitmapB64.isNotEmpty) {
                     try {
                       final bytes = base64Decode(bitmapB64);
+                      if (_hasBitmapPosition && _isBitmapSubtitle) {
+                        final screenW = MediaQuery.of(context).size.width;
+                        final screenH = MediaQuery.of(context).size.height;
+                        return Positioned(
+                          left: _bitmapLeft * screenW,
+                          top: _bitmapTop * screenH,
+                          width: _bitmapWidth * screenW,
+                          child: Image.memory(
+                            bytes,
+                            fit: BoxFit.fitWidth,
+                            gaplessPlayback: true,
+                            filterQuality: FilterQuality.medium,
+                          ),
+                        );
+                      }
                       return Positioned(
                         left: 0,
                         right: 0,

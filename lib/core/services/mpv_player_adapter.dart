@@ -436,8 +436,10 @@ class MpvPlayerAdapter implements PlayerAdapter {
       if (_isHttpUrl(path)) {
         _logger.i('MpvAdapter', 'HTTP URL字幕，直接传给mpv加载');
         final ext = _extractExtension(path);
-        _currentSubIsAss = ext == 'ass' || ext == 'ssa';
-        _hasBitmapSubtitle = ext == 'pgs' || ext == 'sup';
+        final isAss = ext == 'ass' || ext == 'ssa' || path.contains('format=ass') || path.contains('Codec=ass');
+        final isPgs = ext == 'pgs' || ext == 'sup' || path.contains('format=pgs') || path.contains('Codec=pgs');
+        _currentSubIsAss = isAss;
+        _hasBitmapSubtitle = isPgs;
         _logger.i('MpvAdapter', 'HTTP字幕类型: ext=$ext, isAss=$_currentSubIsAss, isBitmap=$_hasBitmapSubtitle');
         await _player!.setSubtitleTrack(SubtitleTrack.uri(path));
         await _applySubtitleRuntimeProperties();
@@ -504,14 +506,10 @@ class MpvPlayerAdapter implements PlayerAdapter {
         await np.setProperty('sub-ass-override', 'no');
         await np.setProperty('sub-back-color', '#00000000');
         await np.setProperty('sub-scale', _subtitleScale.toStringAsFixed(2));
-        await np.setProperty('sub-pos', _subtitlePosition.toStringAsFixed(1));
+        await np.setProperty('sub-pos', '100');
       } else if (_currentSubIsAss) {
         await np.setProperty('sub-ass', 'yes');
-        if (_subtitleBackground || _subtitleScale != 1.0 || _subtitlePosition != 100.0) {
-          await np.setProperty('sub-ass-override', 'force');
-        } else {
-          await np.setProperty('sub-ass-override', 'no');
-        }
+        await np.setProperty('sub-ass-override', 'no');
         if (_subtitleBackground) {
           await np.setProperty('sub-back-color', '#000000C0');
         } else {
@@ -670,8 +668,11 @@ class MpvPlayerAdapter implements PlayerAdapter {
       await np.setProperty('sub-scale', _subtitleScale.toStringAsFixed(2));
     }
     await _configManager.updateConfigValue('sub-scale', _subtitleScale.toStringAsFixed(2));
-    if (_currentSubIsAss && !_hasBitmapSubtitle) {
-      await _applySubtitleRuntimeProperties();
+    if (!_currentSubIsAss || _hasBitmapSubtitle) {
+      final np = _nativePlayer;
+      if (np != null) {
+        await np.setProperty('sub-scale', _subtitleScale.toStringAsFixed(2));
+      }
     }
   }
 
@@ -679,14 +680,13 @@ class MpvPlayerAdapter implements PlayerAdapter {
   Future<void> setSubtitlePosition(double position) async {
     _subtitlePosition = 100 - position * 100;
     _logger.i('MpvAdapter', '设置字幕位置: pos=$_subtitlePosition');
-    final np = _nativePlayer;
-    if (np != null) {
-      await np.setProperty('sub-pos', _subtitlePosition.toStringAsFixed(1));
+    if (!_currentSubIsAss || _hasBitmapSubtitle) {
+      final np = _nativePlayer;
+      if (np != null) {
+        await np.setProperty('sub-pos', _hasBitmapSubtitle ? '100' : _subtitlePosition.toStringAsFixed(1));
+      }
     }
     await _configManager.updateConfigValue('sub-pos', _subtitlePosition.toStringAsFixed(1));
-    if (_currentSubIsAss && !_hasBitmapSubtitle) {
-      await _applySubtitleRuntimeProperties();
-    }
   }
 
   @override

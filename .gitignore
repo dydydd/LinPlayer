@@ -21,6 +21,33 @@ migrate_working_dir/
 # VS Code
 .vscode/
 
+# Cursor AI Editor
+.cursor/
+
+# CodeGraph (AI coding assistant)
+.codegraph/
+
+# Zed Editor
+.zed/
+
+# Fleet IDE
+.fleet/
+
+# Run configurations
+.run/
+
+# Environment & Secrets
+*.env
+*.env.local
+*.env.*.local
+.envrc
+
+# Android Signing
+*.keystore
+*.jks
+key.properties
+android/key.properties
+
 # Flutter/Dart/Pub related
 **/doc/api/
 **/ios/Flutter/.last_build_id
