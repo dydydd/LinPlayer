@@ -8,7 +8,7 @@ on:
       - '.github/workflows/build-ffmpeg.yml'
   workflow_dispatch:
   schedule:
-    # 姣忓懆涓€鍑屾櫒缂栬瘧涓€娆★紙淇濇寔渚濊禆鏈€鏂帮級
+    # 每周一凌晨编译一次（保持依赖最新）
     - cron: '0 0 * * 1'
 
 env:
@@ -31,26 +31,26 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
       
-      # 涓嬭浇 Android NDK
+      # 下载 Android NDK
       - name: Download Android NDK
         run: |
           wget -q https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip -O /tmp/ndk.zip
           unzip -q /tmp/ndk.zip -d /opt
           echo "NDK_PATH=/opt/android-ndk-${NDK_VERSION}" >> $GITHUB_ENV
       
-      # 涓嬭浇 ExoPlayer media3 婧愮爜
+      # 下载 ExoPlayer media3 源码
       - name: Download ExoPlayer source
         run: |
           git clone --depth 1 --branch ${{ env.EXOPLAYER_VERSION }} \
             https://github.com/androidx/media.git /tmp/media3
       
-      # 涓嬭浇 FFmpeg 婧愮爜
+      # 下载 FFmpeg 源码
       - name: Download FFmpeg source
         run: |
           git clone --depth 1 --branch ${{ env.FFMPEG_VERSION }} \
             https://git.ffmpeg.org/ffmpeg.git /tmp/media3/libraries/decoder_ffmpeg/src/main/jni/ffmpeg
       
-      # 缂栬瘧 FFmpeg锛堟墍鏈夋灦鏋勫湪涓€涓?job 涓畬鎴愶級
+      # 编译 FFmpeg（所有架构在一个 job 中完成）
       - name: Build FFmpeg for all architectures
         run: |
           FFMPEG_MODULE_PATH="/tmp/media3/libraries/decoder_ffmpeg/src/main"
@@ -88,7 +88,7 @@ jobs:
           
           cd "${FFMPEG_MODULE_PATH}/jni/ffmpeg"
           
-          # 缂栬瘧 arm64-v8a
+          # 编译 arm64-v8a
           echo "Building for arm64-v8a..."
           ./configure \
               --libdir=android-libs/arm64-v8a \
@@ -102,7 +102,8 @@ jobs:
               ${COMMON_OPTIONS}
           make -j${JOBS}
           
-          # 鎵嬪姩澶嶅埗闈欐€佸簱鍒?CMake 鏈熸湜鐨勮矾寰?          mkdir -p android-libs/arm64-v8a
+          # 手动复制静态库到 CMake 期望的路径
+          mkdir -p android-libs/arm64-v8a
           cp libavutil/libavutil.a android-libs/arm64-v8a/
           cp libswresample/libswresample.a android-libs/arm64-v8a/
           cp libavcodec/libavcodec.a android-libs/arm64-v8a/
@@ -112,7 +113,7 @@ jobs:
           
           make clean
           
-          # 缂栬瘧 armeabi-v7a
+          # 编译 armeabi-v7a
           echo "Building for armeabi-v7a..."
           ./configure \
               --libdir=android-libs/armeabi-v7a \
@@ -128,7 +129,8 @@ jobs:
               ${COMMON_OPTIONS}
           make -j${JOBS}
           
-          # 鎵嬪姩澶嶅埗闈欐€佸簱鍒?CMake 鏈熸湜鐨勮矾寰?          mkdir -p android-libs/armeabi-v7a
+          # 手动复制静态库到 CMake 期望的路径
+          mkdir -p android-libs/armeabi-v7a
           cp libavutil/libavutil.a android-libs/armeabi-v7a/
           cp libswresample/libswresample.a android-libs/armeabi-v7a/
           cp libavcodec/libavcodec.a android-libs/armeabi-v7a/
@@ -140,14 +142,15 @@ jobs:
           
           make clean
       
-      # 璋冭瘯锛氭鏌?NDK 涓彲鐢ㄧ殑缂栬瘧鍣?      - name: Debug NDK compilers
+      # 调试：检查 NDK 中可用的编译器
+      - name: Debug NDK compilers
         run: |
           echo "Available compilers in NDK:"
           ls -la /opt/android-ndk-r25c/toolchains/llvm/prebuilt/linux-x86_64/bin/*clang* | grep -E "(i686|x86)" || true
           echo "---"
           ls -la /opt/android-ndk-r25c/toolchains/llvm/prebuilt/linux-x86_64/bin/ | head -30
       
-      # 妫€鏌ュ苟鎵撳嵃 ExoPlayer build.gradle 鍐呭
+      # 检查并打印 ExoPlayer build.gradle 内容
       - name: Check ExoPlayer build.gradle
         run: |
           BUILD_GRADLE="/tmp/media3/libraries/decoder_ffmpeg/build.gradle"
@@ -155,7 +158,7 @@ jobs:
           cat "$BUILD_GRADLE"
           echo "=== End ==="
       
-      # 浣跨敤 Python 鑴氭湰姝ｇ‘淇敼 build.gradle 浠ラ檺鍒?ABI
+      # 使用 Python 脚本正确修改 build.gradle 以限制 ABI
       - name: Patch ExoPlayer build.gradle to limit ABIs
         run: |
           cat > /tmp/patch_gradle.py << 'EOF'
@@ -196,13 +199,13 @@ jobs:
           
           python3 /tmp/patch_gradle.py
       
-      # 娓呯悊 CMake 缂撳瓨锛堥槻姝箣鍓嶅け璐ョ殑閰嶇疆琚鐢級
+      # 清理 CMake 缓存（防止之前失败的配置被复用）
       - name: Clean CMake cache before build
         run: |
           rm -rf /tmp/media3/libraries/decoder_ffmpeg/.cxx
           echo "Cleaned CMake cache"
       
-      # 缂栬瘧 AAR
+      # 编译 AAR
       - name: Build AAR
         run: |
           cd /tmp/media3
@@ -215,7 +218,8 @@ jobs:
             exit 1
           }
       
-      # 鏌ユ壘 AAR 鏂囦欢锛堝吋瀹?build 鍜?buildout 涓ょ璺緞锛?      - name: Locate AAR file
+      # 查找 AAR 文件（兼容 build 和 buildout 两种路径）
+      - name: Locate AAR file
         run: |
           if [ -f "/tmp/media3/libraries/decoder_ffmpeg/build/outputs/aar/lib-decoder-ffmpeg-release.aar" ]; then
             AAR_PATH="/tmp/media3/libraries/decoder_ffmpeg/build/outputs/aar/lib-decoder-ffmpeg-release.aar"
@@ -231,7 +235,7 @@ jobs:
           echo "AAR_PATH=$AAR_PATH" >> $GITHUB_ENV
           ls -la "$AAR_PATH"
       
-      # 涓婁紶 AAR Artifact
+      # 上传 AAR Artifact
       - name: Upload AAR
         uses: actions/upload-artifact@v4
         with:
@@ -239,7 +243,7 @@ jobs:
           path: ${{ env.AAR_PATH }}
           retention-days: 90
       
-      # 鍙€夛細鍒涘缓 Release 骞朵笂浼?AAR
+      # 可选：创建 Release 并上传 AAR
       - name: Create Release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v1
@@ -247,16 +251,18 @@ jobs:
           tag_name: ffmpeg-extension-${{ github.run_number }}
           name: FFmpeg Extension Build ${{ github.run_number }}
           body: |
-            鑷姩缂栬瘧鐨?ExoPlayer FFmpeg 鎵╁睍
+            自动编译的 ExoPlayer FFmpeg 扩展
             
-            - ExoPlayer 鐗堟湰: ${{ env.EXOPLAYER_VERSION }}
-            - FFmpeg 鐗堟湰: ${{ env.FFMPEG_VERSION }}
-            - 鏀寔鐨勬灦鏋? arm64-v8a, armeabi-v7a
-            - 鏀寔鐨勫瓧骞曟牸寮? PGS, SUP, DVB, DVD, ASS, SSA, SRT, WEBVTT
+            - ExoPlayer 版本: ${{ env.EXOPLAYER_VERSION }}
+            - FFmpeg 版本: ${{ env.FFMPEG_VERSION }}
+            - 支持的架构: arm64-v8a, armeabi-v7a
+            - 支持的字幕格式: PGS, SUP, DVB, DVD, ASS, SSA, SRT, WEBVTT
             
-            浣跨敤鏂瑰紡锛?            1. 涓嬭浇 `ffmpeg-extension-all` artifact
-            2. 瑙ｅ帇鍚庡皢 `.aar` 鏂囦欢鏀惧叆 `android/exoplayer-ffmpeg/libs/`
-            3. 鍦?`android/app/build.gradle.kts` 涓坊鍔犱緷璧?          files: ${{ env.AAR_PATH }}
+            使用方式：
+            1. 下载 `ffmpeg-extension-all` artifact
+            2. 解压后将 `.aar` 文件放入 `android/exoplayer-ffmpeg/libs/`
+            3. 在 `android/app/build.gradle.kts` 中添加依赖
+          files: ${{ env.AAR_PATH }}
           draft: false
           prerelease: true
         env:
