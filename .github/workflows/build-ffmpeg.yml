@@ -1,4 +1,4 @@
-﻿name: Build FFmpeg Extension
+name: Build FFmpeg Extension
 
 on:
   push:
