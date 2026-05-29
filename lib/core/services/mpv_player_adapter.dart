@@ -158,8 +158,11 @@ class MpvPlayerAdapter implements PlayerAdapter {
         } else {
           await np.setProperty('sub-fonts-dir', systemFontsDir);
         }
-        await np.setProperty('secondary-sub-visibility', 'yes');
-        // 确保PGS/SUP位图字幕被正确渲染到视频帧中
+        // 默认关闭次字幕可见性，只有用户明确选择次字幕时才开启
+        // 避免同时显示两个字幕（主字幕+次字幕）
+        await np.setProperty('secondary-sub-visibility', 'no');
+        // 使用 blend-subtitles=video 让 MPV 将字幕混合到视频帧中
+        // 这样字幕会正确显示在视频上，而不是作为单独层
         await np.setProperty('blend-subtitles', 'video');
         await np.setProperty('sub-visibility', 'yes');
       }
@@ -554,6 +557,9 @@ class MpvPlayerAdapter implements PlayerAdapter {
       if (_secondarySid != null) {
         await np.setProperty('secondary-sid', _secondarySid!);
         await np.setProperty('secondary-sub-visibility', 'yes');
+      } else {
+        // 确保没有次字幕时关闭次字幕显示，避免双字幕问题
+        await np.setProperty('secondary-sub-visibility', 'no');
       }
     } catch (e) {
       _logger.e('MpvAdapter', '设置运行时字幕属性失败: $e');
@@ -629,6 +635,7 @@ class MpvPlayerAdapter implements PlayerAdapter {
       final np = _nativePlayer;
       if (np != null) {
         await np.setProperty('secondary-sid', 'no');
+        await np.setProperty('secondary-sub-visibility', 'no');
       }
     } catch (e, stackTrace) {
       _logger.eWithStack('MpvAdapter', '取消次字幕失败', e, stackTrace);
@@ -830,5 +837,8 @@ class MpvPlayerAdapter implements PlayerAdapter {
     _tracks = [];
     _subtitleTracks = [];
     _audioTracks = [];
+    _secondarySid = null;
+    _hasBitmapSubtitle = false;
+    _currentSubIsAss = false;
   }
 }

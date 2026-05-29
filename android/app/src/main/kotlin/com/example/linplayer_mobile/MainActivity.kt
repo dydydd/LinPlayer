@@ -123,8 +123,13 @@ object LibassBridge {
         if (!pathsSet) {
             try {
                 val nativeDir = context.applicationInfo.nativeLibraryDir
-                val libassPath = "$nativeDir/libass.so"
-                val libmpvPath = "$nativeDir/libmpv.so"
+                val libassFile = java.io.File(nativeDir, "libass.so")
+                val libmpvFile = java.io.File(nativeDir, "libmpv.so")
+                
+                // 检查库文件是否真实存在，不存在则提供空路径让JNI回退处理
+                val libassPath = if (libassFile.exists()) libassFile.absolutePath else ""
+                val libmpvPath = if (libmpvFile.exists()) libmpvFile.absolutePath else ""
+                
                 nativeSetLibraryPaths(libassPath, libmpvPath)
                 pathsSet = true
                 android.util.Log.i("LibassBridge", "Set library paths: ass=$libassPath, mpv=$libmpvPath")

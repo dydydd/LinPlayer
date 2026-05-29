@@ -158,7 +158,8 @@ class MpvConfigManager {
     buffer.writeln('sub-ass=yes');
     buffer.writeln('sub-ass-override=no');
     buffer.writeln('slang=chi,zh,eng,en');
-    // PGS/SUP 位图字幕：确保字幕被混合到视频帧中（解决media_kit纹理捕获问题）
+    // 使用 blend-subtitles=video 让 MPV 将字幕混合到视频帧中
+    // 这样字幕会正确显示在视频上，而不是作为单独层
     buffer.writeln('blend-subtitles=video');
 
     final configPath = configFilePath;

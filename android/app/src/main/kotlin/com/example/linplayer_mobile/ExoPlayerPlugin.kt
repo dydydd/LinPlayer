@@ -243,7 +243,10 @@ class ExoPlayerPlugin(
                 trackSelector.parameters = paramsBuilder.build()
 
                 val renderersFactory = DefaultRenderersFactory(context)
-                    .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+                    .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+                    .setEnableDecoderFallback(true)
+
+                android.util.Log.i("ExoPlayerPlugin", "Creating ExoPlayer with FFmpeg extension support");
 
                 val exoPlayer = ExoPlayer.Builder(context)
                     .setTrackSelector(trackSelector)

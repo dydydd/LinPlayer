@@ -63,12 +63,27 @@ dependencies {
 
     // FFmpeg 扩展（可选，用于 PGS/SUP 图形字幕支持）
     // GitHub Actions 会自动编译并放置到此路径
-    val ffmpegAar = file("../exoplayer-ffmpeg/libs/ffmpeg-extension.aar")
-    if (ffmpegAar.exists()) {
+    // 支持多种文件名格式（不同版本的 ExoPlayer 生成的文件名不同）
+    val possibleAarNames = listOf(
+        "ffmpeg-extension.aar",
+        "lib-decoder-ffmpeg-release.aar",
+        "decoder_ffmpeg-release.aar"
+    )
+    var ffmpegAar: java.io.File? = null
+    for (aarName in possibleAarNames) {
+        val candidate = file("../exoplayer-ffmpeg/libs/$aarName")
+        if (candidate.exists()) {
+            ffmpegAar = candidate
+            break
+        }
+    }
+    if (ffmpegAar != null) {
         implementation(files(ffmpegAar))
         println("✅ FFmpeg extension found: ${ffmpegAar.absolutePath}")
     } else {
-        println("⚠️ FFmpeg extension not found. PGS/SUP subtitle support disabled.")
+        println("⚠️ FFmpeg extension not found at: ${file("../exoplayer-ffmpeg/libs/").absolutePath}")
+        println("   Expected one of: ${possibleAarNames.joinToString()}")
+        println("   PGS/SUP subtitle support will be limited.")
         println("   Build with GitHub Actions to auto-compile, or see docs/FFmpegExtensionSetup.md")
     }
 }
