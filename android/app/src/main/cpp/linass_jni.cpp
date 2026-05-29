@@ -37,7 +37,6 @@ static struct {
     void (*ass_library_done)(ASS_Library *priv);
     void (*ass_set_extract_fonts)(ASS_Library *priv, int extract);
     void (*ass_set_style_overrides)(ASS_Library *priv, char **list);
-    void (*ass_set_fonts_dir)(ASS_Library *priv, const char *dir);
 
     ASS_Renderer* (*ass_renderer_init)(ASS_Library *);
     void (*ass_renderer_done)(ASS_Renderer *priv);
@@ -83,7 +82,6 @@ static int load_libass_symbols(void *handle) {
     LOAD_SYM(ass_library_done)
     LOAD_SYM(ass_set_extract_fonts)
     LOAD_SYM(ass_set_style_overrides)
-    LOAD_SYM(ass_set_fonts_dir)
     LOAD_SYM(ass_renderer_init)
     LOAD_SYM(ass_renderer_done)
     LOAD_SYM(ass_set_frame_size)
@@ -231,10 +229,6 @@ Java_com_example_linplayer_1mobile_LibassBridge_nativeInit(JNIEnv *env, jobject 
 
     g_ass.ass_set_extract_fonts(g_ctx.library, 1);
     g_ass.ass_set_style_overrides(g_ctx.library, NULL);
-    
-    // 设置 Android 系统字体目录，确保中文/日文/韩文字体能被找到
-    g_ass.ass_set_fonts_dir(g_ctx.library, "/system/fonts");
-    LOGI("Set fonts dir: /system/fonts");
 
     g_ctx.renderer = g_ass.ass_renderer_init(g_ctx.library);
     if (!g_ctx.renderer) {
