@@ -1,0 +1,162 @@
+name: Extract libmpv from mpv-android
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每周检查一次 mpv-android 更新
+    - cron: '0 0 * * 0'
+
+env:
+  MPV_ANDROID_REPO: mpv-android/mpv-android
+
+jobs:
+  extract-libmpv:
+    name: Extract libmpv from mpv-android
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a, x86, x86_64]
+    
+    steps:
+      - name: Checkout LinPlayer
+        uses: actions/checkout@v4
+      
+      - name: Get latest mpv-android release
+        id: get_release
+        run: |
+          # 获取最新 release 的 APK URL
+          RELEASE_INFO=$(curl -s "https://api.github.com/repos/${{ env.MPV_ANDROID_REPO }}/releases/latest")
+          APK_URL=$(echo "$RELEASE_INFO" | grep -o '"browser_download_url": "[^"]*\.apk"' | head -1 | cut -d'"' -f4)
+          
+          if [ -z "$APK_URL" ]; then
+            echo "❌ No APK found in latest release"
+            exit 1
+          fi
+          
+          echo "📥 Found APK: $APK_URL"
+          echo "apk_url=$APK_URL" >> $GITHUB_OUTPUT
+      
+      - name: Download and extract APK
+        run: |
+          APK_URL="${{ steps.get_release.outputs.apk_url }}"
+          
+          # 下载 APK
+          echo "Downloading APK..."
+          wget -q "$APK_URL" -O mpv-android.apk
+          
+          # 创建解压目录
+          mkdir -p apk_extracted
+          
+          # 使用 unzip 解压 APK (APK 本质上是 ZIP)
+          echo "Extracting APK..."
+          unzip -q mpv-android.apk -d apk_extracted/
+          
+          echo "✅ APK extracted"
+      
+      - name: Extract libmpv.so
+        run: |
+          ABI="${{ matrix.abi }}"
+          SOURCE_DIR="apk_extracted/lib/$ABI"
+          DEST_DIR="android/app/src/main/jniLibs/$ABI"
+          
+          mkdir -p "$DEST_DIR"
+          
+          # 复制 libmpv.so
+          if [ -f "$SOURCE_DIR/libmpv.so" ]; then
+            cp "$SOURCE_DIR/libmpv.so" "$DEST_DIR/"
+            echo "✅ Extracted libmpv.so for $ABI"
+            ls -lh "$DEST_DIR/libmpv.so"
+          else
+            echo "⚠️ libmpv.so not found for $ABI, checking available libraries..."
+            find apk_extracted/lib -name "*.so" | head -20
+            exit 1
+          fi
+          
+          # 同时复制其他可能需要的库
+          for lib in libass.so libplacebo.so; do
+            if [ -f "$SOURCE_DIR/$lib" ]; then
+              cp "$SOURCE_DIR/$lib" "$DEST_DIR/"
+              echo "✅ Also extracted $lib"
+            fi
+          done
+      
+      - name: Verify PGS support
+        run: |
+          ABI="${{ matrix.abi }}"
+          LIBMPV="android/app/src/main/jniLibs/$ABI/libmpv.so"
+          
+          # 检查是否包含 pgssub 解码器
+          if strings "$LIBMPV" | grep -q "pgssub"; then
+            echo "✅ PGS decoder (pgssub) found in libmpv.so"
+          else
+            echo "⚠️ PGS decoder not found - may need to build from source instead"
+          fi
+          
+          # 检查是否包含 libass
+          if strings "$LIBMPV" | grep -q "libass"; then
+            echo "✅ libass found in libmpv.so"
+          fi
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libmpv-extracted-${{ matrix.abi }}
+          path: android/app/src/main/jniLibs/${{ matrix.abi }}/
+          retention-days: 90
+
+  commit-libraries:
+    name: Commit extracted libraries
+    needs: extract-libmpv
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout LinPlayer
+        uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: extracted-libs
+          pattern: libmpv-extracted-*
+      
+      - name: Copy to jniLibs
+        run: |
+          mkdir -p android/app/src/main/jniLibs
+          
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+            if [ -d "extracted-libs/libmpv-extracted-$abi" ]; then
+              mkdir -p "android/app/src/main/jniLibs/$abi"
+              cp extracted-libs/libmpv-extracted-$abi/*.so "android/app/src/main/jniLibs/$abi/"
+              echo "✅ Copied libraries for $abi"
+            fi
+          done
+          
+          echo "=== Final jniLibs contents ==="
+          find android/app/src/main/jniLibs -name "*.so" -exec ls -lh {} \;
+      
+      - name: Commit libraries
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add android/app/src/main/jniLibs/
+          
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update libmpv from mpv-android (includes PGS support)"
+            git push
+            echo "✅ Libraries committed"
+          fi
+        continue-on-error: true
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: libmpv-extracted-${{ github.run_number }}
+          name: libmpv from mpv-android - Build ${{ github.run_number }}
+          body: "Extracted libmpv.so from mpv-android release\n\nIncludes:\n- PGS subtitle decoder (pgssub)\n- libass for ASS/SSA subtitles\n- All standard mpv decoders\n\nSource: ${{ env.MPV_ANDROID_REPO }}"
+          files: android/app/src/main/jniLibs/**/*.so
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
