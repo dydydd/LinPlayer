@@ -59,7 +59,7 @@ jobs:
           unzip -q "mpv-android-$ABI.apk" -d "apk_extracted_$ABI/"
           echo "✅ APK extracted"
       
-      - name: Extract libmpv.so
+      - name: Extract libraries
         run: |
           ABI="${{ matrix.abi }}"
           SOURCE_DIR="apk_extracted_$ABI/lib/$ABI"
@@ -67,6 +67,13 @@ jobs:
           
           mkdir -p "$DEST_DIR"
           
+          # 优先提取独立的 libass.so（不会与 media_kit 的 libmpv.so 冲突）
+          if [ -f "$SOURCE_DIR/libass.so" ]; then
+            cp "$SOURCE_DIR/libass.so" "$DEST_DIR/"
+            echo "✅ Extracted libass.so for $ABI"
+          fi
+          
+          # 同时提取 libmpv.so（用于 PGS 解码器）
           if [ -f "$SOURCE_DIR/libmpv.so" ]; then
             cp "$SOURCE_DIR/libmpv.so" "$DEST_DIR/"
             echo "✅ Extracted libmpv.so for $ABI"
@@ -75,17 +82,21 @@ jobs:
             find "apk_extracted_$ABI" -name "*.so" | head -20
             exit 1
           fi
+          
+          # 列出提取的所有库
+          echo "=== Extracted libraries for $ABI ==="
+          ls -lh "$DEST_DIR/"
       
       - name: Verify library integrity
         run: |
           ABI="${{ matrix.abi }}"
           LIBMPV="android/app/src/main/jniLibs/$ABI/libmpv.so"
           
-          # 检查文件大小（完整的 libmpv.so 应该 > 10MB）
+          # 检查文件大小（release 版本的 stripped libmpv.so 通常为 6-8MB）
           FILE_SIZE=$(stat -c%s "$LIBMPV")
-          echo "libmpv.so size: $FILE_SIZE bytes"
+          echo "libmpv.so size: $FILE_SIZE bytes ($(echo "scale=2; $FILE_SIZE/1024/1024" | bc) MB)"
           
-          if [ "$FILE_SIZE" -lt 10000000 ]; then
+          if [ "$FILE_SIZE" -lt 5000000 ]; then
             echo "❌ libmpv.so too small ($FILE_SIZE bytes), may be incomplete"
             exit 1
           fi
@@ -137,8 +148,16 @@ jobs:
           for abi in arm64-v8a armeabi-v7a x86 x86_64; do
             if [ -d "extracted-libs/libmpv-extracted-$abi" ]; then
               mkdir -p "android/app/src/main/jniLibs/$abi"
-              cp extracted-libs/libmpv-extracted-$abi/*.so "android/app/src/main/jniLibs/$abi/"
-              echo "✅ Copied libraries for $abi"
+              # 只复制 libass.so 到 jniLibs（用于 ExoPlayer 的 ASS 字幕渲染）
+              # 不复制 libmpv.so，避免与 media_kit 自动下载的版本冲突导致崩溃
+              if [ -f "extracted-libs/libmpv-extracted-$abi/libass.so" ]; then
+                cp extracted-libs/libmpv-extracted-$abi/libass.so "android/app/src/main/jniLibs/$abi/"
+                echo "✅ Copied libass.so for $abi"
+              fi
+              # libmpv.so 如有需要可以手动放置，但默认不自动提交以避免冲突
+              if [ -f "extracted-libs/libmpv-extracted-$abi/libmpv.so" ]; then
+                echo "ℹ️ libmpv.so available for $abi (not auto-committed to avoid media_kit conflicts)"
+              fi
             fi
           done
           
@@ -149,14 +168,16 @@ jobs:
         run: |
           echo "=== Verifying all libraries ==="
           for abi in arm64-v8a armeabi-v7a x86 x86_64; do
-            LIB="android/app/src/main/jniLibs/$abi/libmpv.so"
+            LIB="android/app/src/main/jniLibs/$abi/libass.so"
             if [ -f "$LIB" ]; then
               SIZE=$(stat -c%s "$LIB")
-              echo "$ABI: $SIZE bytes"
-              if [ "$SIZE" -lt 10000000 ]; then
-                echo "❌ Library too small!"
+              echo "$abi: libass.so = $SIZE bytes"
+              if [ "$SIZE" -lt 100000 ]; then
+                echo "❌ libass.so too small!"
                 exit 1
               fi
+            else
+              echo "⚠️ libass.so not found for $abi"
             fi
           done
           echo "✅ All libraries verified"

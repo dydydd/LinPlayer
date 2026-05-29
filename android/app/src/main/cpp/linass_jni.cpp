@@ -127,7 +127,18 @@ static void init_libass() {
     LOGI("Initializing libass...");
     LOGI("Paths: ass='%s', mpv='%s'", g_libass_path, g_libmpv_path);
 
-    // 优先使用Java层传入的完整路径（如果存在）
+    // 策略1：使用 RTLD_DEFAULT 搜索所有已加载的库（包括 media_kit 加载的 libmpv.so）
+    // media_kit 用 RTLD_LOCAL 加载 libmpv.so，符号默认不可见，但 RTLD_DEFAULT 可以搜索到
+    LOGI("Trying RTLD_DEFAULT to find libass symbols in already-loaded libraries...");
+    if (load_libass_symbols(RTLD_DEFAULT)) {
+        g_ass.available = 1;
+        g_ass.handle = RTLD_DEFAULT;
+        LOGI("libass symbols found via RTLD_DEFAULT (likely from media_kit's libmpv.so)");
+        return;
+    }
+    LOGI("No libass symbols found via RTLD_DEFAULT");
+
+    // 策略2：优先使用Java层传入的完整路径（如果存在）
     if (g_libass_path[0] != '\0') {
         g_ass.handle = dlopen(g_libass_path, RTLD_NOW | RTLD_GLOBAL);
         if (g_ass.handle) {
@@ -146,7 +157,7 @@ static void init_libass() {
         }
     }
 
-    // 回退1：尝试dlopen(NULL)获取全局符号（可能其他库已加载libass符号）
+    // 策略3：尝试dlopen(NULL)获取全局符号
     if (!g_ass.handle) {
         void* global_handle = dlopen(NULL, RTLD_NOW | RTLD_GLOBAL);
         if (global_handle) {
@@ -161,7 +172,7 @@ static void init_libass() {
         }
     }
 
-    // 回退2：尝试从系统库路径加载
+    // 策略4：尝试从系统库路径加载
     if (!g_ass.handle) {
         g_ass.handle = dlopen("libass.so", RTLD_NOW | RTLD_GLOBAL);
         if (g_ass.handle) {
@@ -171,7 +182,7 @@ static void init_libass() {
         }
     }
 
-    // 回退3：尝试加载 libmpv.so（可能包含libass符号）
+    // 策略5：尝试加载 libmpv.so
     if (!g_ass.handle) {
         g_ass.handle = dlopen("libmpv.so", RTLD_NOW | RTLD_GLOBAL);
         if (g_ass.handle) {
@@ -190,7 +201,9 @@ static void init_libass() {
         g_ass.available = 1;
         LOGI("libass symbols loaded successfully");
     } else {
-        dlclose(g_ass.handle);
+        if (g_ass.handle != RTLD_DEFAULT) {
+            dlclose(g_ass.handle);
+        }
         g_ass.handle = NULL;
         LOGE("Failed to load libass symbols from loaded library");
     }
