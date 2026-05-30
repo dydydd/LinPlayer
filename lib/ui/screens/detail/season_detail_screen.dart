@@ -298,8 +298,8 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
-    // 增加高度到 55% 屏幕宽度，接近 16:9 比例，显示更多封面内容
-    final headerHeight = screenWidth * 0.55;
+    // 增加高度到 65% 屏幕宽度，让封面更完整可见
+    final headerHeight = screenWidth * 0.65;
     final api = ref.read(apiClientProvider);
     final imageUrl = widget.item.backdropImageTag != null
         ? api.image.getBackdropImageUrl(widget.item.id, tag: widget.item.backdropImageTag, maxWidth: 800)

@@ -331,6 +331,7 @@ class MockImageApi implements ImageApi {
     int? maxWidth,
     int? maxHeight,
     double quality = 90,
+    String? format,
   }) {
     // 使用picsum作为占位图
     final seed = itemId.hashCode.abs();
@@ -338,29 +339,31 @@ class MockImageApi implements ImageApi {
   }
   
   @override
-  String getPrimaryImageUrl(String itemId, {String? tag, int? maxWidth}) {
-    return getImageUrl(itemId: itemId, imageTag: tag, maxWidth: maxWidth);
+  String getPrimaryImageUrl(String itemId, {String? tag, int? maxWidth, String? format}) {
+    return getImageUrl(itemId: itemId, imageTag: tag, maxWidth: maxWidth, format: format);
   }
 
   @override
-  String getThumbImageUrl(String itemId, {String? tag, int? maxWidth}) {
+  String getThumbImageUrl(String itemId, {String? tag, int? maxWidth, String? format}) {
     return getImageUrl(
       itemId: itemId,
       imageTag: tag,
       imageType: 'Thumb',
       maxWidth: maxWidth ?? 400,
       maxHeight: ((maxWidth ?? 400) * 9 / 16).round(),
+      format: format,
     );
   }
   
   @override
-  String getBackdropImageUrl(String itemId, {String? tag, int? maxWidth}) {
+  String getBackdropImageUrl(String itemId, {String? tag, int? maxWidth, String? format}) {
     return getImageUrl(
       itemId: itemId, 
       imageTag: tag, 
       imageType: 'Backdrop',
       maxWidth: maxWidth ?? 800,
       maxHeight: 450,
+      format: format,
     );
   }
 }

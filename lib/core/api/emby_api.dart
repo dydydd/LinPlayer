@@ -640,6 +640,7 @@ class EmbyImageApi implements ImageApi {
     int? maxWidth,
     int? maxHeight,
     double quality = 90,
+    String? format,
   }) {
     final base = _client._currentLine;
     final buf = StringBuffer('$base/Items/$itemId/Images/$imageType');
@@ -647,6 +648,7 @@ class EmbyImageApi implements ImageApi {
     if (maxWidth != null) params['maxWidth'] = maxWidth.toString();
     if (maxHeight != null) params['maxHeight'] = maxHeight.toString();
     params['quality'] = quality.round().toString();
+    if (format != null && format.isNotEmpty) params['format'] = format;
     if (_client._authToken != null) params['api_key'] = _client._authToken!;
     if (imageTag != null) params['tag'] = imageTag;
     if (params.isNotEmpty) {
@@ -657,23 +659,24 @@ class EmbyImageApi implements ImageApi {
   }
 
   @override
-  String getPrimaryImageUrl(String itemId, {String? tag, int? maxWidth}) {
-    return getImageUrl(itemId: itemId, imageTag: tag, imageType: 'Primary', maxWidth: maxWidth);
+  String getPrimaryImageUrl(String itemId, {String? tag, int? maxWidth, String? format}) {
+    return getImageUrl(itemId: itemId, imageTag: tag, imageType: 'Primary', maxWidth: maxWidth, format: format);
   }
 
   @override
-  String getThumbImageUrl(String itemId, {String? tag, int? maxWidth}) {
-    return getImageUrl(itemId: itemId, imageTag: tag, imageType: 'Thumb', maxWidth: maxWidth);
+  String getThumbImageUrl(String itemId, {String? tag, int? maxWidth, String? format}) {
+    return getImageUrl(itemId: itemId, imageTag: tag, imageType: 'Thumb', maxWidth: maxWidth, format: format);
   }
 
   @override
-  String getBackdropImageUrl(String itemId, {String? tag, int? maxWidth}) {
+  String getBackdropImageUrl(String itemId, {String? tag, int? maxWidth, String? format}) {
     return getImageUrl(
       itemId: itemId,
       imageTag: tag,
       imageType: 'Backdrop',
       maxWidth: maxWidth ?? 800,
       maxHeight: 450,
+      format: format,
     );
   }
 }

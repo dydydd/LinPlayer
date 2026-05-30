@@ -329,6 +329,8 @@ class _RandomRecommendationCarouselState extends ConsumerState<RandomRecommendat
   Color _dominantColor = Colors.transparent;
   Color _backgroundColor = const Color(0xFF121212);
   bool _initialColorExtracted = false;
+  // 颜色缓存：itemId -> ExtractedColors
+  final Map<String, ExtractedColors> _colorCache = {};
 
   @override
   void dispose() {
@@ -336,23 +338,45 @@ class _RandomRecommendationCarouselState extends ConsumerState<RandomRecommendat
     super.dispose();
   }
 
-  Future<void> _extractColor(MediaItem item) async {
+  /// 预提取所有推荐封面的颜色
+  Future<void> _precacheColors(List<MediaItem> items) async {
     final api = ref.read(apiClientProvider);
-    final imageUrl = item.backdropImageTag != null
-        ? api.image.getBackdropImageUrl(item.id, tag: item.backdropImageTag, maxWidth: 400)
-        : item.primaryImageTag != null
-            ? api.image.getPrimaryImageUrl(item.id, tag: item.primaryImageTag, maxWidth: 400)
-            : null;
+    final futures = <Future<void>>[];
+    
+    for (final item in items) {
+      // 跳过已缓存的颜色
+      if (_colorCache.containsKey(item.id)) continue;
+      
+      final imageUrl = item.backdropImageTag != null
+          ? api.image.getBackdropImageUrl(item.id, tag: item.backdropImageTag, maxWidth: 400)
+          : item.primaryImageTag != null
+              ? api.image.getPrimaryImageUrl(item.id, tag: item.primaryImageTag, maxWidth: 400)
+              : null;
+      
+      if (imageUrl == null) continue;
+      
+      futures.add(_extractColorForItem(item.id, imageUrl));
+    }
+    
+    // 并行提取所有颜色
+    await Future.wait(futures);
+  }
 
-    if (imageUrl == null) return;
-
+  Future<void> _extractColorForItem(String itemId, String imageUrl) async {
     final colors = await ColorExtractor.extractFromUrl(imageUrl);
-    if (mounted) {
-      setState(() {
-        _dominantColor = colors.gradientStart;
-        _backgroundColor = colors.background;
-      });
-      widget.onColorChanged?.call(colors.background);
+    _colorCache[itemId] = colors;
+  }
+
+  void _applyColorForItem(MediaItem item) {
+    if (_colorCache.containsKey(item.id)) {
+      final colors = _colorCache[item.id]!;
+      if (mounted) {
+        setState(() {
+          _dominantColor = colors.gradientStart;
+          _backgroundColor = colors.background;
+        });
+        widget.onColorChanged?.call(colors.background);
+      }
     }
   }
 
@@ -361,7 +385,7 @@ class _RandomRecommendationCarouselState extends ConsumerState<RandomRecommendat
       _currentPage = index;
     });
     if (index < items.length) {
-      _extractColor(items[index]);
+      _applyColorForItem(items[index]);
     }
   }
 
@@ -375,10 +399,14 @@ class _RandomRecommendationCarouselState extends ConsumerState<RandomRecommendat
       data: (items) {
         if (items.isEmpty) return const SizedBox.shrink();
 
-        // 首次加载时提取第一个item的颜色
+        // 首次加载时预提取所有颜色并应用第一个
         if (!_initialColorExtracted && items.isNotEmpty) {
           _initialColorExtracted = true;
-          _extractColor(items[0]);
+          _precacheColors(items).then((_) {
+            if (mounted) {
+              _applyColorForItem(items[0]);
+            }
+          });
         }
 
         return SizedBox(
@@ -489,12 +517,12 @@ class _CarouselItem extends ConsumerWidget {
             ),
           ),
 
-          // 底部渐变遮罩（平滑过渡到背景色，修复细线问题）
+          // 底部渐变遮罩（平滑过渡到背景色，消除细线）
           Positioned(
-            bottom: 0,
+            bottom: -1, // 向下延伸1像素消除细线
             left: 0,
             right: 0,
-            height: 320,
+            height: 340,
             child: Container(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -503,11 +531,13 @@ class _CarouselItem extends ConsumerWidget {
                   colors: [
                     Colors.transparent,
                     Colors.transparent,
-                    dominantColor.withValues(alpha: 0.5),
-                    dominantColor.withValues(alpha: 0.85),
+                    dominantColor.withValues(alpha: 0.3),
+                    dominantColor.withValues(alpha: 0.7),
+                    backgroundColor.withValues(alpha: 0.95),
+                    backgroundColor,
                     backgroundColor,
                   ],
-                  stops: const [0.0, 0.4, 0.65, 0.85, 1.0],
+                  stops: const [0.0, 0.35, 0.55, 0.75, 0.9, 0.98, 1.0],
                 ),
               ),
             ),

@@ -94,32 +94,48 @@ List<String> resolveSeasonImageUrls(
   Season season, {
   int? maxWidth,
 }) {
-  return _dedupeUrls([
-    if (season.primaryImageTag != null)
-      api.image.getPrimaryImageUrl(
+  // 生成多格式回退URL，确保JPG/PNG/WebP兼容性
+  final urls = <String>[];
+  
+  // 按优先级添加各种格式的封面URL
+  final formats = ['jpg', 'png', 'webp'];
+  
+  for (final format in formats) {
+    if (season.primaryImageTag != null) {
+      urls.add(api.image.getPrimaryImageUrl(
         season.id,
         tag: season.primaryImageTag,
         maxWidth: maxWidth,
-      ),
-    if (season.thumbImageTag != null)
-      api.image.getThumbImageUrl(
+        format: format,
+      ));
+    }
+    if (season.thumbImageTag != null) {
+      urls.add(api.image.getThumbImageUrl(
         season.id,
         tag: season.thumbImageTag,
         maxWidth: maxWidth,
-      ),
-    if (season.seriesId.isNotEmpty && season.seriesThumbImageTag != null)
-      api.image.getThumbImageUrl(
+        format: format,
+      ));
+    }
+    if (season.seriesId.isNotEmpty && season.seriesThumbImageTag != null) {
+      urls.add(api.image.getThumbImageUrl(
         season.seriesId,
         tag: season.seriesThumbImageTag,
         maxWidth: maxWidth,
-      ),
-    if (season.seriesId.isNotEmpty && season.seriesPrimaryImageTag != null)
-      api.image.getPrimaryImageUrl(
+        format: format,
+      ));
+    }
+    if (season.seriesId.isNotEmpty && season.seriesPrimaryImageTag != null) {
+      urls.add(api.image.getPrimaryImageUrl(
         season.seriesId,
         tag: season.seriesPrimaryImageTag,
         maxWidth: maxWidth,
-      ),
-  ]);
+        format: format,
+      ));
+    }
+  }
+  
+  return _dedupeUrls(urls);
 }
 
 List<String> resolveEpisodeImageUrls(

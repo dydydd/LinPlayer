@@ -635,16 +635,17 @@ abstract class ImageApi {
     int? maxWidth,
     int? maxHeight,
     double quality = 90,
+    String? format,
   });
   
   /// 获取主封面
-  String getPrimaryImageUrl(String itemId, {String? tag, int? maxWidth});
+  String getPrimaryImageUrl(String itemId, {String? tag, int? maxWidth, String? format});
 
   /// 获取缩略图/横图
-  String getThumbImageUrl(String itemId, {String? tag, int? maxWidth});
+  String getThumbImageUrl(String itemId, {String? tag, int? maxWidth, String? format});
   
   /// 获取背景图
-  String getBackdropImageUrl(String itemId, {String? tag, int? maxWidth});
+  String getBackdropImageUrl(String itemId, {String? tag, int? maxWidth, String? format});
 }
 
 // ==================== 弹幕相关 ====================

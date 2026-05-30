@@ -236,8 +236,9 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMovie = widget.item.type == 'Movie';
-    // 电影：使用 contain 完整展示海报；剧集：使用 cover 展示更多 backdrop
-    final headerHeight = isMovie ? screenWidth * 1.2 : screenWidth * 0.55;
+    // 电影：根据手机屏幕比例适配，使用 cover 填满宽度，高度设为屏幕宽度的70%（接近16:9）
+    // 剧集：使用 cover 展示更多 backdrop
+    final headerHeight = isMovie ? screenWidth * 0.7 : screenWidth * 0.55;
     final api = ref.read(apiClientProvider);
     
     final imageUrl = widget.item.primaryImageTag != null
@@ -256,7 +257,7 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
             imageUrl: imageUrl,
             width: double.infinity,
             height: headerHeight,
-            fit: isMovie ? BoxFit.contain : BoxFit.cover,
+            fit: BoxFit.cover,
           ),
         ),
 
@@ -449,7 +450,7 @@ class _SeasonsSection extends ConsumerWidget {
           children: [
             const SectionHeader(title: '季度选择'),
             HorizontalList(
-              height: 160,
+              height: 210,
               children: seasons.map((season) {
                 return SizedBox(
                   width: 120,
@@ -494,31 +495,37 @@ class _SeasonCard extends ConsumerWidget {
     final imageUrls = resolveSeasonImageUrls(api, season, maxWidth: 300);
 
     if (imageUrls.isNotEmpty) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: MediaImage(
-          imageUrl: imageUrls.first,
-          imageUrls: imageUrls.length > 1 ? imageUrls.sublist(1) : null,
-          width: 120,
-          height: 120,
-          fit: BoxFit.contain,
+      return AspectRatio(
+        aspectRatio: 2 / 3,
+        child: ClipRRect(
           borderRadius: BorderRadius.circular(8),
+          child: MediaImage(
+            imageUrl: imageUrls.first,
+            imageUrls: imageUrls.length > 1 ? imageUrls.sublist(1) : null,
+            width: 120,
+            height: 180,
+            fit: BoxFit.cover,
+            borderRadius: BorderRadius.circular(8),
+          ),
         ),
       );
     }
 
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF5B8DEF).withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Center(
-        child: Text(
-          'S${season.indexNumber}',
-          style: const TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF5B8DEF),
+    return AspectRatio(
+      aspectRatio: 2 / 3,
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF5B8DEF).withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Center(
+          child: Text(
+            'S${season.indexNumber}',
+            style: const TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF5B8DEF),
+            ),
           ),
         ),
       ),
