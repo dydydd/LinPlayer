@@ -134,6 +134,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/player/:id',
         builder: (context, state) => PlayerScreen(
           itemId: state.pathParameters['id']!,
+          mediaSourceId: state.uri.queryParameters['mediaSourceId'],
         ),
       ),
       

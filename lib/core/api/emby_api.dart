@@ -520,10 +520,16 @@ class EmbyPlaybackApi implements PlaybackApi {
   }
 
   @override
-  String getVideoStreamUrl(String itemId) {
+  String getVideoStreamUrl(String itemId, {String? mediaSourceId}) {
     final base = _client._currentLine;
     final token = _client._authToken;
-    return '$base/Videos/$itemId/stream?static=true${token != null ? '&api_key=$token' : ''}';
+    final params = <String>[
+      'static=true',
+      if (mediaSourceId != null && mediaSourceId.isNotEmpty)
+        'MediaSourceId=${Uri.encodeQueryComponent(mediaSourceId)}',
+      if (token != null) 'api_key=$token',
+    ];
+    return '$base/Videos/$itemId/stream?${params.join('&')}';
   }
 
   @override

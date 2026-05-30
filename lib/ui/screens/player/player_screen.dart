@@ -38,10 +38,114 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
   bool _isLongPressing = false;
   Timer? _longPressTimer;
   Timer? _sleepTimer;
+  double? _initialVideoAspectRatio;
 
   static VideoPlayerService? _activePlayerService;
 
   static VideoPlayerService? get activePlayerService => _activePlayerService;
+
+  MediaSource? _resolveMediaSource(
+    PlaybackInfo playbackInfo, {
+    String? preferredMediaSourceId,
+  }) {
+    final mediaSources = playbackInfo.mediaSources;
+    if (mediaSources.isEmpty) {
+      return null;
+    }
+
+    final targetSourceId =
+        preferredMediaSourceId ??
+        ref.read(selectedMediaSourceProvider) ??
+        widget.mediaSourceId;
+
+    if (targetSourceId == null || targetSourceId.isEmpty) {
+      return mediaSources.firstOrNull;
+    }
+
+    return mediaSources.where((source) => source.id == targetSourceId).firstOrNull ??
+        mediaSources.firstOrNull;
+  }
+
+  void _sanitizeSelectionState(MediaSource? mediaSource) {
+    if (mediaSource == null) {
+      ref.read(audioTrackProvider.notifier).state = null;
+      ref.read(subtitleTrackProvider.notifier).state = null;
+      ref.read(secondarySubtitleTrackProvider.notifier).state = null;
+      return;
+    }
+
+    final audioIndexes = mediaSource.mediaStreams
+        .where((stream) => stream.isAudio)
+        .map((stream) => stream.index)
+        .toSet();
+    final subtitleIndexes = mediaSource.mediaStreams
+        .where((stream) => stream.isSubtitle)
+        .map((stream) => stream.index)
+        .toSet();
+
+    final selectedAudioIndex = ref.read(audioTrackProvider);
+    if (selectedAudioIndex != null && !audioIndexes.contains(selectedAudioIndex)) {
+      ref.read(audioTrackProvider.notifier).state = null;
+    }
+
+    final selectedSubtitleIndex = ref.read(subtitleTrackProvider);
+    if (selectedSubtitleIndex != null &&
+        !subtitleIndexes.contains(selectedSubtitleIndex)) {
+      ref.read(subtitleTrackProvider.notifier).state = null;
+    }
+
+    final selectedSecondarySubtitleIndex = ref.read(secondarySubtitleTrackProvider);
+    if (selectedSecondarySubtitleIndex != null &&
+        (!subtitleIndexes.contains(selectedSecondarySubtitleIndex) ||
+            selectedSecondarySubtitleIndex == ref.read(subtitleTrackProvider))) {
+      ref.read(secondarySubtitleTrackProvider.notifier).state = null;
+    }
+  }
+
+  Rect _computeContentRect(Size containerSize) {
+    if (containerSize.width <= 0 || containerSize.height <= 0) {
+      return Rect.zero;
+    }
+    final ratio = _resolveDisplayAspectRatio();
+    if (ratio == null || ratio <= 0) {
+      return Offset.zero & containerSize;
+    }
+
+    final containerRatio = containerSize.width / containerSize.height;
+    if (containerRatio > ratio) {
+      final contentWidth = containerSize.height * ratio;
+      final left = (containerSize.width - contentWidth) / 2;
+      return Rect.fromLTWH(left, 0, contentWidth, containerSize.height);
+    }
+
+    final contentHeight = containerSize.width / ratio;
+    final top = (containerSize.height - contentHeight) / 2;
+    return Rect.fromLTWH(0, top, containerSize.width, contentHeight);
+  }
+
+  double? _resolveDisplayAspectRatio() {
+    final aspectMode = ref.read(aspectRatioProvider);
+    if (aspectMode == '全屏') return null;
+
+    switch (aspectMode) {
+      case '16:9':
+        return 16 / 9;
+      case '4:3':
+        return 4 / 3;
+      case '21:9':
+        return 21 / 9;
+      case '原始':
+      case '自动':
+      default:
+        break;
+    }
+
+    final adapter = _playerService.adapter;
+    if (adapter is ExoPlayerAdapter) {
+      return adapter.videoAspectRatio ?? _initialVideoAspectRatio;
+    }
+    return _initialVideoAspectRatio;
+  }
 
   @override
   void initState() {
@@ -90,9 +194,23 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     final item = await api.media.getItemDetails(widget.itemId);
 
     final playbackInfo = await api.playback.getPlaybackInfo(widget.itemId);
-    final mediaSource = playbackInfo.mediaSources.firstOrNull;
+    final mediaSource = _resolveMediaSource(
+      playbackInfo,
+      preferredMediaSourceId: widget.mediaSourceId,
+    );
+    _sanitizeSelectionState(mediaSource);
+    final videoStream = mediaSource?.mediaStreams.where((stream) => stream.isVideo).firstOrNull;
+    _initialVideoAspectRatio = (videoStream?.width != null &&
+            videoStream?.height != null &&
+            videoStream!.width! > 0 &&
+            videoStream.height! > 0)
+        ? videoStream.width! / videoStream.height!
+        : null;
 
-    final videoUrl = api.playback.getVideoStreamUrl(widget.itemId);
+    final videoUrl = api.playback.getVideoStreamUrl(
+      widget.itemId,
+      mediaSourceId: mediaSource?.id,
+    );
 
     Duration? startPosition;
     if (item.userData?.playbackPositionTicks != null) {
@@ -102,6 +220,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     }
 
     ref.read(currentPlayingItemProvider.notifier).state = item;
+    ref.read(selectedMediaSourceProvider.notifier).state = mediaSource?.id;
 
     final coreString = ref.read(playerCoreProvider);
     final coreType = coreString == 'mpv'
@@ -155,11 +274,28 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
       await _loadSubtitles(item, mediaSource);
     }
 
+    final audioStreams = mediaSource?.mediaStreams.where((stream) => stream.isAudio).toList() ?? const <MediaStream>[];
+    final selectedAudioIndex = ref.read(audioTrackProvider);
+    if (selectedAudioIndex != null) {
+      await _applyInitialAudioTrack(audioStreams, selectedAudioIndex);
+    }
+
+    final selectedSubtitleIndex = ref.read(subtitleTrackProvider);
+    if (selectedSubtitleIndex != null) {
+      await _onSubtitleTrackChanged(null, selectedSubtitleIndex);
+    }
+
+    final selectedSecondarySubtitleIndex = ref.read(secondarySubtitleTrackProvider);
+    if (selectedSecondarySubtitleIndex != null) {
+      await _onSecondarySubtitleTrackChanged(selectedSecondarySubtitleIndex);
+    }
+
     _playerService.setSubtitleSize(ref.read(subtitleSizeProvider));
     _playerService.setSubtitlePosition(ref.read(subtitlePositionProvider));
     _playerService.setSubtitleDelay(ref.read(subtitleDelayProvider));
     _playerService.setSubtitleFont(ref.read(subtitleFontProvider));
     _playerService.setSubtitleBackground(ref.read(subtitleBackgroundProvider));
+    _playerService.setAspectRatio(ref.read(aspectRatioProvider));
   }
 
   Future<void> _waitForTracksReady() async {
@@ -185,6 +321,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
 
     if (subtitleStreams.isEmpty) {
       logger.w('Player', '没有可用字幕流');
+      return;
+    }
+
+    final userSelectedSubtitleIndex = ref.read(subtitleTrackProvider);
+    if (userSelectedSubtitleIndex != null) {
+      logger.i('Player', '保留用户在详情页中选择的字幕轨道: $userSelectedSubtitleIndex');
       return;
     }
 
@@ -831,7 +973,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
 
     try {
       final playbackInfo = await api.playback.getPlaybackInfo(item.id);
-      final mediaSource = playbackInfo.mediaSources.firstOrNull;
+      final mediaSource = _resolveMediaSource(playbackInfo);
       if (mediaSource == null) return;
 
       final subtitleStreams = mediaSource.mediaStreams.where((s) => s.isSubtitle).toList();
@@ -972,7 +1114,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
 
     try {
       final playbackInfo = await api.playback.getPlaybackInfo(item.id);
-      final mediaSource = playbackInfo.mediaSources.firstOrNull;
+      final mediaSource = _resolveMediaSource(playbackInfo);
       if (mediaSource == null) return;
 
       final subtitleStreams = mediaSource.mediaStreams.where((s) => s.isSubtitle).toList();
@@ -1240,44 +1382,88 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     final danmakuDensity = ref.watch(danmakuDensityProvider);
     final danmakuDelay = ref.watch(danmakuDelayProvider);
 
-    final overlays = <Widget>[];
-    if (_playerService.coreType == PlayerCoreType.exoPlayer) {
-      final adapter = _playerService.adapter;
-      if (adapter is ExoPlayerAdapter) {
+    if (_playerService.coreType != PlayerCoreType.exoPlayer) {
+      final overlays = <Widget>[];
+      if (danmakuEnabled && danmakuItems.isNotEmpty) {
+        final delayedPosition = _playerService.position -
+            Duration(milliseconds: (danmakuDelay * 1000).round());
         overlays.add(
-          ValueListenableBuilder<bool>(
-            valueListenable: adapter.libassOverlayNotifier,
-            builder: (context, showLibass, _) {
-              if (!showLibass) return const SizedBox.shrink();
-              return Positioned.fill(
-                child: _LibassOverlay(
-                  playerService: _playerService,
-                  referenceWidth: adapter.libassRenderWidth,
-                  referenceHeight: adapter.libassRenderHeight,
-                ),
-              );
-            },
+          Positioned.fill(
+            child: DanmakuOverlay(
+              items: danmakuItems,
+              position: delayedPosition,
+              isPlaying: _playerService.isPlaying,
+              opacity: danmakuOpacity,
+              fontSizeFactor: danmakuFontSize,
+              speedFactor: danmakuSpeed,
+              densityFactor: danmakuDensity,
+            ),
           ),
         );
       }
-    }
-    if (danmakuEnabled && danmakuItems.isNotEmpty) {
-      final delayedPosition = _playerService.position - Duration(milliseconds: (danmakuDelay * 1000).round());
-      overlays.add(Positioned.fill(
-        child: DanmakuOverlay(
-          items: danmakuItems,
-          position: delayedPosition,
-          isPlaying: _playerService.isPlaying,
-          opacity: danmakuOpacity,
-          fontSizeFactor: danmakuFontSize,
-          speedFactor: danmakuSpeed,
-          densityFactor: danmakuDensity,
-        ),
-      ));
+      if (overlays.isEmpty) return videoWidget;
+      return Stack(fit: StackFit.expand, children: [videoWidget, ...overlays]);
     }
 
-    if (overlays.isEmpty) return videoWidget;
-    return Stack(fit: StackFit.expand, children: [videoWidget, ...overlays]);
+    final adapter = _playerService.adapter;
+    if (adapter is! ExoPlayerAdapter) {
+      return videoWidget;
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final contentRect = _computeContentRect(
+          Size(constraints.maxWidth, constraints.maxHeight),
+        );
+        final delayedPosition = _playerService.position -
+            Duration(milliseconds: (danmakuDelay * 1000).round());
+
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            Positioned.fromRect(
+              rect: contentRect,
+              child: videoWidget,
+            ),
+            if (danmakuEnabled && danmakuItems.isNotEmpty)
+              Positioned.fromRect(
+                rect: contentRect,
+                child: DanmakuOverlay(
+                  items: danmakuItems,
+                  position: delayedPosition,
+                  isPlaying: _playerService.isPlaying,
+                  opacity: danmakuOpacity,
+                  fontSizeFactor: danmakuFontSize,
+                  speedFactor: danmakuSpeed,
+                  densityFactor: danmakuDensity,
+                ),
+              ),
+            Positioned.fromRect(
+              rect: contentRect,
+              child: IgnorePointer(
+                child: ValueListenableBuilder<bool>(
+                  valueListenable: adapter.libassOverlayNotifier,
+                  builder: (context, showLibass, _) {
+                    if (!showLibass) return const SizedBox.shrink();
+                    return _LibassOverlay(
+                      playerService: _playerService,
+                      referenceWidth: adapter.libassRenderWidth,
+                      referenceHeight: adapter.libassRenderHeight,
+                    );
+                  },
+                ),
+              ),
+            ),
+            if (contentRect == Rect.zero)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: videoWidget,
+                ),
+              ),
+          ],
+        );
+      },
+    );
   }
 
   void _onDoubleTapDown(TapDownDetails details) {
@@ -2071,6 +2257,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     );
   }
 
+  Future<void> _applyInitialAudioTrack(List<MediaStream> audioStreams, int selectedIndex) async {
+    final tracks = _playerService.tracksInfo;
+    final audioTracks = tracks.where((track) => track['type'] == 'audio').toList();
+    final audioPosition = audioStreams.indexWhere((stream) => stream.index == selectedIndex);
+    if (audioPosition < 0 || audioPosition >= audioTracks.length) {
+      return;
+    }
+    final trackId = audioTracks[audioPosition]['id']?.toString();
+    if (trackId != null && trackId.isNotEmpty) {
+      await _playerService.selectAudioTrack(trackId);
+    }
+  }
+
   void _showAudioSettings() {
     _showRightPanel(
       title: '音频设置',
@@ -2521,6 +2720,7 @@ class _SubtitleSettingsContentState extends ConsumerState<_SubtitleSettingsConte
     final subtitleBackground = ref.watch(subtitleBackgroundProvider);
     final selectedSubtitleIndex = ref.watch(subtitleTrackProvider);
     final selectedSecondaryIndex = ref.watch(secondarySubtitleTrackProvider);
+    final selectedMediaSourceId = ref.watch(selectedMediaSourceProvider);
 
     if (subtitleAsync == null) {
       return const _SettingsSection(
@@ -2530,7 +2730,13 @@ class _SubtitleSettingsContentState extends ConsumerState<_SubtitleSettingsConte
 
     return subtitleAsync.when(
       data: (info) {
-        final subtitles = info.mediaSources.firstOrNull?.mediaStreams.where((s) => s.isSubtitle).toList() ?? [];
+        final mediaSource = selectedMediaSourceId != null
+            ? info.mediaSources.firstWhere(
+                (source) => source.id == selectedMediaSourceId,
+                orElse: () => info.mediaSources.firstOrNull!,
+              )
+            : info.mediaSources.firstOrNull;
+        final subtitles = mediaSource?.mediaStreams.where((s) => s.isSubtitle).toList() ?? [];
         final playerService = _PlayerScreenState.activePlayerService;
         final nameMap = _buildSubtitleNameMap(subtitles, playerService);
 
@@ -2828,6 +3034,7 @@ class _AudioSettingsContentState extends ConsumerState<_AudioSettingsContent> {
     final audioAsync = item != null ? ref.watch(playbackInfoProvider(item.id)) : null;
     final audioOffset = ref.watch(audioDelayProvider);
     final selectedIndex = ref.watch(audioTrackProvider);
+    final selectedMediaSourceId = ref.watch(selectedMediaSourceProvider);
 
     if (audioAsync == null) {
       return const _SettingsSection(
@@ -2837,7 +3044,13 @@ class _AudioSettingsContentState extends ConsumerState<_AudioSettingsContent> {
 
     return audioAsync.when(
       data: (info) {
-        final audios = info.mediaSources.firstOrNull?.mediaStreams.where((s) => s.isAudio).toList() ?? [];
+        final mediaSource = selectedMediaSourceId != null
+            ? info.mediaSources.firstWhere(
+                (source) => source.id == selectedMediaSourceId,
+                orElse: () => info.mediaSources.firstOrNull!,
+              )
+            : info.mediaSources.firstOrNull;
+        final audios = mediaSource?.mediaStreams.where((s) => s.isAudio).toList() ?? [];
 
         return _SettingsSection(
           children: [
@@ -2853,7 +3066,7 @@ class _AudioSettingsContentState extends ConsumerState<_AudioSettingsContent> {
                 onChanged: (value) {
                   if (value != null) {
                     ref.read(audioTrackProvider.notifier).state = value;
-                    _switchAudioTrack(value);
+                    _switchAudioTrack(audios, value);
                   }
                 },
                 child: Column(
@@ -2890,15 +3103,18 @@ class _AudioSettingsContentState extends ConsumerState<_AudioSettingsContent> {
     );
   }
 
-  Future<void> _switchAudioTrack(int index) async {
+  Future<void> _switchAudioTrack(List<MediaStream> audios, int selectedStreamIndex) async {
     final playerService = _PlayerScreenState.activePlayerService;
     if (playerService == null) return;
 
     final tracks = playerService.tracksInfo;
     final audioTracks = tracks.where((t) => t['type'] == 'audio').toList();
-
-    if (index < audioTracks.length) {
-      final trackId = audioTracks[index]['id']?.toString() ?? '';
+    final audioPosition = audios.indexWhere((stream) => stream.index == selectedStreamIndex);
+    if (audioPosition < 0 || audioPosition >= audioTracks.length) {
+      return;
+    }
+    final trackId = audioTracks[audioPosition]['id']?.toString() ?? '';
+    if (trackId.isNotEmpty) {
       await playerService.selectAudioTrack(trackId);
     }
   }

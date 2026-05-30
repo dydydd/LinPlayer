@@ -354,7 +354,7 @@ abstract class PlaybackApi {
   
   /// 获取视频流
   /// GET /Videos/{Id}/stream
-  String getVideoStreamUrl(String itemId);
+  String getVideoStreamUrl(String itemId, {String? mediaSourceId});
   
   /// 获取字幕流URL
   /// GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/Stream.{codec}

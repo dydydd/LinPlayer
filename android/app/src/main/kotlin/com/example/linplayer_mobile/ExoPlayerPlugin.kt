@@ -210,6 +210,9 @@ class ExoPlayerPlugin(
                 result.success(true)
             }
             "setAspectRatio" -> {
+                val playerId = call.argument<String>("playerId") ?: ""
+                val ratio = call.argument<String>("ratio") ?: "自动"
+                getPlayer(playerId)?.setAspectRatio(ratio)
                 result.success(true)
             }
             "disposePlayer" -> {
@@ -372,6 +375,17 @@ class ExoPlayerPlugin(
         fun setSubtitlePosition(position: Double) {}
 
         fun setSubtitleBackground(enabled: Boolean) {}
+
+        fun setAspectRatio(ratio: String) {
+            val paramsBuilder = trackSelector.buildUponParameters()
+            when (ratio) {
+                "16:9" -> paramsBuilder.setViewportSize(16, 9, false)
+                "4:3" -> paramsBuilder.setViewportSize(4, 3, false)
+                "21:9" -> paramsBuilder.setViewportSize(21, 9, false)
+                else -> paramsBuilder.clearViewportSizeConstraints()
+            }
+            trackSelector.parameters = paramsBuilder.build()
+        }
 
         fun getTracksInfo(): List<Map<String, Any>> {
             return currentTracks

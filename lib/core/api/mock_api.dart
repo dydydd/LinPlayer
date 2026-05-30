@@ -285,8 +285,11 @@ class MockPlaybackApi implements PlaybackApi {
   }
   
   @override
-  String getVideoStreamUrl(String itemId) {
-    return 'https://mock.example.com/Videos/$itemId/stream';
+  String getVideoStreamUrl(String itemId, {String? mediaSourceId}) {
+    final suffix = mediaSourceId != null && mediaSourceId.isNotEmpty
+        ? '?MediaSourceId=$mediaSourceId'
+        : '';
+    return 'https://mock.example.com/Videos/$itemId/stream$suffix';
   }
 
   @override

@@ -54,6 +54,7 @@ class ExoPlayerAdapter implements PlayerAdapter {
   int _videoHeight = 0;
   int _libassRenderWidth = 0;
   int _libassRenderHeight = 0;
+  String _aspectRatio = '自动';
   String? _currentLibassPath;
   Uint8List? _currentLibassData;
   String _currentLibassCodec = 'ass';
@@ -86,6 +87,11 @@ class ExoPlayerAdapter implements PlayerAdapter {
   String? get errorMessage => _errorMessage;
   @override
   bool get libassReady => _libassAvailable;
+  double? get videoAspectRatio {
+    if (_videoWidth <= 0 || _videoHeight <= 0) return null;
+    return _videoWidth / _videoHeight;
+  }
+  String get aspectRatioMode => _aspectRatio;
   int get libassRenderWidth =>
       _libassRenderWidth > 0 ? _libassRenderWidth : (_videoWidth > 0 ? _videoWidth : 1920);
   int get libassRenderHeight =>
@@ -813,19 +819,24 @@ class ExoPlayerAdapter implements PlayerAdapter {
 
   @override
   Future<void> setAspectRatio(String ratio) async {
+    _aspectRatio = ratio;
     if (_playerId == null) return;
     await _channel.invokeMethod('setAspectRatio', {
       'playerId': _playerId,
       'ratio': ratio,
     });
+    _callbacks?.onPositionChanged?.call();
   }
 
   @override
   Widget buildVideo() {
     if (_textureId != null) {
-      return Stack(
-        fit: StackFit.expand,
-        children: [
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final videoSize = Size(constraints.maxWidth, constraints.maxHeight);
+          return Stack(
+            fit: StackFit.expand,
+            children: [
           Texture(textureId: _textureId!),
           ValueListenableBuilder<int>(
             valueListenable: _subtitleSettingsVersion,
@@ -836,7 +847,6 @@ class ExoPlayerAdapter implements PlayerAdapter {
                   if (bitmapB64 != null && bitmapB64.isNotEmpty) {
                     try {
                       final bytes = base64Decode(bitmapB64);
-                      final videoSize = MediaQuery.of(context).size;
                       if (_hasBitmapPosition && _isBitmapSubtitle) {
                         return Positioned(
                           left: (_bitmapLeft.clamp(0.0, 1.0)) * videoSize.width,
@@ -857,8 +867,8 @@ class ExoPlayerAdapter implements PlayerAdapter {
                         child: Center(
                           child: ConstrainedBox(
                             constraints: BoxConstraints(
-                              maxWidth: MediaQuery.of(context).size.width - 16,
-                              maxHeight: MediaQuery.of(context).size.height * 0.35,
+                              maxWidth: videoSize.width - 16,
+                              maxHeight: videoSize.height * 0.35,
                             ),
                             child: Image.memory(
                               bytes,
@@ -937,10 +947,19 @@ class ExoPlayerAdapter implements PlayerAdapter {
               );
             },
           ),
-        ],
+            ],
+          );
+        },
       );
     }
     return const Center(child: CircularProgressIndicator());
+  }
+
+  Widget buildVideoContent() {
+    if (_textureId == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return Texture(textureId: _textureId!);
   }
 
   static String _stripAssTags(String text) {
