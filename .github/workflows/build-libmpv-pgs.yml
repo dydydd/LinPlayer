@@ -153,10 +153,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "chore: update libmpv with PGS support
-
-Built from ${{ env.BUILD_REPO }}
-Enabled decoders: pgssub, dvdsub, dvbsub"
+            git commit -m "chore: update libmpv with PGS support (built from ${{ env.BUILD_REPO }})"
             git push
             echo "✅ Libraries committed"
           fi
