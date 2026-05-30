@@ -193,26 +193,3 @@ jobs:
             git push
             echo "✅ Libraries committed"
           fi
-        continue-on-error: true
-      
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: libmpv-extracted-${{ github.run_number }}
-          name: libmpv from mpv-android - Build ${{ github.run_number }}
-          body: |
-            Extracted complete native libraries from mpv-android release (per-ABI APKs)
-            
-            Includes:
-            - Full libmpv.so with all decoders (PGS, ASS, SRT, VOBSUB, etc.)
-            - libass.so for ASS/SSA subtitle rendering
-            - All FFmpeg dependencies (libavcodec, libavutil, etc.)
-            - Complete replacement for media-kit's stripped-down version
-            
-            Source: ${{ env.MPV_ANDROID_REPO }}
-          files: android/app/src/main/jniLibs/**/*.so
-          draft: false
-          prerelease: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
