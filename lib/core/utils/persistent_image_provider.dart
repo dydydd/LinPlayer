@@ -50,6 +50,28 @@ class PersistentNetworkImageProvider
 
   static String? _persistentCachePath;
 
+  /// 标准化 URL 用于缓存 key 生成
+  /// 
+  /// 去除可变查询参数（maxWidth/maxHeight/api_key/quality），
+  /// 保留图片身份标识参数（tag/imageType/itemId），
+  /// 使得不同页面请求同一张图片的不同尺寸时能复用同一个缓存。
+  static String _normalizeUrlForCache(String url) {
+    try {
+      final uri = Uri.parse(url);
+      final params = Map<String, String>.from(uri.queryParameters);
+      // 移除可变参数（尺寸、认证、压缩质量）
+      params.remove('maxWidth');
+      params.remove('maxHeight');
+      params.remove('api_key');
+      params.remove('quality');
+      // 保留 tag、format 等标识参数
+      final normalizedUri = uri.replace(queryParameters: params);
+      return normalizedUri.toString();
+    } catch (e) {
+      return url;
+    }
+  }
+
   static Future<String> get _cachePath async {
     if (_persistentCachePath != null) return _persistentCachePath!;
     final appDir = await getApplicationDocumentsDirectory();
@@ -95,7 +117,9 @@ class PersistentNetworkImageProvider
     ImageDecoderCallback decode,
   ) async {
     assert(key == this);
-    final String md5Key = cacheKey ?? keyToMd5(key.url);
+    // 使用标准化后的 URL 生成缓存 key，不同 maxWidth 的请求可以复用同一个缓存
+    final String normalizedUrl = _normalizeUrlForCache(key.url);
+    final String md5Key = cacheKey ?? keyToMd5(normalizedUrl);
     ui.Codec? result;
     if (cache) {
       try {
