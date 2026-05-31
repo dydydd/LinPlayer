@@ -13,7 +13,7 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        // 注册 ExoPlayer 插件（v2 - 支持字幕轨道、ffmpeg 扩展）
+        // 注册 ExoPlayer 插件（v2 - 支持字幕轨道）
         exoPlayerPlugin = ExoPlayerPlugin(
             this,
             flutterEngine.dartExecutor.binaryMessenger,

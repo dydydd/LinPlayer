@@ -90,6 +90,16 @@ class MockUserApi implements UserApi {
   Future<User> getUser(String userId) async {
     return User(id: userId, name: 'Mock User');
   }
+
+  @override
+  Future<void> markAsPlayed(String itemId) async {
+    await Future.delayed(const Duration(milliseconds: 200));
+  }
+
+  @override
+  Future<void> markAsUnplayed(String itemId) async {
+    await Future.delayed(const Duration(milliseconds: 200));
+  }
 }
 
 class MockServerApi implements ServerApi {

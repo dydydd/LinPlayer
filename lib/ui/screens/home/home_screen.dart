@@ -50,15 +50,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final offset = _scrollController.offset;
     final delta = offset - _lastScrollOffset;
 
-    setState(() {
-      if (delta > 0) {
-        // 向下滑动，渐隐
-        _appBarOpacity = (_appBarOpacity - delta / 100).clamp(0.0, 1.0);
-      } else if (delta < 0) {
-        // 向上滑动，渐显
-        _appBarOpacity = (_appBarOpacity - delta / 100).clamp(0.0, 1.0);
-      }
-    });
+    // 使用微任务避免setState过于频繁导致掉帧
+    if (delta.abs() > 2) {
+      setState(() {
+        if (delta > 0) {
+          _appBarOpacity = (_appBarOpacity - delta / 100).clamp(0.0, 1.0);
+        } else if (delta < 0) {
+          _appBarOpacity = (_appBarOpacity - delta / 100).clamp(0.0, 1.0);
+        }
+      });
+    }
 
     _lastScrollOffset = offset;
   }
@@ -888,6 +889,7 @@ class _ContinueWatchingCard extends ConsumerWidget {
       onTap: () {
         context.push(mediaRouteForItem(item));
       },
+      onLongPress: () => _showLongPressMenu(context, ref),
       child: SizedBox(
         width: 160,
         child: Column(
@@ -897,7 +899,7 @@ class _ContinueWatchingCard extends ConsumerWidget {
             AspectRatio(
               aspectRatio: 16 / 9,
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(12),
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
@@ -972,6 +974,149 @@ class _ContinueWatchingCard extends ConsumerWidget {
               ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showLongPressMenu(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.remove_circle_outline),
+              title: const Text('从继续观看中移除'),
+              onTap: () {
+                Navigator.pop(context);
+                _removeFromContinueWatching(context, ref);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.favorite_border),
+              title: const Text('添加到收藏'),
+              onTap: () {
+                Navigator.pop(context);
+                _addToFavorites(context, ref);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.check_circle_outline),
+              title: const Text('标记为已播放'),
+              onTap: () {
+                Navigator.pop(context);
+                _markAsPlayed(context, ref);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _removeFromContinueWatching(BuildContext context, WidgetRef ref) {
+    // 通过API标记为未播放来移除继续观看记录
+    _showConfirmDialog(
+      context,
+      title: '移除记录',
+      content: '确定要从继续观看中移除 "${item.name}" 吗？',
+      onConfirm: () async {
+        try {
+          final api = ref.read(apiClientProvider);
+          await api.user.markAsUnplayed(item.id);
+          ref.invalidate(resumeItemsProvider);
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('已移除')),
+            );
+          }
+        } catch (e) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('移除失败: $e')),
+            );
+          }
+        }
+      },
+    );
+  }
+
+  void _addToFavorites(BuildContext context, WidgetRef ref) {
+    _showConfirmDialog(
+      context,
+      title: '添加到收藏',
+      content: '将 "${item.name}" 添加到收藏？',
+      onConfirm: () async {
+        try {
+          final api = ref.read(apiClientProvider);
+          await api.favorite.addFavorite(item.id);
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('已添加到收藏')),
+            );
+          }
+        } catch (e) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('添加失败: $e')),
+            );
+          }
+        }
+      },
+    );
+  }
+
+  void _markAsPlayed(BuildContext context, WidgetRef ref) {
+    _showConfirmDialog(
+      context,
+      title: '标记为已播放',
+      content: '将 "${item.name}" 标记为已播放？',
+      onConfirm: () async {
+        try {
+          final api = ref.read(apiClientProvider);
+          await api.user.markAsPlayed(item.id);
+          ref.invalidate(resumeItemsProvider);
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('已标记为已播放')),
+            );
+          }
+        } catch (e) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('标记失败: $e')),
+            );
+          }
+        }
+      },
+    );
+  }
+
+  void _showConfirmDialog(
+    BuildContext context, {
+    required String title,
+    required String content,
+    required VoidCallback onConfirm,
+  }) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(content),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              onConfirm();
+            },
+            child: const Text('确定'),
+          ),
+        ],
       ),
     );
   }
@@ -1054,6 +1199,7 @@ class _LibraryCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final api = ref.read(apiClientProvider);
     final imageUrls = resolveLibraryImageUrls(api, library, maxWidth: 400);
+    const borderRadius = BorderRadius.all(Radius.circular(16));
 
     return GestureDetector(
       onTap: () => context.push('/library/${library.id}'),
@@ -1063,8 +1209,8 @@ class _LibraryCard extends ConsumerWidget {
           Container(
             width: 135,
             height: 100,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
+            decoration: const BoxDecoration(
+              borderRadius: borderRadius,
             ),
             clipBehavior: Clip.antiAlias,
             child: imageUrls.isNotEmpty
@@ -1074,7 +1220,7 @@ class _LibraryCard extends ConsumerWidget {
                     width: 135,
                     height: 100,
                     fit: BoxFit.contain,
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: borderRadius,
                   )
                 : Container(
                     color: const Color(0xFF5B8DEF).withValues(alpha: 0.1),

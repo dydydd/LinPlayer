@@ -30,13 +30,7 @@ LinPlayer - Emby 第三方客户端移动端
 
 ### 自动触发
 - Push 到 `main`/`master`/`develop` 分支时自动构建
-- 支持手动触发（可选择 debug/release、是否包含 FFmpeg 扩展）
-
-### FFmpeg 扩展自动编译
-ExoPlayer 的 ffmpeg 扩展需要自行编译。GitHub Actions 已配置自动编译：
-- 首次编译约 15-25 分钟（后续利用缓存仅需 2-5 分钟）
-- 支持 PGS/SUP 图形字幕解码
-- 详见 [docs/FFmpegExtensionSetup.md](docs/FFmpegExtensionSetup.md)
+- 支持手动触发（可选择 debug/release）
 
 ### 下载构建产物
 1. 进入 [Actions](../../actions) 页面
@@ -62,30 +56,18 @@ cd linplayer
 # 获取依赖
 flutter pub get
 
-# 构建 Debug APK（不含 FFmpeg 扩展）
+# 构建 Debug APK
 flutter build apk --debug
 
 # 构建 Release APK
 flutter build apk --release
 ```
 
-### PGS/SUP 字幕支持（可选）
+### PGS/SUP 字幕支持
 
-ExoPlayer 默认不支持 PGS/SUP 图形字幕。如需支持：
-
-**方案 1：使用 GitHub Actions（推荐）**
-- Push 代码后 Actions 自动编译
-- 下载包含 ffmpeg 扩展的 APK
-
-**方案 2：切换到 MPV 内核**
-- 播放时自动检测 PGS/SUP 字幕
-- 提示切换到 MPV 内核即可
-
-**方案 3：本地编译 FFmpeg 扩展**
-```bash
-# 详见文档
-cat docs/FFmpegExtensionSetup.md
-```
+ExoPlayer 默认不支持 PGS/SUP 图形字幕。播放含此类字幕的视频时：
+- 自动检测到 PGS/SUP 字幕
+- 提示切换到 **MPV 内核** 即可获得完整支持
 
 ## 项目结构
 
@@ -108,9 +90,7 @@ android/
 ├── app/                  # Android 应用模块
 │   └── src/main/kotlin/  # 原生插件
 │       └── ExoPlayerPlugin.kt
-└── exoplayer-ffmpeg/     # FFmpeg 扩展编译配置
-    ├── Dockerfile        # Docker 编译环境
-    └── build_ffmpeg_android.sh  # 编译脚本
+└── app/                  # Android 应用模块
 ```
 
 ## 技术栈

@@ -137,9 +137,16 @@ class _FallbackNetworkImageState extends State<_FallbackNetworkImage> {
       fit: widget.fit,
       enableMemoryCache: true,
       clearMemoryCacheIfFailed: true,
+      // 保持旧图直到新图加载完成，避免切换时闪烁黑屏
+      enableLoadState: true,
       loadStateChanged: (state) {
         switch (state.extendedImageLoadState) {
           case LoadState.loading:
+            // 如果有缓存，先尝试展示内存缓存中的图片（extended_image自动处理）
+            // 首次加载才显示placeholder
+            if (state.wasSynchronouslyLoaded) {
+              return state.completedWidget;
+            }
             return widget.placeholderBuilder();
           case LoadState.completed:
             return state.completedWidget;
@@ -183,6 +190,7 @@ class MediaPoster extends ConsumerWidget {
     final imageUrls = resolveMediaItemImageUrls(api, item, maxWidth: 300);
 
     final useFill = !width.isFinite || !height.isFinite;
+    final borderRadius = BorderRadius.circular(12);
 
     Widget imageWidget = MediaImage(
       imageUrl: imageUrls.isNotEmpty ? imageUrls.first : null,
@@ -190,7 +198,7 @@ class MediaPoster extends ConsumerWidget {
       width: width.isFinite ? width : null,
       height: height.isFinite ? height : null,
       fit: BoxFit.contain,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: borderRadius,
       heroTag: heroTag,
     );
 
@@ -201,11 +209,62 @@ class MediaPoster extends ConsumerWidget {
       );
     }
 
+    // 构建年份和评分信息
+    final List<Widget> infoWidgets = [];
+    if (item.productionYear != null) {
+      infoWidgets.add(
+        Text(
+          '${item.productionYear}',
+          style: TextStyle(
+            fontSize: 11,
+            color: Theme.of(context).textTheme.bodySmall?.color,
+          ),
+        ),
+      );
+    }
+    if (item.communityRating != null) {
+      if (infoWidgets.isNotEmpty) {
+        infoWidgets.add(
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text(
+              '·',
+              style: TextStyle(
+                fontSize: 11,
+                color: Theme.of(context).textTheme.bodySmall?.color,
+              ),
+            ),
+          ),
+        );
+      }
+      infoWidgets.add(
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.star, size: 12, color: Colors.amber),
+            const SizedBox(width: 2),
+            Text(
+              item.communityRating!.toStringAsFixed(1),
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Colors.amber,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // 是否为剧集（显示集数角标）
+    final isSeries = item.type == 'Series' || item.type == 'Season';
+    final episodeCount = item.childCount;
+
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: borderRadius,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         mainAxisSize: useFill ? MainAxisSize.max : MainAxisSize.min,
         children: [
           useFill
@@ -220,8 +279,8 @@ class MediaPoster extends ConsumerWidget {
                           left: 0,
                           right: 0,
                           child: ClipRRect(
-                            borderRadius: const BorderRadius.vertical(
-                              bottom: Radius.circular(8),
+                            borderRadius: BorderRadius.vertical(
+                              bottom: Radius.circular(borderRadius.topLeft.x),
                             ),
                             child: LinearProgressIndicator(
                               value: item.progress,
@@ -250,6 +309,27 @@ class MediaPoster extends ConsumerWidget {
                             ),
                           ),
                         ),
+                      // 剧集集数角标
+                      if (isSeries && episodeCount != null && episodeCount > 0)
+                        Positioned(
+                          top: 8,
+                          right: item.isWatched ? 32 : 8,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.7),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              '$episodeCount',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 )
@@ -263,8 +343,8 @@ class MediaPoster extends ConsumerWidget {
                         left: 0,
                         right: 0,
                         child: ClipRRect(
-                          borderRadius: const BorderRadius.vertical(
-                            bottom: Radius.circular(8),
+                          borderRadius: BorderRadius.vertical(
+                            bottom: Radius.circular(borderRadius.topLeft.x),
                           ),
                           child: LinearProgressIndicator(
                             value: item.progress,
@@ -293,18 +373,53 @@ class MediaPoster extends ConsumerWidget {
                           ),
                         ),
                       ),
+                    // 剧集集数角标
+                    if (isSeries && episodeCount != null && episodeCount > 0)
+                      Positioned(
+                        top: 8,
+                        right: item.isWatched ? 32 : 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.7),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            '$episodeCount',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
           const SizedBox(height: 6),
+          // 标题居中
           SizedBox(
             width: width.isFinite ? width : double.infinity,
             child: Text(
               item.name,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
             ),
           ),
+          // 年份和评分（居中）
+          if (infoWidgets.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            SizedBox(
+              width: width.isFinite ? width : double.infinity,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: infoWidgets,
+              ),
+            ),
+          ],
           if (item.seriesName != null)
             SizedBox(
               width: width.isFinite ? width : double.infinity,
@@ -312,6 +427,7 @@ class MediaPoster extends ConsumerWidget {
                 '${item.seriesName} | S${item.parentIndexNumber}E${item.indexNumber}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 11,
                   color: Theme.of(context).textTheme.bodySmall?.color,

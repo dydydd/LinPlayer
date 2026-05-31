@@ -45,6 +45,12 @@ class AuthResult {
 abstract class UserApi {
   /// 获取用户资料
   Future<User> getUser(String userId);
+  
+  /// 标记为已播放
+  Future<void> markAsPlayed(String itemId);
+  
+  /// 标记为未播放
+  Future<void> markAsUnplayed(String itemId);
 }
 
 class User {
@@ -200,6 +206,7 @@ class MediaItem {
   final String? seriesPrimaryImageTag;
   final String? mediaType; // 'Video', 'Audio'
   final String? parentId; // 父级ID（可能是媒体库或文件夹）
+  final int? childCount; // 子项数量（剧集的总集数）
 
   MediaItem({
     required this.id,
@@ -230,6 +237,7 @@ class MediaItem {
     this.seriesPrimaryImageTag,
     this.mediaType,
     this.parentId,
+    this.childCount,
   });
   
   String? get formattedRuntime {

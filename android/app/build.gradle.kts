@@ -86,31 +86,7 @@ dependencies {
     // Mature ASS integration for Media3/ExoPlayer.
     implementation("io.github.peerless2012:ass-media:0.4.0")
 
-    // FFmpeg 扩展（可选，当前仅作为 Media3 扩展库附加能力保留）
-    // GitHub Actions 会自动编译并放置到此路径
-    // 支持多种文件名格式（不同版本的 ExoPlayer 生成的文件名不同）
-    val possibleAarNames = listOf(
-        "ffmpeg-extension.aar",
-        "lib-decoder-ffmpeg-release.aar",
-        "decoder_ffmpeg-release.aar"
-    )
-    var ffmpegAar: java.io.File? = null
-    for (aarName in possibleAarNames) {
-        val candidate = file("../exoplayer-ffmpeg/libs/$aarName")
-        if (candidate.exists()) {
-            ffmpegAar = candidate
-            break
-        }
-    }
-    if (ffmpegAar != null) {
-        implementation(files(ffmpegAar))
-        println("✅ FFmpeg extension found: ${ffmpegAar.absolutePath}")
-    } else {
-        println("⚠️ FFmpeg extension not found at: ${file("../exoplayer-ffmpeg/libs/").absolutePath}")
-        println("   Expected one of: ${possibleAarNames.joinToString()}")
-        println("   Some Media3 extension capabilities may be unavailable.")
-        println("   Build with GitHub Actions to auto-compile, or see docs/FFmpegExtensionSetup.md")
-    }
+
 }
 
 flutter {

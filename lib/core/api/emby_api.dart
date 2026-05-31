@@ -117,6 +117,16 @@ class EmbyApiClient implements ApiClientFactory {
       options: options,
     );
   }
+
+  /// 包装 Dio.delete，自动去掉路径开头的 /，确保 baseUrl 子路径不被丢弃
+  Future<Response<T>> delete<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters, Options? options}) {
+    return _dio.delete<T>(
+      path.startsWith('/') ? path.substring(1) : path,
+      data: data,
+      queryParameters: queryParameters,
+      options: options,
+    );
+  }
 }
 
 // ==================== Auth ====================
@@ -192,6 +202,18 @@ class EmbyUserApi implements UserApi {
   Future<User> getUser(String userId) async {
     final resp = await _client.get('/Users/$userId');
     return _parseUser(resp.data as Map<String, dynamic>);
+  }
+
+  @override
+  Future<void> markAsPlayed(String itemId) async {
+    final uid = _requireUserId(_client);
+    await _client.post('/Users/$uid/PlayedItems/$itemId');
+  }
+
+  @override
+  Future<void> markAsUnplayed(String itemId) async {
+    final uid = _requireUserId(_client);
+    await _client.delete('/Users/$uid/PlayedItems/$itemId');
   }
 }
 
@@ -756,6 +778,7 @@ MediaItem _parseMediaItem(Map<String, dynamic> d) {
     seriesPrimaryImageTag: d['SeriesPrimaryImageTag']?.toString(),
     mediaType: d['MediaType']?.toString(),
     parentId: d['ParentId']?.toString(),
+    childCount: d['ChildCount'] as int? ?? d['RecursiveItemCount'] as int?,
   );
 }
 

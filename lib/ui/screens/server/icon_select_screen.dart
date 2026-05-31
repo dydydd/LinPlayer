@@ -20,10 +20,12 @@ class IconSelectScreen extends ConsumerStatefulWidget {
 class _IconSelectScreenState extends ConsumerState<IconSelectScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final _urlController = TextEditingController();
+  final _searchController = TextEditingController();
   
   final List<IconLibrary> _libraries = [];
   bool _isLoading = true;
   String? _loadError;
+  String _searchQuery = '';
   
   @override
   void initState() {
@@ -73,7 +75,19 @@ class _IconSelectScreenState extends ConsumerState<IconSelectScreen> with Single
   void dispose() {
     _tabController.dispose();
     _urlController.dispose();
+    _searchController.dispose();
     super.dispose();
+  }
+
+  List<IconItem> get _filteredIcons {
+    if (_searchQuery.isEmpty) {
+      return _libraries.expand((l) => l.icons).toList();
+    }
+    final query = _searchQuery.toLowerCase();
+    return _libraries
+        .expand((l) => l.icons)
+        .where((icon) => icon.name.toLowerCase().contains(query))
+        .toList();
   }
   
   @override
@@ -221,6 +235,9 @@ class _IconSelectScreenState extends ConsumerState<IconSelectScreen> with Single
       );
     }
 
+    final allIcons = _libraries.expand((l) => l.icons).toList();
+    final filteredIcons = _filteredIcons;
+
     return Column(
       children: [
         // Library list
@@ -234,7 +251,7 @@ class _IconSelectScreenState extends ConsumerState<IconSelectScreen> with Single
                   const Text('图标库', style: TextStyle(fontWeight: FontWeight.w600)),
                   const Spacer(),
                   Text(
-                    '共 ${_libraries.expand((l) => l.icons).length} 个图标',
+                    '共 ${allIcons.length} 个图标',
                     style: TextStyle(
                       fontSize: 12,
                       color: Theme.of(context).textTheme.bodySmall?.color,
@@ -260,6 +277,42 @@ class _IconSelectScreenState extends ConsumerState<IconSelectScreen> with Single
           ),
         ),
         const Divider(),
+        // Search bar
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: '搜索图标...',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: _searchQuery.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() => _searchQuery = '');
+                      },
+                    )
+                  : null,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+            ),
+            onChanged: (value) => setState(() => _searchQuery = value),
+          ),
+        ),
+        if (_searchQuery.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              '找到 ${filteredIcons.length} 个结果',
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).textTheme.bodySmall?.color,
+              ),
+            ),
+          ),
         // Icon grid
         Expanded(
           child: GridView.builder(
@@ -270,9 +323,9 @@ class _IconSelectScreenState extends ConsumerState<IconSelectScreen> with Single
               crossAxisSpacing: 12,
               mainAxisSpacing: 12,
             ),
-            itemCount: _libraries.expand((l) => l.icons).length,
+            itemCount: filteredIcons.length,
             itemBuilder: (context, index) {
-              final icon = _libraries.expand((l) => l.icons).elementAt(index);
+              final icon = filteredIcons[index];
               return _IconGridItem(
                 icon: icon,
                 onTap: () => _selectIcon(icon),

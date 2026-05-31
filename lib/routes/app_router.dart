@@ -43,44 +43,65 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             routes: [
               GoRoute(
                 path: '/',
-                builder: (context, state) => const ServerListScreen(),
+                pageBuilder: (context, state) => _buildPage(
+                  child: const ServerListScreen(),
+                  state: state,
+                ),
                 routes: [
                   GoRoute(
                     path: 'home',
-                    builder: (context, state) => const HomeScreen(),
+                    pageBuilder: (context, state) => _buildPage(
+                      child: const HomeScreen(),
+                      state: state,
+                    ),
                   ),
                   GoRoute(
                     path: 'add',
-                    builder: (context, state) => const AddServerScreen(),
+                    pageBuilder: (context, state) => _buildPage(
+                      child: const AddServerScreen(),
+                      state: state,
+                    ),
                   ),
                   GoRoute(
                     path: 'edit/:serverId',
-                    builder: (context, state) => EditServerScreen(
-                      serverId: state.pathParameters['serverId']!,
+                    pageBuilder: (context, state) => _buildPage(
+                      child: EditServerScreen(
+                        serverId: state.pathParameters['serverId']!,
+                      ),
+                      state: state,
                     ),
                   ),
                   GoRoute(
                     path: 'lines/:serverId',
-                    builder: (context, state) => ServerLinesScreen(
-                      serverId: state.pathParameters['serverId']!,
+                    pageBuilder: (context, state) => _buildPage(
+                      child: ServerLinesScreen(
+                        serverId: state.pathParameters['serverId']!,
+                      ),
+                      state: state,
                     ),
                   ),
                   GoRoute(
                     path: 'icons/:serverId',
-                    builder: (context, state) => IconSelectScreen(
-                      serverId: state.pathParameters['serverId']!,
+                    pageBuilder: (context, state) => _buildPage(
+                      child: IconSelectScreen(
+                        serverId: state.pathParameters['serverId']!,
+                      ),
+                      state: state,
                     ),
                   ),
                 ],
               ),
             ],
           ),
-          // 搜索Tab
+          // 搜索Tab（现更名为收藏）
           StatefulShellBranch(
             routes: [
               GoRoute(
                 path: '/search',
-                builder: (context, state) => const SearchScreen(),
+                pageBuilder: (context, state) => _buildPage(
+                  child: const SearchScreen(),
+                  state: state,
+                ),
               ),
             ],
           ),
@@ -89,7 +110,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             routes: [
               GoRoute(
                 path: '/settings',
-                builder: (context, state) => const SettingsScreen(),
+                pageBuilder: (context, state) => _buildPage(
+                  child: const SettingsScreen(),
+                  state: state,
+                ),
               ),
             ],
           ),
@@ -151,6 +175,39 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     ],
   );
 });
+
+/// 构建带动画过渡的页面
+CustomTransitionPage<void> _buildPage({
+  required Widget child,
+  required GoRouterState state,
+}) {
+  return CustomTransitionPage<void>(
+    key: state.pageKey,
+    child: child,
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      // 推拉效果：从右向左推入，离开时向左推出
+      const begin = Offset(1.0, 0.0);
+      const end = Offset.zero;
+      const reverseBegin = Offset.zero;
+      const reverseEnd = Offset(-0.3, 0.0);
+
+      final isReverse = animation.status == AnimationStatus.reverse;
+
+      var tween = Tween(begin: isReverse ? reverseBegin : begin, end: isReverse ? reverseEnd : end)
+          .chain(CurveTween(curve: Curves.easeInOutCubic));
+
+      return SlideTransition(
+        position: animation.drive(tween),
+        child: FadeTransition(
+          opacity: animation.drive(Tween(begin: 0.8, end: 1.0)),
+          child: child,
+        ),
+      );
+    },
+    transitionDuration: const Duration(milliseconds: 300),
+    reverseTransitionDuration: const Duration(milliseconds: 250),
+  );
+}
 
 /// 底部Tab外壳（悬浮样式）
 class MainShell extends StatefulWidget {
@@ -275,7 +332,7 @@ class _FloatingTabBar extends StatelessWidget {
           children: [
             _buildNavItem(0, Icons.dns_rounded, '服务器'),
             const SizedBox(width: 24),
-            _buildNavItem(1, Icons.search_rounded, '聚合搜索'),
+            _buildNavItem(1, Icons.favorite_rounded, '收藏'),
             const SizedBox(width: 24),
             _buildNavItem(2, Icons.settings_rounded, '设置'),
           ],

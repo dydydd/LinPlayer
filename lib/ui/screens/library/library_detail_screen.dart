@@ -107,11 +107,12 @@ class _LibraryDetailScreenState extends ConsumerState<LibraryDetailScreen> {
                   itemCount: items.length,
                   itemBuilder: (context, index) {
                     final item = items[index];
-                    return MediaPoster(
+                  return MediaPoster(
                       item: item,
                       width: double.infinity,
                       height: double.infinity,
                       onTap: () => context.push(mediaRouteForItem(item)),
+                      heroTag: 'library_${item.id}',
                     );
                   },
                 );
