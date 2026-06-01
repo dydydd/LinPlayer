@@ -469,7 +469,7 @@ class RandomRecommendationCarousel extends ConsumerStatefulWidget {
 }
 
 class _RandomRecommendationCarouselState extends ConsumerState<RandomRecommendationCarousel> {
-  final PageController _pageController = PageController();
+  PageController? _pageController;
   int _currentPage = 0;
   Color _dominantColor = Colors.transparent;
   Color _backgroundColor = const Color(0xFF121212);
@@ -478,8 +478,15 @@ class _RandomRecommendationCarouselState extends ConsumerState<RandomRecommendat
   final Map<String, ExtractedColors> _colorCache = {};
 
   @override
+  void initState() {
+    super.initState();
+    _pageController = PageController();
+  }
+
+  @override
   void dispose() {
-    _pageController.dispose();
+    _pageController?.dispose();
+    _pageController = null;
     super.dispose();
   }
 
@@ -520,8 +527,15 @@ class _RandomRecommendationCarouselState extends ConsumerState<RandomRecommendat
   }
 
   Future<void> _extractColorForItem(String itemId, String imageUrl) async {
-    final colors = await ColorExtractor.extractFromUrl(imageUrl);
-    _colorCache[itemId] = colors;
+    try {
+      final colors = await ColorExtractor.extractFromUrl(imageUrl);
+      if (mounted) {
+        _colorCache[itemId] = colors;
+      }
+    } catch (e) {
+      // 颜色提取失败不影响图片显示
+      debugPrint('Color extraction failed for $itemId: $e');
+    }
   }
 
   void _applyColorForItem(MediaItem item) {
@@ -546,6 +560,20 @@ class _RandomRecommendationCarouselState extends ConsumerState<RandomRecommendat
     }
   }
 
+  void _initColorExtraction(List<MediaItem> items) {
+    if (_initialColorExtracted || items.isEmpty) return;
+    _initialColorExtracted = true;
+    
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _precacheColors(items).then((_) {
+        if (mounted) {
+          _applyColorForItem(items[0]);
+        }
+      });
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final recommendationsAsync = ref.watch(randomRecommendationsProvider);
@@ -558,14 +586,10 @@ class _RandomRecommendationCarouselState extends ConsumerState<RandomRecommendat
         if (items.isEmpty) return const SizedBox.shrink();
 
         // 首次加载时预提取所有颜色并应用第一个
-        if (!_initialColorExtracted && items.isNotEmpty) {
-          _initialColorExtracted = true;
-          _precacheColors(items).then((_) {
-            if (mounted) {
-              _applyColorForItem(items[0]);
-            }
-          });
-        }
+        _initColorExtraction(items);
+
+        final controller = _pageController;
+        if (controller == null) return const SizedBox.shrink();
 
         return SizedBox(
           height: carouselHeight,
@@ -573,7 +597,7 @@ class _RandomRecommendationCarouselState extends ConsumerState<RandomRecommendat
             children: [
               // 轮播内容
               PageView.builder(
-                controller: _pageController,
+                controller: controller,
                 itemCount: items.length,
                 allowImplicitScrolling: false,
                 physics: const ClampingScrollPhysics(),

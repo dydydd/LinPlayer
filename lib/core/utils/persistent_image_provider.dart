@@ -257,7 +257,11 @@ class PersistentNetworkImageProvider
   }
 
   static final HttpClient _sharedHttpClient = HttpClient()
-    ..autoUncompress = false;
+    ..autoUncompress = false
+    ..badCertificateCallback = (X509Certificate cert, String host, int port) {
+      // 允许自签名证书，与 Dio 配置保持一致
+      return true;
+    };
 
   static HttpClient get httpClient {
     HttpClient client = _sharedHttpClient;

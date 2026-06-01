@@ -69,8 +69,11 @@ class _AddServerScreenState extends ConsumerState<AddServerScreen> with SingleTi
   }
   
   Widget _buildManualTab() {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16).copyWith(bottom: 100),
+      padding: const EdgeInsets.all(16).copyWith(
+        bottom: bottomInset > 0 ? bottomInset + 24 : 100,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -144,8 +147,11 @@ class _AddServerScreenState extends ConsumerState<AddServerScreen> with SingleTi
   }
   
   Widget _buildBatchTab() {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16).copyWith(bottom: 100),
+      padding: const EdgeInsets.all(16).copyWith(
+        bottom: bottomInset > 0 ? bottomInset + 24 : 100,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -229,9 +235,12 @@ class _AddServerScreenState extends ConsumerState<AddServerScreen> with SingleTi
   
   Widget _buildImportTab() {
     final importController = TextEditingController();
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16).copyWith(bottom: 100),
+      padding: const EdgeInsets.all(16).copyWith(
+        bottom: bottomInset > 0 ? bottomInset + 24 : 100,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

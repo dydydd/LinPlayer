@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
 import 'api_interfaces.dart';
 
@@ -34,6 +36,18 @@ class EmbyApiClient implements ApiClientFactory {
         if (authToken != null) 'X-Emby-Token': authToken,
       },
     ));
+    
+    // 处理自签名证书和证书验证问题
+    (dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () {
+      final client = HttpClient();
+      client.badCertificateCallback = (X509Certificate cert, String host, int port) {
+        // 在生产环境中应该验证证书，但这里允许自签名证书以提高兼容性
+        // TODO: 考虑添加证书指纹验证
+        return true;
+      };
+      return client;
+    };
+    
     dio.interceptors.add(LogInterceptor(requestBody: true, responseBody: false));
     return dio;
   }
