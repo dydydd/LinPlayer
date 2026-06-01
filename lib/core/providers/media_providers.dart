@@ -8,21 +8,18 @@ import '../providers/app_providers.dart';
 
 /// 继续观看
 final resumeItemsProvider = FutureProvider<List<MediaItem>>((ref) async {
-  ref.keepAlive();
   final api = ref.watch(apiClientProvider);
   return await api.home.getResumeItems();
 });
 
 /// 下一集
 final nextUpProvider = FutureProvider<List<MediaItem>>((ref) async {
-  ref.keepAlive();
   final api = ref.watch(apiClientProvider);
   return await api.home.getNextUp();
 });
 
 /// 媒体库列表（已过滤被屏蔽的）
 final librariesProvider = FutureProvider<List<Library>>((ref) async {
-  ref.keepAlive();
   final api = ref.watch(apiClientProvider);
   final hiddenLibraries = ref.watch(hiddenLibrariesProvider);
   final allLibraries = await api.home.getLibraries();
@@ -31,14 +28,12 @@ final librariesProvider = FutureProvider<List<Library>>((ref) async {
 
 /// 最新添加（按媒体库）
 final latestItemsProvider = FutureProvider.family<List<MediaItem>, String>((ref, libraryId) async {
-  ref.keepAlive();
   final api = ref.watch(apiClientProvider);
   return await api.home.getLatestItems(libraryId, limit: 20);
 });
 
 /// 随机推荐
 final randomRecommendationsProvider = FutureProvider<List<MediaItem>>((ref) async {
-  ref.keepAlive();
   final api = ref.watch(apiClientProvider);
   return await api.home.getRandomRecommendations();
 });

@@ -1,11 +1,36 @@
+import 'dart:collection';
 import 'package:flutter/material.dart';
 import 'package:palette_generator/palette_generator.dart';
 
 /// 颜色提取工具类
 class ColorExtractor {
+  static const int _maxCacheEntries = 96;
+  static final LinkedHashMap<String, ExtractedColors> _cache =
+      LinkedHashMap<String, ExtractedColors>();
+  static final Map<String, Future<ExtractedColors>> _pending =
+      <String, Future<ExtractedColors>>{};
+
   /// 从图片URL提取主色调和暗色背景
   /// 降低采样分辨率以减少主线程阻塞
   static Future<ExtractedColors> extractFromUrl(String imageUrl) async {
+    final cached = _readCache(imageUrl);
+    if (cached != null) {
+      return cached;
+    }
+
+    final pending = _pending[imageUrl];
+    if (pending != null) {
+      return pending;
+    }
+
+    final future = _extract(imageUrl);
+    _pending[imageUrl] = future;
+    return future.whenComplete(() {
+      _pending.remove(imageUrl);
+    });
+  }
+
+  static Future<ExtractedColors> _extract(String imageUrl) async {
     try {
       final palette = await PaletteGenerator.fromImageProvider(
         NetworkImage(imageUrl),
@@ -18,7 +43,7 @@ class ColorExtractor {
       final colors = palette.colors.toList();
       
       if (colors.isEmpty) {
-        return ExtractedColors.fallback();
+        return _writeCache(imageUrl, ExtractedColors.fallback());
       }
 
       // 计算加权平均颜色（基于像素占比）
@@ -39,15 +64,35 @@ class ColorExtractor {
           ? darkMuted 
           : bgHsl.withSaturation(bgHsl.saturation * 0.7).withLightness(0.12).toColor();
 
-      return ExtractedColors(
-        primary: vibrant,
-        background: safeBackground,
-        gradientStart: muted.withValues(alpha: 0.7),
-        gradientEnd: safeBackground,
+      return _writeCache(
+        imageUrl,
+        ExtractedColors(
+          primary: vibrant,
+          background: safeBackground,
+          gradientStart: muted.withValues(alpha: 0.7),
+          gradientEnd: safeBackground,
+        ),
       );
     } catch (e) {
-      return ExtractedColors.fallback();
+      return _writeCache(imageUrl, ExtractedColors.fallback());
     }
+  }
+
+  static ExtractedColors? _readCache(String imageUrl) {
+    final cached = _cache.remove(imageUrl);
+    if (cached != null) {
+      _cache[imageUrl] = cached;
+    }
+    return cached;
+  }
+
+  static ExtractedColors _writeCache(String imageUrl, ExtractedColors colors) {
+    _cache.remove(imageUrl);
+    _cache[imageUrl] = colors;
+    if (_cache.length > _maxCacheEntries) {
+      _cache.remove(_cache.keys.first);
+    }
+    return colors;
   }
 
   /// 计算颜色的加权平均值

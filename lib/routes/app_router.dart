@@ -315,6 +315,10 @@ class _MainShellState extends State<MainShell> {
 
   bool get _isHomePage => widget.currentPath == '/home';
   bool get _isServerListPage => widget.currentPath == '/';
+  bool get _supportsFloatingTabBar => switch (widget.currentPath) {
+        '/' || '/home' || '/favorites' || '/settings' => true,
+        _ => false,
+      };
 
   bool _onScrollNotification(ScrollNotification notification) {
     if (!_isHomePage) return false;
@@ -342,30 +346,35 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
-    final bottomPadding = MediaQuery.of(context).padding.bottom;
-    final tabHeight = 64.0 + bottomPadding;
+    final mediaQuery = MediaQuery.of(context);
+    final isKeyboardVisible = mediaQuery.viewInsets.bottom > 0;
+    final showFloatingTabBar = _supportsFloatingTabBar && !isKeyboardVisible;
+    final bottomPadding = mediaQuery.padding.bottom;
+    final tabHeight = showFloatingTabBar ? 64.0 + bottomPadding : 0.0;
     final effectiveOpacity = _isServerListPage ? 1.0 : _tabOpacity;
 
     return NotificationListener<ScrollNotification>(
       onNotification: _onScrollNotification,
       child: Scaffold(
         body: MediaQuery(
-          data: MediaQuery.of(context).copyWith(
-            padding: MediaQuery.of(context).padding.copyWith(
-              bottom: MediaQuery.of(context).padding.bottom + tabHeight,
+          data: mediaQuery.copyWith(
+            padding: mediaQuery.padding.copyWith(
+              bottom: mediaQuery.padding.bottom + tabHeight,
             ),
           ),
           child: widget.navigationShell,
         ),
         bottomNavigationBar: const SizedBox.shrink(),
         floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
-        floatingActionButton: AnimatedOpacity(
-          opacity: effectiveOpacity,
-          duration: const Duration(milliseconds: 200),
-          child: _FloatingTabBar(
-            navigationShell: widget.navigationShell,
-          ),
-        ),
+        floatingActionButton: showFloatingTabBar
+            ? AnimatedOpacity(
+                opacity: effectiveOpacity,
+                duration: const Duration(milliseconds: 200),
+                child: _FloatingTabBar(
+                  navigationShell: widget.navigationShell,
+                ),
+              )
+            : null,
       ),
     );
   }

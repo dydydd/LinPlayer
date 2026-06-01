@@ -21,6 +21,7 @@ class _AddServerScreenState extends ConsumerState<AddServerScreen> with SingleTi
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   final _batchController = TextEditingController();
+  final _importController = TextEditingController();
   
   bool _isLoading = false;
   String? _errorMessage;
@@ -40,6 +41,7 @@ class _AddServerScreenState extends ConsumerState<AddServerScreen> with SingleTi
     _usernameController.dispose();
     _passwordController.dispose();
     _batchController.dispose();
+    _importController.dispose();
     super.dispose();
   }
   
@@ -234,7 +236,6 @@ class _AddServerScreenState extends ConsumerState<AddServerScreen> with SingleTi
   }
   
   Widget _buildImportTab() {
-    final importController = TextEditingController();
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     
     return SingleChildScrollView(
@@ -268,7 +269,7 @@ class _AddServerScreenState extends ConsumerState<AddServerScreen> with SingleTi
           ),
           const SizedBox(height: 16),
           TextField(
-            controller: importController,
+            controller: _importController,
             decoration: const InputDecoration(
               labelText: '粘贴JSON配置',
               hintText: '[{"name": "服务器", "url": "https://..."}]',
@@ -278,7 +279,7 @@ class _AddServerScreenState extends ConsumerState<AddServerScreen> with SingleTi
           ),
           const SizedBox(height: 16),
           FilledButton.icon(
-            onPressed: () => _importFromJson(context, ref, importController.text),
+            onPressed: () => _importFromJson(context, ref, _importController.text),
             icon: const Icon(Icons.paste),
             label: const Text('解析并导入'),
           ),

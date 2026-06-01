@@ -403,14 +403,7 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
                       ),
                     ),
                   if (widget.item.productionYear != null && widget.item.formattedRuntime != null)
-                    const Text(
-                      ' · ',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.white,
-                        shadows: [Shadow(blurRadius: 4, color: Colors.black54)],
-                      ),
-                    ),
+                    const SizedBox(width: 12),
                   if (widget.item.formattedRuntime != null)
                     Text(
                       widget.item.formattedRuntime!,

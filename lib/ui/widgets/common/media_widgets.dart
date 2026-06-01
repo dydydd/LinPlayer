@@ -204,16 +204,30 @@ class MediaPoster extends ConsumerWidget {
     final api = ref.read(apiClientProvider);
     final imageUrls = resolveMediaItemImageUrls(api, item, maxWidth: 320);
     final useFill = !width.isFinite || !height.isFinite;
-    final borderRadius = BorderRadius.circular(18);
+    final borderRadius = BorderRadius.circular(16);
 
-    Widget imageWidget = MediaImage(
-      imageUrl: imageUrls.isNotEmpty ? imageUrls.first : null,
-      imageUrls: imageUrls.length > 1 ? imageUrls.sublist(1) : null,
+    Widget imageWidget = SizedBox(
       width: width.isFinite ? width : null,
       height: height.isFinite ? height : null,
-      fit: BoxFit.cover,
-      borderRadius: borderRadius,
-      heroTag: heroTag,
+      child: ClipRRect(
+        borderRadius: borderRadius,
+        child: ColoredBox(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          child: SizedBox.expand(
+            child: Transform.scale(
+              scale: 1.05,
+              child: MediaImage(
+                imageUrl: imageUrls.isNotEmpty ? imageUrls.first : null,
+                imageUrls: imageUrls.length > 1 ? imageUrls.sublist(1) : null,
+                width: double.infinity,
+                height: double.infinity,
+                fit: BoxFit.contain,
+                heroTag: heroTag,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
 
     if (useFill) {
@@ -237,18 +251,7 @@ class MediaPoster extends ConsumerWidget {
     }
     if (item.communityRating != null) {
       if (infoWidgets.isNotEmpty) {
-        infoWidgets.add(
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Text(
-              '路',
-              style: TextStyle(
-                fontSize: 11,
-                color: Theme.of(context).textTheme.bodySmall?.color,
-              ),
-            ),
-          ),
-        );
+        infoWidgets.add(const SizedBox(width: 6));
       }
       infoWidgets.add(
         Row(

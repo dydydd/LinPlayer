@@ -473,7 +473,8 @@ class _RandomRecommendationCarouselState extends ConsumerState<RandomRecommendat
   int _currentPage = 0;
   Color _dominantColor = Colors.transparent;
   Color _backgroundColor = const Color(0xFF121212);
-  bool _initialColorExtracted = false;
+  String? _itemsSignature;
+  int _colorPrefetchToken = 0;
   // 颜色缓存：itemId -> ExtractedColors
   final Map<String, ExtractedColors> _colorCache = {};
 
@@ -485,51 +486,69 @@ class _RandomRecommendationCarouselState extends ConsumerState<RandomRecommendat
 
   @override
   void dispose() {
+    _colorPrefetchToken++;
+    _colorCache.clear();
     _pageController?.dispose();
     _pageController = null;
     super.dispose();
   }
 
-  /// 预提取所有推荐封面的颜色（延迟执行，避免阻塞首次渲染）
-  Future<void> _precacheColors(List<MediaItem> items) async {
+  /// 只预取当前页附近的颜色，避免离开首页后仍有大量任务排队。
+  Future<void> _precacheColors(List<MediaItem> items, int centerIndex) async {
+    if (items.isEmpty) return;
+
     final api = ref.read(apiClientProvider);
+    final int sessionId = ++_colorPrefetchToken;
+    final int safeIndex = centerIndex.clamp(0, items.length - 1);
 
-    // 分批处理，每批最多3个，避免一次性大量网络请求阻塞UI
-    const batchSize = 3;
-    for (var i = 0; i < items.length; i += batchSize) {
-      final batch = items.skip(i).take(batchSize);
-      final futures = <Future<void>>[];
+    for (final index in _buildPrefetchIndexes(safeIndex, items.length)) {
+      if (!mounted || sessionId != _colorPrefetchToken) return;
 
-      for (final item in batch) {
-        // 跳过已缓存的颜色
-        if (_colorCache.containsKey(item.id)) continue;
-
+      final item = items[index];
+      if (!_colorCache.containsKey(item.id)) {
         final imageUrl = item.backdropImageTag != null
             ? api.image.getBackdropImageUrl(item.id, tag: item.backdropImageTag, maxWidth: 400)
             : item.primaryImageTag != null
                 ? api.image.getPrimaryImageUrl(item.id, tag: item.primaryImageTag, maxWidth: 400)
                 : null;
 
-        if (imageUrl == null) continue;
-
-        futures.add(_extractColorForItem(item.id, imageUrl));
+        if (imageUrl != null) {
+          await _extractColorForItem(item.id, imageUrl, sessionId);
+        }
       }
 
-      if (futures.isNotEmpty) {
-        await Future.wait(futures);
+      if (index == safeIndex && mounted && sessionId == _colorPrefetchToken) {
+        _applyColorForItem(item);
       }
 
-      // 让出时间片，避免阻塞UI
-      if (i + batchSize < items.length) {
-        await Future.delayed(const Duration(milliseconds: 16));
-      }
+      if (!mounted || sessionId != _colorPrefetchToken) return;
+      await Future<void>.delayed(const Duration(milliseconds: 16));
     }
   }
 
-  Future<void> _extractColorForItem(String itemId, String imageUrl) async {
+  List<int> _buildPrefetchIndexes(int centerIndex, int itemCount) {
+    final indexes = <int>[];
+
+    void addIndex(int index) {
+      if (index >= 0 && index < itemCount && !indexes.contains(index)) {
+        indexes.add(index);
+      }
+    }
+
+    addIndex(centerIndex);
+    addIndex(centerIndex + 1);
+    addIndex(centerIndex - 1);
+    return indexes;
+  }
+
+  Future<void> _extractColorForItem(
+    String itemId,
+    String imageUrl,
+    int sessionId,
+  ) async {
     try {
       final colors = await ColorExtractor.extractFromUrl(imageUrl);
-      if (mounted) {
+      if (mounted && sessionId == _colorPrefetchToken) {
         _colorCache[itemId] = colors;
       }
     } catch (e) {
@@ -552,25 +571,38 @@ class _RandomRecommendationCarouselState extends ConsumerState<RandomRecommendat
   }
 
   void _onPageChanged(int index, List<MediaItem> items) {
-    setState(() {
-      _currentPage = index;
-    });
+    if (_currentPage != index) {
+      setState(() {
+        _currentPage = index;
+      });
+    }
+
     if (index < items.length) {
       _applyColorForItem(items[index]);
+      _precacheColors(items, index);
     }
   }
 
-  void _initColorExtraction(List<MediaItem> items) {
-    if (_initialColorExtracted || items.isEmpty) return;
-    _initialColorExtracted = true;
-    
+  void _syncColorExtraction(List<MediaItem> items) {
+    if (items.isEmpty) return;
+
+    final signature = items.map((item) => item.id).join('|');
+    if (_itemsSignature == signature) return;
+
+    _itemsSignature = signature;
+    _currentPage = 0;
+    _dominantColor = Colors.transparent;
+    _backgroundColor = const Color(0xFF121212);
+    _colorCache.clear();
+    _colorPrefetchToken++;
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _precacheColors(items).then((_) {
-        if (mounted) {
-          _applyColorForItem(items[0]);
-        }
-      });
+      final controller = _pageController;
+      if (controller != null && controller.hasClients) {
+        controller.jumpToPage(0);
+      }
+      _precacheColors(items, 0);
     });
   }
 
@@ -585,8 +617,12 @@ class _RandomRecommendationCarouselState extends ConsumerState<RandomRecommendat
       data: (items) {
         if (items.isEmpty) return const SizedBox.shrink();
 
-        // 首次加载时预提取所有颜色并应用第一个
-        _initColorExtraction(items);
+        _syncColorExtraction(items);
+
+        final currentPage = _currentPage.clamp(0, items.length - 1);
+        if (_currentPage != currentPage) {
+          _currentPage = currentPage;
+        }
 
         final controller = _pageController;
         if (controller == null) return const SizedBox.shrink();
@@ -624,12 +660,12 @@ class _RandomRecommendationCarouselState extends ConsumerState<RandomRecommendat
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: List.generate(items.length, (index) {
                     return Container(
-                      width: index == _currentPage ? 20 : 6,
+                      width: index == currentPage ? 20 : 6,
                       height: 6,
                       margin: const EdgeInsets.symmetric(horizontal: 3),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(3),
-                        color: index == _currentPage
+                        color: index == currentPage
                             ? const Color(0xFF5B8DEF)
                             : Colors.white.withValues(alpha: 0.5),
                       ),

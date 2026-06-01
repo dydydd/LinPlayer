@@ -196,6 +196,7 @@ class _GridView extends ConsumerWidget {
             ? api.image.getPrimaryImageUrl(library.id,
                 tag: library.primaryImageTag, maxWidth: 400)
             : null;
+        final borderRadius = BorderRadius.circular(16);
 
         return GestureDetector(
           onTap: () => onTap(library),
@@ -206,16 +207,23 @@ class _GridView extends ConsumerWidget {
                   children: [
                     Container(
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(18),
+                        borderRadius: borderRadius,
                       ),
                       clipBehavior: Clip.antiAlias,
                       child: imageUrl != null
-                          ? MediaImage(
-                              imageUrl: imageUrl,
-                              width: double.infinity,
-                              height: double.infinity,
-                              fit: BoxFit.cover,
-                              borderRadius: BorderRadius.circular(18),
+                          ? ColoredBox(
+                              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                              child: SizedBox.expand(
+                                child: Transform.scale(
+                                  scale: 1.04,
+                                  child: MediaImage(
+                                    imageUrl: imageUrl,
+                                    width: double.infinity,
+                                    height: double.infinity,
+                                    fit: BoxFit.contain,
+                                  ),
+                                ),
+                              ),
                             )
                           : Container(
                               color: const Color(0xFF5B8DEF).withValues(alpha: 0.1),

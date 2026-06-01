@@ -351,13 +351,28 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
               ),
               if (isMovie && widget.item.productionYear != null) ...[
                 const SizedBox(height: 8),
-                Text(
-                  '${widget.item.productionYear} · ${widget.item.formattedRuntime ?? ''}',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Colors.white,
-                    shadows: [Shadow(blurRadius: 4, color: Colors.black54)],
-                  ),
+                Wrap(
+                  spacing: 12,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      '${widget.item.productionYear}',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Colors.white,
+                        shadows: [Shadow(blurRadius: 4, color: Colors.black54)],
+                      ),
+                    ),
+                    if ((widget.item.formattedRuntime ?? '').isNotEmpty)
+                      Text(
+                        widget.item.formattedRuntime!,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: Colors.white,
+                          shadows: [Shadow(blurRadius: 4, color: Colors.black54)],
+                        ),
+                      ),
+                  ],
                 ),
               ],
             ],
