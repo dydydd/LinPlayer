@@ -759,7 +759,13 @@ class EmbyImageApi implements ImageApi {
 
 String _requireUserId(EmbyApiClient c) {
   final uid = c._userId;
-  if (uid == null || uid.isEmpty) throw Exception('Not authenticated: userId missing');
+  if (uid == null || uid.isEmpty) {
+    // 如果 authToken 存在，使用 "Me" 作为当前用户的别名（Emby API 支持）
+    if (c._authToken != null && c._authToken!.isNotEmpty) {
+      return 'Me';
+    }
+    throw Exception('Not authenticated: userId missing');
+  }
   return uid;
 }
 

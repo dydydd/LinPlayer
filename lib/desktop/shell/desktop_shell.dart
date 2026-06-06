@@ -40,9 +40,21 @@ class DesktopShell extends ConsumerStatefulWidget {
 
 class _DesktopShellState extends ConsumerState<DesktopShell> {
   bool _isSidebarCollapsed = false;
+  bool _hasAttemptedRestore = false;
   
   @override
   Widget build(BuildContext context) {
+    final servers = ref.watch(serverListProvider);
+    final currentServer = ref.watch(currentServerProvider);
+    
+    // 服务器列表已加载且当前服务器未恢复时，尝试恢复
+    if (servers.isNotEmpty && currentServer == null && !_hasAttemptedRestore) {
+      _hasAttemptedRestore = true;
+      Future.microtask(() async {
+        await ref.read(currentServerProvider.notifier).loadFromSaved(servers);
+      });
+    }
+
     final currentPath = GoRouterState.of(context).uri.path;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final sidebarWidth = _isSidebarCollapsed ? _kSidebarCollapsedWidth : _kSidebarWidth;

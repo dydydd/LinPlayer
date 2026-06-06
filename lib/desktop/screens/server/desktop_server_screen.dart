@@ -145,8 +145,24 @@ class _DesktopServerScreenState extends ConsumerState<DesktopServerScreen> {
   
   void _selectServer(ServerConfig server) {
     ref.read(currentServerProvider.notifier).state = server;
-    if (server.authToken != null) {
+    if (server.authToken != null && server.userId != null) {
       ref.read(authStateProvider.notifier).state = AuthState.authenticated;
+    } else {
+      ref.read(authStateProvider.notifier).state = AuthState.unauthenticated;
+      // 提示用户需要登录
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${server.name} 未认证，部分功能可能无法使用'),
+            action: SnackBarAction(
+              label: '登录',
+              onPressed: () {
+                // TODO: 打开登录对话框
+              },
+            ),
+          ),
+        );
+      }
     }
     ref.invalidate(librariesProvider);
     ref.invalidate(resumeItemsProvider);
@@ -341,7 +357,7 @@ class _ServerGridCardState extends State<_ServerGridCard> with SingleTickerProvi
                     ),
                   ),
                   
-                  // 当前选中标记
+                  // 当前选中标记 / 未认证标记
                   if (widget.isCurrent)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -364,6 +380,33 @@ class _ServerGridCardState extends State<_ServerGridCard> with SingleTickerProvi
                               fontSize: 10,
                               fontWeight: FontWeight.w600,
                               color: Color(0xFF5B8DEF),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else if (widget.server.authToken == null || widget.server.userId == null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.warning_amber_rounded,
+                            size: 12,
+                            color: Colors.orange.shade700,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '未认证',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.orange.shade700,
                             ),
                           ),
                         ],
@@ -534,7 +577,7 @@ class _ServerListTileState extends State<_ServerListTile> with SingleTickerProvi
                   ),
                 ),
                 
-                // 当前标记
+                // 当前标记 / 未认证标记
                 if (widget.isCurrent)
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -557,6 +600,33 @@ class _ServerListTileState extends State<_ServerListTile> with SingleTickerProvi
                             fontSize: 10,
                             fontWeight: FontWeight.w600,
                             color: Color(0xFF5B8DEF),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else if (widget.server.authToken == null || widget.server.userId == null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.warning_amber_rounded,
+                          size: 12,
+                          color: Colors.orange.shade700,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '未认证',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.orange.shade700,
                           ),
                         ),
                       ],

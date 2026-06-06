@@ -36,6 +36,9 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen> {
   Widget build(BuildContext context) {
     final hideDailyRecommendations = ref.watch(hideDailyRecommendationsProvider);
     final servers = ref.watch(serverListProvider);
+    final currentServer = ref.watch(currentServerProvider);
+    final isUnauthenticated = currentServer != null && 
+        (currentServer.authToken == null || currentServer.userId == null);
     
     return Scaffold(
       body: CustomScrollView(
@@ -50,6 +53,12 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen> {
               child: _EmptyServerGuide(),
             )
           else ...[
+            // 当前服务器未认证提示
+            if (isUnauthenticated)
+              SliverToBoxAdapter(
+                child: _UnauthenticatedBanner(server: currentServer),
+              ),
+            
             // 主内容区（轮播 + 继续观看）
             if (!hideDailyRecommendations)
               const SliverToBoxAdapter(child: _HeroSection()),
@@ -861,6 +870,73 @@ class _LibraryLatestItems extends ConsumerWidget {
         debugPrint('[_LibraryLatestItems] Error loading ${library.name}: $error');
         return const SizedBox.shrink();
       },
+    );
+  }
+}
+
+/// 未认证提示横幅
+class _UnauthenticatedBanner extends StatelessWidget {
+  final ServerConfig server;
+  
+  const _UnauthenticatedBanner({required this.server});
+  
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(24, 8, 24, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: Colors.orange.withValues(alpha: 0.3),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.warning_amber_rounded,
+            color: Colors.orange.shade700,
+            size: 20,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '当前服务器未认证',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.orange.shade800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${server.name} 需要登录才能访问内容',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.orange.shade700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          FilledButton.tonal(
+            onPressed: () {
+              context.push('/servers');
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.orange.withValues(alpha: 0.15),
+              foregroundColor: Colors.orange.shade800,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            ),
+            child: const Text('去认证'),
+          ),
+        ],
+      ),
     );
   }
 }

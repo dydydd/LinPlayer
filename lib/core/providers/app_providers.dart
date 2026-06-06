@@ -251,10 +251,16 @@ ServerConfig _serverConfigFromJson(Map<String, dynamic> json) {
       remark: l['remark'] as String?,
     )).toList() ?? [],
     activeLineIndex: json['activeLineIndex'] as int? ?? 0,
-    username: json['username'] as String?,
-    authToken: json['authToken'] as String?,
-    userId: json['userId'] as String?,
+    username: _emptyToNull(json['username'] as String?),
+    authToken: _emptyToNull(json['authToken'] as String?),
+    userId: _emptyToNull(json['userId'] as String?),
   );
+}
+
+/// 将空字符串转换为 null（清理旧数据中的空字符串）
+String? _emptyToNull(String? value) {
+  if (value == null || value.isEmpty) return null;
+  return value;
 }
 
 /// 当前用户Provider
