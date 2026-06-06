@@ -28,6 +28,37 @@ jobs:
           gh release download "v${{ inputs.version }}-pre" \
             --dir /tmp/assets \
             --repo "${{ github.repository }}"
+          
+          echo "Downloaded assets:"
+          ls -la /tmp/assets/
+
+      - name: Verify assets
+        run: |
+          echo "Verifying downloaded assets..."
+          
+          # Check Android APKs
+          if [ -f "/tmp/assets/app-arm64-v8a-release.apk" ]; then
+            echo "✓ Android ARM64 APK found"
+            ls -lh /tmp/assets/app-arm64-v8a-release.apk
+          else
+            echo "⚠ Android ARM64 APK not found"
+          fi
+          
+          if [ -f "/tmp/assets/app-armeabi-v7a-release.apk" ]; then
+            echo "✓ Android ARMv7 APK found"
+            ls -lh /tmp/assets/app-armeabi-v7a-release.apk
+          else
+            echo "⚠ Android ARMv7 APK not found"
+          fi
+          
+          # Check Windows build
+          WINDOWS_ZIP=$(ls /tmp/assets/LinPlayer-Windows-*.zip 2>/dev/null | head -1)
+          if [ -n "$WINDOWS_ZIP" ]; then
+            echo "✓ Windows build found: $(basename $WINDOWS_ZIP)"
+            ls -lh "$WINDOWS_ZIP"
+          else
+            echo "⚠ Windows build not found"
+          fi
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -37,6 +68,30 @@ jobs:
           prerelease: false
           files: /tmp/assets/*
           generate_release_notes: true
+          body: |
+            ## LinPlayer v${{ inputs.version }}
+
+            ### 下载
+
+            **Android:**
+            - `app-arm64-v8a-release.apk` - 推荐（大多数现代设备）
+            - `app-armeabi-v7a-release.apk` - 兼容旧设备
+
+            **Windows:**
+            - `LinPlayer-Windows-v${{ inputs.version }}.zip` - 解压后运行 `linplayer_mobile.exe`
+
+            ### 安装说明
+
+            **Android:**
+            1. 下载对应架构的 APK
+            2. 允许安装未知来源应用
+            3. 安装并运行
+
+            **Windows:**
+            1. 下载 ZIP 文件
+            2. 解压到任意目录
+            3. 运行 `linplayer_mobile.exe`
+            4. 首次运行可能需要安装 Visual C++ Redistributable（如提示）
 
       - name: Delete Pre-release
         env:

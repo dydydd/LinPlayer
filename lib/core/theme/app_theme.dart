@@ -90,6 +90,12 @@ class AppTheme {
         bodyMedium: TextStyle(fontSize: textSizeSM),
         bodySmall: TextStyle(fontSize: textSizeXS),
       ),
+      scrollbarTheme: ScrollbarThemeData(
+        thickness: WidgetStateProperty.all(8),
+        radius: const Radius.circular(4),
+        thumbColor: WidgetStateProperty.all(const Color(0xFF5B8DEF).withValues(alpha: 0.3)),
+        trackColor: WidgetStateProperty.all(Colors.transparent),
+      ),
     );
   }
 
@@ -150,6 +156,12 @@ class AppTheme {
         bodyLarge: TextStyle(fontSize: textSizeBase),
         bodyMedium: TextStyle(fontSize: textSizeSM),
         bodySmall: TextStyle(fontSize: textSizeXS),
+      ),
+      scrollbarTheme: ScrollbarThemeData(
+        thickness: WidgetStateProperty.all(8),
+        radius: const Radius.circular(4),
+        thumbColor: WidgetStateProperty.all(const Color(0xFF5B8DEF).withValues(alpha: 0.4)),
+        trackColor: WidgetStateProperty.all(Colors.transparent),
       ),
     );
   }
