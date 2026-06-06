@@ -14,6 +14,7 @@ class DesktopLibraryScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final librariesAsync = ref.watch(librariesProvider);
+    final servers = ref.watch(serverListProvider);
     
     return Scaffold(
       body: CustomScrollView(
@@ -47,8 +48,13 @@ class DesktopLibraryScreen extends ConsumerWidget {
             ),
           ),
           
-          // 媒体库网格
-          librariesAsync.when(
+          if (servers.isEmpty)
+            const SliverFillRemaining(
+              child: _EmptyServerGuide(),
+            )
+          else
+            // 媒体库网格
+            librariesAsync.when(
             data: (libraries) {
               if (libraries.isEmpty) {
                 return const SliverFillRemaining(
@@ -116,19 +122,14 @@ class _DesktopLibraryGridCardState extends ConsumerState<_DesktopLibraryGridCard
       child: GestureDetector(
         onTap: () => context.push('/library/${widget.library.id}'),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOutCubic,
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.fastOutSlowIn,
           transform: _isHovered 
               ? (Matrix4.identity()..translateByDouble(0.0, -6.0, 0.0, 0.0))
               : Matrix4.identity(),
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: _isHovered
-                  ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.3)
-                  : Theme.of(context).dividerColor.withValues(alpha: 0.2),
-            ),
             boxShadow: _isHovered
                 ? [
                     BoxShadow(
@@ -206,6 +207,73 @@ class _DesktopLibraryGridCardState extends ConsumerState<_DesktopLibraryGridCard
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 无服务器引导组件
+class _EmptyServerGuide extends StatelessWidget {
+  const _EmptyServerGuide();
+  
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.dns_outlined,
+            size: 80,
+            color: Theme.of(context).colorScheme.outline,
+          ),
+          const SizedBox(height: 24),
+          Text(
+            '尚未添加服务器',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '添加 Emby 服务器后即可浏览媒体库',
+            style: TextStyle(
+              fontSize: 14,
+              color: Theme.of(context).textTheme.bodySmall?.color,
+            ),
+          ),
+          const SizedBox(height: 32),
+          MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: () => context.go('/servers'),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF5B8DEF),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.add, color: Colors.white, size: 20),
+                    SizedBox(width: 8),
+                    Text(
+                      '前往服务器管理',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

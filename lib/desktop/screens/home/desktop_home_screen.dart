@@ -35,6 +35,7 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen> {
   @override
   Widget build(BuildContext context) {
     final hideDailyRecommendations = ref.watch(hideDailyRecommendationsProvider);
+    final servers = ref.watch(serverListProvider);
     
     return Scaffold(
       body: CustomScrollView(
@@ -43,20 +44,24 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen> {
           // 顶部工具栏
           const SliverToBoxAdapter(child: _DesktopTopBar()),
           
-          // 主内容区（轮播 + 继续观看）
-          if (!hideDailyRecommendations)
-            const SliverToBoxAdapter(child: _HeroSection()),
-          
-          // 继续观看
-          const SliverToBoxAdapter(child: _ContinueWatchingSection()),
-          
-          // 媒体库
-          const SliverToBoxAdapter(child: _LibrariesSection()),
-          
-          // 各媒体库最新内容
-          const SliverToBoxAdapter(child: _LatestItemsSection()),
-          
-          const SliverPadding(padding: EdgeInsets.only(bottom: 48)),
+          if (servers.isEmpty)
+            // 无服务器引导
+            const SliverFillRemaining(
+              child: _EmptyServerGuide(),
+            )
+          else ...[
+            // 主内容区（轮播 + 继续观看）
+            if (!hideDailyRecommendations)
+              const SliverToBoxAdapter(child: _HeroSection()),
+            
+            // 媒体库
+            const SliverToBoxAdapter(child: _LibrariesSection()),
+            
+            // 各媒体库最新内容
+            const SliverToBoxAdapter(child: _LatestItemsSection()),
+            
+            const SliverPadding(padding: EdgeInsets.only(bottom: 48)),
+          ],
         ],
       ),
     );
@@ -494,9 +499,6 @@ class _DesktopContinueWatching extends ConsumerWidget {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Theme.of(context).dividerColor.withValues(alpha: 0.3),
-        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -575,9 +577,6 @@ class _DesktopContinueItem extends ConsumerWidget {
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: Theme.of(context).dividerColor.withValues(alpha: 0.2),
-            ),
           ),
           child: Row(
             children: [
@@ -624,52 +623,6 @@ class _DesktopContinueItem extends ConsumerWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-/// 继续观看区块（下方独立展示）
-class _ContinueWatchingSection extends ConsumerWidget {
-  const _ContinueWatchingSection();
-  
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final resumeAsync = ref.watch(resumeItemsProvider);
-    
-    return resumeAsync.when(
-      data: (items) {
-        if (items.isEmpty) return const SizedBox.shrink();
-        
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            DesktopSectionHeader(
-              title: '继续观看',
-              onMoreTap: () {},
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              height: 180,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                itemCount: items.length,
-                itemBuilder: (context, index) {
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 16),
-                    child: DesktopMediaCard(
-                      item: items[index],
-                      width: 280,
-                      showProgress: true,
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        );
-      },
-      loading: () => const SizedBox.shrink(),
-      error: (_, __) => const SizedBox.shrink(),
     );
   }
 }
@@ -736,9 +689,6 @@ class _DesktopLibraryCard extends ConsumerWidget {
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: Theme.of(context).dividerColor.withValues(alpha: 0.2),
-            ),
           ),
           clipBehavior: Clip.antiAlias,
           child: Column(
@@ -836,6 +786,73 @@ class _LibraryLatestItems extends ConsumerWidget {
       },
       loading: () => const SizedBox.shrink(),
       error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+}
+
+/// 无服务器引导组件
+class _EmptyServerGuide extends StatelessWidget {
+  const _EmptyServerGuide();
+  
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.dns_outlined,
+            size: 80,
+            color: Theme.of(context).colorScheme.outline,
+          ),
+          const SizedBox(height: 24),
+          Text(
+            '尚未添加服务器',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '添加 Emby 服务器后即可浏览媒体库',
+            style: TextStyle(
+              fontSize: 14,
+              color: Theme.of(context).textTheme.bodySmall?.color,
+            ),
+          ),
+          const SizedBox(height: 32),
+          MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: () => context.go('/servers'),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF5B8DEF),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.add, color: Colors.white, size: 20),
+                    SizedBox(width: 8),
+                    Text(
+                      '前往服务器管理',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

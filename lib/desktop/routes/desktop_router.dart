@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/providers/app_providers.dart';
 import '../../ui/screens/detail/media_detail_screen.dart';
 import '../../ui/screens/detail/season_detail_screen.dart';
 import '../screens/player/desktop_player_screen.dart';
@@ -20,6 +21,14 @@ final desktopRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     navigatorKey: _rootNavigatorKey,
     initialLocation: '/',
+    redirect: (context, state) {
+      final servers = ref.read(serverListProvider);
+      final isAuthRoute = state.uri.path == '/servers' || state.uri.path == '/add-server';
+      if (servers.isEmpty && !isAuthRoute) {
+        return '/servers';
+      }
+      return null;
+    },
     routes: [
       // 主壳路由 - 带侧边栏
       ShellRoute(
@@ -138,8 +147,8 @@ CustomTransitionPage<void> _buildFadePage({
         child: child,
       );
     },
-    transitionDuration: const Duration(milliseconds: 200),
-    reverseTransitionDuration: const Duration(milliseconds: 150),
+    transitionDuration: const Duration(milliseconds: 180),
+    reverseTransitionDuration: const Duration(milliseconds: 120),
   );
 }
 
@@ -168,7 +177,7 @@ CustomTransitionPage<void> _buildSlidePage({
         ),
       );
     },
-    transitionDuration: const Duration(milliseconds: 250),
-    reverseTransitionDuration: const Duration(milliseconds: 200),
+    transitionDuration: const Duration(milliseconds: 200),
+    reverseTransitionDuration: const Duration(milliseconds: 160),
   );
 }

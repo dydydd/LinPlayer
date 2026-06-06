@@ -21,7 +21,7 @@ lib/
 │   ├── api/
 │   │   ├── api_interfaces.dart        # API抽象接口（供后端接入）
 │   │   ├── api_response.dart          # API响应包装
-│   │   └── mock_api.dart              # Mock实现（UI开发测试用）
+│   │   └── emby_api.dart              # Emby API 真实客户端实现
 │   ├── models/                        # 数据模型（在api_interfaces中定义）
 │   ├── providers/
 │   │   ├── app_providers.dart         # 全局Providers（认证、服务器、主题等）

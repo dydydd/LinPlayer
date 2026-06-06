@@ -45,8 +45,8 @@ class _DesktopMediaCardState extends ConsumerState<DesktopMediaCard> {
       child: GestureDetector(
         onTap: widget.onTap ?? () => context.push(mediaRouteForItem(widget.item)),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOutCubic,
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.fastOutSlowIn,
           width: widget.width,
           transform: _isHovered 
               ? (Matrix4.identity()..translateByDouble(0.0, -4.0, 0.0, 0.0))
@@ -71,7 +71,7 @@ class _DesktopMediaCardState extends ConsumerState<DesktopMediaCard> {
                       
                       // 悬停遮罩
                       AnimatedOpacity(
-                        duration: const Duration(milliseconds: 150),
+                        duration: const Duration(milliseconds: 120),
                         opacity: _isHovered ? 1.0 : 0.0,
                         child: Container(
                           decoration: BoxDecoration(

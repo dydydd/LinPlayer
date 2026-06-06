@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../api/api_interfaces.dart';
 import '../api/emby_api.dart';
-import '../api/mock_api.dart';
+
 import '../services/cache_service.dart';
 import '../services/ext_domain_service.dart';
 
@@ -13,7 +13,7 @@ import '../services/ext_domain_service.dart';
 /// 未登录时回退MockApiClient（用于首次启动/服务器列表页）。
 final apiClientProvider = Provider<ApiClientFactory>((ref) {
   final server = ref.watch(currentServerProvider);
-  if (server == null) return MockApiClient();
+  if (server == null) throw StateError('未连接服务器，请先添加服务器');
   final client = EmbyApiClient(
     baseUrl: server.activeLineUrl,
     authToken: server.authToken,

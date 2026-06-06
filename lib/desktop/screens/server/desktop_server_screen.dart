@@ -45,38 +45,6 @@ class _DesktopServerScreenState extends ConsumerState<DesktopServerScreen> {
                     onPressed: () => setState(() => _isGridView = !_isGridView),
                     tooltip: _isGridView ? '列表视图' : '网格视图',
                   ),
-                  
-                  const SizedBox(width: 12),
-                  
-                  // 添加服务器按钮
-                  MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: GestureDetector(
-                      onTap: () => context.push('/add-server'),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF5B8DEF),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.add, color: Colors.white, size: 18),
-                            SizedBox(width: 6),
-                            Text(
-                              '添加服务器',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -84,21 +52,45 @@ class _DesktopServerScreenState extends ConsumerState<DesktopServerScreen> {
           
           // 服务器列表
           if (servers.isEmpty)
-            const SliverFillRemaining(
+            SliverFillRemaining(
               child: Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.dns_outlined, size: 64, color: Colors.grey),
-                    SizedBox(height: 16),
-                    Text(
+                    const Icon(Icons.dns_outlined, size: 64, color: Colors.grey),
+                    const SizedBox(height: 16),
+                    const Text(
                       '暂无服务器',
                       style: TextStyle(fontSize: 16, color: Colors.grey),
                     ),
-                    SizedBox(height: 8),
-                    Text(
-                      '点击右上角按钮添加服务器',
-                      style: TextStyle(fontSize: 13, color: Colors.grey),
+                    const SizedBox(height: 24),
+                    MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: () => context.push('/add-server'),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF5B8DEF),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.add, color: Colors.white, size: 20),
+                              SizedBox(width: 8),
+                              Text(
+                                '添加服务器',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -189,26 +181,20 @@ class _ServerGridCardState extends State<_ServerGridCard> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOutCubic,
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.fastOutSlowIn,
           transform: _isHovered 
               ? (Matrix4.identity()..translateByDouble(0.0, -4.0, 0.0, 0.0))
               : Matrix4.identity(),
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: widget.isCurrent
-                  ? const Color(0xFF5B8DEF).withValues(alpha: 0.5)
-                  : _isHovered
-                      ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.3)
-                      : Theme.of(context).dividerColor.withValues(alpha: 0.2),
-              width: widget.isCurrent ? 2 : 1,
-            ),
-            boxShadow: _isHovered
+            boxShadow: _isHovered || widget.isCurrent
                 ? [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.08),
+                      color: widget.isCurrent
+                          ? const Color(0xFF5B8DEF).withValues(alpha: 0.15)
+                          : Colors.black.withValues(alpha: 0.08),
                       blurRadius: 16,
                       offset: const Offset(0, 6),
                     ),
@@ -443,20 +429,14 @@ class _ServerListTileState extends State<_ServerListTile> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
+          duration: const Duration(milliseconds: 120),
           margin: const EdgeInsets.only(bottom: 8),
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
+            color: _isHovered
+                ? Theme.of(context).colorScheme.surfaceContainerHighest
+                : Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: widget.isCurrent
-                  ? const Color(0xFF5B8DEF).withValues(alpha: 0.5)
-                  : _isHovered
-                      ? Theme.of(context).dividerColor.withValues(alpha: 0.5)
-                      : Theme.of(context).dividerColor.withValues(alpha: 0.2),
-              width: widget.isCurrent ? 2 : 1,
-            ),
           ),
           child: Row(
             children: [

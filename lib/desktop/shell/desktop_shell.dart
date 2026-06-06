@@ -52,8 +52,8 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
         children: [
           // 侧边栏
           AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOutCubic,
+              duration: const Duration(milliseconds: 160),
+              curve: Curves.fastOutSlowIn,
               width: sidebarWidth,
               decoration: BoxDecoration(
                 color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF8F9FA),
@@ -146,7 +146,7 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
   
   Widget _buildNavItem(_NavItem item, bool isSelected, bool isDark, String currentPath) {
     final bgColor = isSelected
-        ? const Color(0xFF5B8DEF).withValues(alpha: 0.12)
+        ? const Color(0xFF5B8DEF).withValues(alpha: 0.15)
         : Colors.transparent;
     final iconColor = isSelected
         ? const Color(0xFF5B8DEF)
@@ -166,8 +166,8 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
             }
           },
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            curve: Curves.easeOutCubic,
+            duration: const Duration(milliseconds: 120),
+            curve: Curves.fastOutSlowIn,
             padding: EdgeInsets.symmetric(
               horizontal: _isSidebarCollapsed ? 0 : 14,
               vertical: 10,
