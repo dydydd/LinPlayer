@@ -6,6 +6,7 @@ import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
 import '../../../core/services/cast_service.dart';
 import '../../../core/utils/color_extractor.dart';
+import '../../../core/utils/platform_utils.dart';
 import '../../screens/download/download_screen.dart';
 import '../../utils/media_helpers.dart';
 import '../../widgets/common/media_widgets.dart';
@@ -80,11 +81,10 @@ class _SeasonDetailScreenState extends ConsumerState<SeasonDetailScreen> {
             itemCount: episodes.length,
             itemBuilder: (context, index) {
               final episode = episodes[index];
-              final imageUrls = resolveEpisodeImageUrls(
+              final imageUrls = resolveEpisodeLandscapeImageUrls(
                 api,
                 episode,
-                maxWidth: 200,
-                preferThumb: true,
+                maxWidth: 480,
               );
               return Card(
                 margin: const EdgeInsets.only(bottom: 12),
@@ -104,7 +104,7 @@ class _SeasonDetailScreenState extends ConsumerState<SeasonDetailScreen> {
                                   : null,
                               width: 100,
                               height: 60,
-                              fit: BoxFit.contain,
+                              fit: BoxFit.cover,
                             )
                           : const Center(child: Icon(Icons.play_arrow)),
                     ),
@@ -277,11 +277,12 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
 
   Future<void> _extractColor() async {
     final api = ref.read(apiClientProvider);
-    final imageUrl = widget.item.backdropImageTag != null
-        ? api.image.getBackdropImageUrl(widget.item.id, tag: widget.item.backdropImageTag, maxWidth: 400)
-        : widget.item.primaryImageTag != null
-            ? api.image.getPrimaryImageUrl(widget.item.id, tag: widget.item.primaryImageTag, maxWidth: 400)
-            : null;
+    final imageUrls = resolveMediaItemLandscapeImageUrls(
+      api,
+      widget.item,
+      maxWidth: 640,
+    );
+    final imageUrl = imageUrls.isNotEmpty ? imageUrls.first : null;
 
     if (imageUrl == null) return;
 
@@ -298,14 +299,16 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
-    // 增加高度到 85% 屏幕宽度，让封面显示更多内容
-    final headerHeight = screenWidth * 0.85;
     final api = ref.read(apiClientProvider);
-    final imageUrl = widget.item.backdropImageTag != null
-        ? api.image.getBackdropImageUrl(widget.item.id, tag: widget.item.backdropImageTag, maxWidth: 800)
-        : widget.item.primaryImageTag != null
-            ? api.image.getPrimaryImageUrl(widget.item.id, tag: widget.item.primaryImageTag, maxWidth: 600)
-            : null;
+    final imageUrls = resolveMediaItemLandscapeImageUrls(
+      api,
+      widget.item,
+      maxWidth: isDesktopPlatform ? 1600 : 960,
+    );
+    final hasLandscapeImage = imageUrls.isNotEmpty;
+    final headerHeight = isDesktopPlatform
+        ? 400.0
+        : (hasLandscapeImage ? screenWidth * 0.6 : screenWidth * 0.85);
 
     return Stack(
       children: [
@@ -314,7 +317,8 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
           width: double.infinity,
           color: _dominantColor,
           child: MediaImage(
-            imageUrl: imageUrl,
+            imageUrl: imageUrls.isNotEmpty ? imageUrls.first : null,
+            imageUrls: imageUrls.length > 1 ? imageUrls.sublist(1) : null,
             width: double.infinity,
             height: headerHeight,
             fit: BoxFit.cover,

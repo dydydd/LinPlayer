@@ -7,6 +7,7 @@ import '../api/emby_api.dart';
 
 import '../services/cache_service.dart';
 import '../services/ext_domain_service.dart';
+import '../utils/platform_utils.dart';
 
 /// 当前API客户端Provider
 /// 
@@ -27,6 +28,26 @@ final apiClientProvider = Provider<ApiClientFactory>((ref) {
 final authStateProvider = StateProvider<AuthState>((ref) => AuthState.unauthenticated);
 
 enum AuthState { unauthenticated, authenticating, authenticated, error }
+
+bool serverHasUsableAuth(ServerConfig? server) {
+  final token = server?.authToken;
+  return token != null && token.isNotEmpty;
+}
+
+String get defaultPlayerCoreKey => isDesktopPlatform ? 'mpv' : 'exoPlayer';
+
+String normalizePlayerCore(String? value) {
+  switch (value) {
+    case 'mpv':
+    case 'media_kit':
+      return 'mpv';
+    case 'exoPlayer':
+    case 'video_player':
+      return 'exoPlayer';
+    default:
+      return defaultPlayerCoreKey;
+  }
+}
 
 /// 当前服务器Provider
 final currentServerProvider = StateNotifierProvider<CurrentServerNotifier, ServerConfig?>((ref) {
@@ -276,9 +297,9 @@ String? _emptyToNull(String? value) {
 /// 当前用户Provider
 final currentUserProvider = FutureProvider<User?>((ref) async {
   final api = ref.watch(apiClientProvider);
-  final authState = ref.watch(authStateProvider);
-  
-  if (authState != AuthState.authenticated) return null;
+  final currentServer = ref.watch(currentServerProvider);
+
+  if (!serverHasUsableAuth(currentServer)) return null;
   
   try {
     return await api.user.getUser('current');
@@ -293,7 +314,7 @@ final themeModeProvider = StateProvider<ThemeModeOption>((ref) => ThemeModeOptio
 enum ThemeModeOption { light, dark, system }
 
 /// 播放器内核Provider
-final playerCoreProvider = StateProvider<String>((ref) => 'video_player');
+final playerCoreProvider = StateProvider<String>((ref) => defaultPlayerCoreKey);
 
 /// 默认播放速度Provider
 final defaultPlaybackSpeedProvider = StateProvider<double>((ref) => 1.0);

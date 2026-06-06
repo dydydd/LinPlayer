@@ -147,7 +147,7 @@ class _DesktopServerScreenState extends ConsumerState<DesktopServerScreen> {
   void _selectServer(ServerConfig server) {
     debugPrint('[SelectServer] Selecting ${server.name}: authToken=${server.authToken != null ? 'present' : 'null'}, userId=${server.userId}');
     ref.read(currentServerProvider.notifier).state = server;
-    if (server.authToken != null && server.userId != null) {
+    if (serverHasUsableAuth(server)) {
       ref.read(authStateProvider.notifier).state = AuthState.authenticated;
     } else {
       ref.read(authStateProvider.notifier).state = AuthState.unauthenticated;
@@ -393,7 +393,7 @@ class _ServerGridCardState extends State<_ServerGridCard> with SingleTickerProvi
                         ],
                       ),
                     )
-                  else if (widget.server.authToken == null || widget.server.userId == null)
+                  else if (!serverHasUsableAuth(widget.server))
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
@@ -613,7 +613,7 @@ class _ServerListTileState extends State<_ServerListTile> with SingleTickerProvi
                       ],
                     ),
                   )
-                else if (widget.server.authToken == null || widget.server.userId == null)
+                else if (!serverHasUsableAuth(widget.server))
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(

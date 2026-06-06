@@ -37,12 +37,14 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen> {
     final hideDailyRecommendations = ref.watch(hideDailyRecommendationsProvider);
     final servers = ref.watch(serverListProvider);
     final currentServer = ref.watch(currentServerProvider);
-    final isUnauthenticated = currentServer != null && 
-        (currentServer.authToken == null || currentServer.userId == null);
+    final isUnauthenticated = currentServer != null && !serverHasUsableAuth(currentServer);
     
     return Scaffold(
       body: CustomScrollView(
         controller: _scrollController,
+        physics: const BouncingScrollPhysics(
+          parent: AlwaysScrollableScrollPhysics(),
+        ),
         slivers: [
           // 顶部工具栏
           const SliverToBoxAdapter(child: _DesktopTopBar()),
@@ -205,8 +207,10 @@ class _DesktopTopBar extends ConsumerWidget {
           ),
           onTap: () {
             ref.read(currentServerProvider.notifier).state = server;
-            if (server.authToken != null) {
+            if (serverHasUsableAuth(server)) {
               ref.read(authStateProvider.notifier).state = AuthState.authenticated;
+            } else {
+              ref.read(authStateProvider.notifier).state = AuthState.unauthenticated;
             }
             ref.invalidate(librariesProvider);
             ref.invalidate(resumeItemsProvider);
@@ -316,17 +320,8 @@ class _DesktopCarouselState extends State<_DesktopCarousel> {
                       left: 0,
                       right: 0,
                       height: 200,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              Colors.transparent,
-                              Colors.black.withValues(alpha: 0.7),
-                            ],
-                          ),
-                        ),
+                      child: IgnorePointer(
+                        child: Container(),
                       ),
                     ),
                     
@@ -485,14 +480,16 @@ class _CarouselImage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final api = ref.read(apiClientProvider);
-    final imageUrl = item.backdropImageTag != null
-        ? api.image.getBackdropImageUrl(item.id, tag: item.backdropImageTag, maxWidth: 800)
-        : item.primaryImageTag != null
-            ? api.image.getPrimaryImageUrl(item.id, tag: item.primaryImageTag, maxWidth: 800)
-            : null;
+    final imageUrls = resolveMediaItemImageUrls(
+      api,
+      item,
+      maxWidth: 1280,
+      preferThumb: true,
+    );
     
     return MediaImage(
-      imageUrl: imageUrl,
+      imageUrl: imageUrls.isNotEmpty ? imageUrls.first : null,
+      imageUrls: imageUrls.length > 1 ? imageUrls.sublist(1) : null,
       width: double.infinity,
       height: double.infinity,
       fit: BoxFit.cover,

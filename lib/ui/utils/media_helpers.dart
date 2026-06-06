@@ -32,7 +32,7 @@ List<String> resolveMediaItemImageUrls(
   int? maxWidth,
   bool preferThumb = false,
 }) {
-  final bool preferWideImage = item.type == 'Movie' && preferThumb;
+  final preferWideImage = item.type == 'Movie' && preferThumb;
   return _dedupeUrls([
     if (preferWideImage && item.thumbImageTag != null)
       api.image.getThumbImageUrl(
@@ -102,52 +102,167 @@ List<String> resolveMediaItemImageUrls(
   ]);
 }
 
+List<String> resolveMediaItemLandscapeImageUrls(
+  ApiClientFactory api,
+  MediaItem item, {
+  int? maxWidth,
+}) {
+  return _dedupeUrls([
+    if (item.backdropImageTag != null)
+      api.image.getBackdropImageUrl(
+        item.id,
+        tag: item.backdropImageTag,
+        maxWidth: maxWidth,
+      ),
+    if (item.thumbImageTag != null)
+      api.image.getThumbImageUrl(
+        item.id,
+        tag: item.thumbImageTag,
+        maxWidth: maxWidth,
+      ),
+    if (item.parentThumbItemId != null && item.parentThumbImageTag != null)
+      api.image.getThumbImageUrl(
+        item.parentThumbItemId!,
+        tag: item.parentThumbImageTag,
+        maxWidth: maxWidth,
+      ),
+    if (item.seriesId != null &&
+        item.seriesId!.isNotEmpty &&
+        item.seriesThumbImageTag != null)
+      api.image.getThumbImageUrl(
+        item.seriesId!,
+        tag: item.seriesThumbImageTag,
+        maxWidth: maxWidth,
+      ),
+    if (item.primaryImageTag != null)
+      api.image.getPrimaryImageUrl(
+        item.id,
+        tag: item.primaryImageTag,
+        maxWidth: maxWidth,
+      ),
+    if (item.parentPrimaryImageItemId != null &&
+        item.parentPrimaryImageTag != null)
+      api.image.getPrimaryImageUrl(
+        item.parentPrimaryImageItemId!,
+        tag: item.parentPrimaryImageTag,
+        maxWidth: maxWidth,
+      ),
+    if (item.seriesId != null &&
+        item.seriesId!.isNotEmpty &&
+        item.seriesPrimaryImageTag != null)
+      api.image.getPrimaryImageUrl(
+        item.seriesId!,
+        tag: item.seriesPrimaryImageTag,
+        maxWidth: maxWidth,
+      ),
+  ]);
+}
+
 List<String> resolveSeasonImageUrls(
   ApiClientFactory api,
   Season season, {
   int? maxWidth,
 }) {
-  // 生成多格式回退URL，确保JPG/PNG/WebP兼容性
   final urls = <String>[];
-  
-  // 按优先级添加各种格式的封面URL
-  final formats = ['jpg', 'png', 'webp'];
-  
+  const formats = ['jpg', 'png', 'webp'];
+
   for (final format in formats) {
     if (season.primaryImageTag != null) {
-      urls.add(api.image.getPrimaryImageUrl(
-        season.id,
-        tag: season.primaryImageTag,
-        maxWidth: maxWidth,
-        format: format,
-      ));
+      urls.add(
+        api.image.getPrimaryImageUrl(
+          season.id,
+          tag: season.primaryImageTag,
+          maxWidth: maxWidth,
+          format: format,
+        ),
+      );
     }
     if (season.thumbImageTag != null) {
-      urls.add(api.image.getThumbImageUrl(
-        season.id,
-        tag: season.thumbImageTag,
-        maxWidth: maxWidth,
-        format: format,
-      ));
+      urls.add(
+        api.image.getThumbImageUrl(
+          season.id,
+          tag: season.thumbImageTag,
+          maxWidth: maxWidth,
+          format: format,
+        ),
+      );
     }
     if (season.seriesId.isNotEmpty && season.seriesThumbImageTag != null) {
-      urls.add(api.image.getThumbImageUrl(
-        season.seriesId,
-        tag: season.seriesThumbImageTag,
-        maxWidth: maxWidth,
-        format: format,
-      ));
+      urls.add(
+        api.image.getThumbImageUrl(
+          season.seriesId,
+          tag: season.seriesThumbImageTag,
+          maxWidth: maxWidth,
+          format: format,
+        ),
+      );
     }
     if (season.seriesId.isNotEmpty && season.seriesPrimaryImageTag != null) {
-      urls.add(api.image.getPrimaryImageUrl(
-        season.seriesId,
-        tag: season.seriesPrimaryImageTag,
-        maxWidth: maxWidth,
-        format: format,
-      ));
+      urls.add(
+        api.image.getPrimaryImageUrl(
+          season.seriesId,
+          tag: season.seriesPrimaryImageTag,
+          maxWidth: maxWidth,
+          format: format,
+        ),
+      );
     }
   }
-  
+
+  return _dedupeUrls(urls);
+}
+
+List<String> resolveSeasonLandscapeImageUrls(
+  ApiClientFactory api,
+  Season season, {
+  int? maxWidth,
+}) {
+  final urls = <String>[];
+  const formats = ['jpg', 'png', 'webp'];
+
+  for (final format in formats) {
+    if (season.thumbImageTag != null) {
+      urls.add(
+        api.image.getThumbImageUrl(
+          season.id,
+          tag: season.thumbImageTag,
+          maxWidth: maxWidth,
+          format: format,
+        ),
+      );
+    }
+    if (season.primaryImageTag != null) {
+      urls.add(
+        api.image.getPrimaryImageUrl(
+          season.id,
+          tag: season.primaryImageTag,
+          maxWidth: maxWidth,
+          format: format,
+        ),
+      );
+    }
+    if (season.seriesId.isNotEmpty && season.seriesThumbImageTag != null) {
+      urls.add(
+        api.image.getThumbImageUrl(
+          season.seriesId,
+          tag: season.seriesThumbImageTag,
+          maxWidth: maxWidth,
+          format: format,
+        ),
+      );
+    }
+    if (season.seriesId.isNotEmpty && season.seriesPrimaryImageTag != null) {
+      urls.add(
+        api.image.getPrimaryImageUrl(
+          season.seriesId,
+          tag: season.seriesPrimaryImageTag,
+          maxWidth: maxWidth,
+          format: format,
+        ),
+      );
+    }
+  }
+
   return _dedupeUrls(urls);
 }
 
@@ -193,6 +308,52 @@ List<String> resolveEpisodeImageUrls(
       api.image.getThumbImageUrl(
         episode.seriesId,
         tag: episode.seriesThumbImageTag,
+        maxWidth: maxWidth,
+      ),
+    if (episode.seriesId.isNotEmpty && episode.seriesPrimaryImageTag != null)
+      api.image.getPrimaryImageUrl(
+        episode.seriesId,
+        tag: episode.seriesPrimaryImageTag,
+        maxWidth: maxWidth,
+      ),
+  ]);
+}
+
+List<String> resolveEpisodeLandscapeImageUrls(
+  ApiClientFactory api,
+  Episode episode, {
+  int? maxWidth,
+}) {
+  return _dedupeUrls([
+    if (episode.thumbImageTag != null)
+      api.image.getThumbImageUrl(
+        episode.id,
+        tag: episode.thumbImageTag,
+        maxWidth: maxWidth,
+      ),
+    if (episode.parentThumbItemId != null && episode.parentThumbImageTag != null)
+      api.image.getThumbImageUrl(
+        episode.parentThumbItemId!,
+        tag: episode.parentThumbImageTag,
+        maxWidth: maxWidth,
+      ),
+    if (episode.seriesId.isNotEmpty && episode.seriesThumbImageTag != null)
+      api.image.getThumbImageUrl(
+        episode.seriesId,
+        tag: episode.seriesThumbImageTag,
+        maxWidth: maxWidth,
+      ),
+    if (episode.primaryImageTag != null)
+      api.image.getPrimaryImageUrl(
+        episode.id,
+        tag: episode.primaryImageTag,
+        maxWidth: maxWidth,
+      ),
+    if (episode.parentPrimaryImageItemId != null &&
+        episode.parentPrimaryImageTag != null)
+      api.image.getPrimaryImageUrl(
+        episode.parentPrimaryImageItemId!,
+        tag: episode.parentPrimaryImageTag,
         maxWidth: maxWidth,
       ),
     if (episode.seriesId.isNotEmpty && episode.seriesPrimaryImageTag != null)

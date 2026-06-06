@@ -13,11 +13,13 @@ import '../../../core/providers/media_providers.dart';
 import '../../widgets/common/danmaku_search_widget.dart';
 import '../../widgets/common/danmaku_overlay.dart';
 import '../../widgets/common/media_widgets.dart';
+import '../../utils/media_helpers.dart';
 import '../../../core/services/video_player_service.dart';
 import '../../../core/services/mpv_player_adapter.dart';
 import '../../../core/services/exo_player_adapter.dart';
 import '../../../core/services/app_logger.dart';
 import '../../../core/services/subtitle_processor.dart';
+import '../../../core/utils/platform_utils.dart';
 
 /// 播放页
 class PlayerScreen extends ConsumerStatefulWidget {
@@ -220,7 +222,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     ref.read(currentPlayingItemProvider.notifier).state = item;
     ref.read(selectedMediaSourceProvider.notifier).state = mediaSource?.id;
 
-    final coreString = ref.read(playerCoreProvider);
+    final coreString = normalizePlayerCore(ref.read(playerCoreProvider));
     final coreType = coreString == 'mpv'
         ? PlayerCoreType.mpv
         : PlayerCoreType.exoPlayer;
@@ -1548,7 +1550,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
   }
 
   Widget _buildTopBar(MediaItem? item) {
-    final coreString = ref.read(playerCoreProvider);
+    final coreString = normalizePlayerCore(ref.read(playerCoreProvider));
     final isMpv = coreString == 'mpv';
 
     return Padding(
@@ -1941,7 +1943,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
             _showTimerDialog();
           },
         ),
-        ListTile(
+        if (!isDesktopPlatform)
+          ListTile(
           leading: const Icon(Icons.memory, color: Colors.white),
           title: const Text('内核切换', style: TextStyle(color: Colors.white)),
           onTap: () {
@@ -2233,6 +2236,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
           child: _EpisodeSelectorContent(
             seriesId: item!.seriesId!,
             currentEpisodeId: item.id,
+            currentMediaSourceId: ref.read(selectedMediaSourceProvider),
           ),
         ),
       ],
@@ -2273,7 +2277,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
   }
 
   void _showCoreSwitchDialog() {
-    final currentCore = ref.read(playerCoreProvider);
+    final currentCore = normalizePlayerCore(ref.read(playerCoreProvider));
     _showRightPanel(
       title: '切换播放器内核',
       children: [
@@ -2309,7 +2313,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
 
   Future<void> _switchCore(String core) async {
     final savedPosition = _playerService.position;
-    ref.read(playerCoreProvider.notifier).state = core;
+    ref.read(playerCoreProvider.notifier).state = normalizePlayerCore(core);
     await _playerService.dispose();
     _playerService = VideoPlayerService();
     _activePlayerService = _playerService;
@@ -3103,19 +3107,35 @@ class _AudioSettingsContentState extends ConsumerState<_AudioSettingsContent> {
 class _EpisodeSelectorContent extends ConsumerStatefulWidget {
   final String seriesId;
   final String currentEpisodeId;
+  final String? currentMediaSourceId;
 
   const _EpisodeSelectorContent({
     required this.seriesId,
     required this.currentEpisodeId,
+    this.currentMediaSourceId,
   });
 
   @override
   ConsumerState<_EpisodeSelectorContent> createState() => _EpisodeSelectorContentState();
 }
 
-class _EpisodeSelectorContentState extends ConsumerState<_EpisodeSelectorContent> {
+ class _EpisodeSelectorContentState extends ConsumerState<_EpisodeSelectorContent> {
   String? _selectedSeasonId;
   bool _isGridView = false;
+
+  void _playEpisode(Episode episode) {
+    if (episode.id == widget.currentEpisodeId) {
+      Navigator.pop(context);
+      return;
+    }
+
+    final mediaSourceQuery = widget.currentMediaSourceId != null &&
+            widget.currentMediaSourceId!.isNotEmpty
+        ? '?mediaSourceId=${widget.currentMediaSourceId!}'
+        : '';
+    Navigator.pop(context);
+    context.replace('/player/${episode.id}$mediaSourceQuery');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -3187,10 +3207,7 @@ class _EpisodeSelectorContentState extends ConsumerState<_EpisodeSelectorContent
               final isWatched = episode.userData?.played ?? false;
 
               return GestureDetector(
-                onTap: () {
-                  Navigator.pop(context);
-                  context.push('/episode/${episode.id}');
-                },
+                onTap: () => _playEpisode(episode),
                 child: Container(
                   decoration: BoxDecoration(
                     color: isCurrent
@@ -3230,9 +3247,11 @@ class _EpisodeSelectorContentState extends ConsumerState<_EpisodeSelectorContent
             final episode = episodes[index];
             final isCurrent = episode.id == widget.currentEpisodeId;
             final isWatched = episode.userData?.played ?? false;
-            final imageUrl = episode.primaryImageTag != null
-                ? api.image.getPrimaryImageUrl(episode.id, tag: episode.primaryImageTag, maxWidth: 200)
-                : null;
+            final imageUrls = resolveEpisodeLandscapeImageUrls(
+              api,
+              episode,
+              maxWidth: 320,
+            );
 
             return ListTile(
               leading: ClipRRect(
@@ -3241,8 +3260,14 @@ class _EpisodeSelectorContentState extends ConsumerState<_EpisodeSelectorContent
                   width: 80,
                   height: 48,
                   color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  child: imageUrl != null
-                      ? MediaImage(imageUrl: imageUrl, width: 80, height: 48, fit: BoxFit.cover)
+                  child: imageUrls.isNotEmpty
+                      ? MediaImage(
+                          imageUrl: imageUrls.first,
+                          imageUrls: imageUrls.length > 1 ? imageUrls.sublist(1) : null,
+                          width: 80,
+                          height: 48,
+                          fit: BoxFit.cover,
+                        )
                       : const Center(child: Icon(Icons.play_arrow, size: 20)),
                 ),
               ),
@@ -3270,10 +3295,7 @@ class _EpisodeSelectorContentState extends ConsumerState<_EpisodeSelectorContent
                   ? const Icon(Icons.play_circle, color: Color(0xFF5B8DEF))
                   : null,
               selected: isCurrent,
-              onTap: () {
-                Navigator.pop(context);
-                context.push('/episode/${episode.id}');
-              },
+              onTap: () => _playEpisode(episode),
             );
           },
         );

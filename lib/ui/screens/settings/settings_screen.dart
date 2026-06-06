@@ -10,6 +10,7 @@ import '../../../core/services/ext_domain_service.dart';
 import '../../../core/services/app_logger.dart';
 import '../../../core/services/cache_service.dart';
 import '../../../core/utils/danmaku_filter.dart';
+import '../../../core/utils/platform_utils.dart';
 import '../../../core/api/danmaku/danmaku_source.dart';
 import '../../../core/api/danmaku/danmaku_service.dart';
 
@@ -560,7 +561,7 @@ class PlayerSettingsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final playerCore = ref.watch(playerCoreProvider);
+    final playerCore = normalizePlayerCore(ref.watch(playerCoreProvider));
     final playbackSpeed = ref.watch(defaultPlaybackSpeedProvider);
     final skipStep = ref.watch(skipForwardStepProvider);
     final longPressSpeed = ref.watch(longPressSpeedProvider);
@@ -582,12 +583,17 @@ class PlayerSettingsScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.only(bottom: 120),
         children: [
-          // 播放器内核
-          ListTile(
-            title: const Text('播放器内核'),
-            subtitle: Text(playerCore == 'video_player' ? 'ExoPlayer/AVPlayer' : 'MPV（media_kit）'),
-            onTap: () => _showCoreSelector(context, ref),
-          ),
+          if (isDesktopPlatform)
+            const ListTile(
+              title: Text('播放器内核'),
+              subtitle: Text('MPV（桌面版固定）'),
+            )
+          else
+            ListTile(
+              title: const Text('播放器内核'),
+              subtitle: Text(playerCore == 'exoPlayer' ? 'ExoPlayer/AVPlayer' : 'MPV'),
+              onTap: () => _showCoreSelector(context, ref),
+            ),
 
           const Divider(),
           const Padding(
@@ -704,7 +710,7 @@ class PlayerSettingsScreen extends ConsumerWidget {
           ),
 
           // MPV特有设置
-          if (playerCore == 'media_kit') ...[
+          if (playerCore == 'mpv') ...[
             const Divider(),
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -744,12 +750,13 @@ class PlayerSettingsScreen extends ConsumerWidget {
             value: impellerEnabled,
             onChanged: (value) => ref.read(impellerEnabledProvider.notifier).state = value,
           ),
-          SwitchListTile(
-            title: const Text('EXO 启用 ASS 原生渲染'),
-            subtitle: const Text('关闭时将 ASS 转为 SRT 兼容播放；开启后优先使用 Media3/libass 管线保留 ASS 效果'),
-            value: exoLibass,
-            onChanged: (value) => ref.read(exoLibassProvider.notifier).state = value,
-          ),
+          if (!isDesktopPlatform && playerCore == 'exoPlayer')
+            SwitchListTile(
+              title: const Text('EXO 启用 ASS 原生渲染'),
+              subtitle: const Text('关闭时将 ASS 转为 SRT 兼容播放；开启后优先使用 Media3/libass 管线保留 ASS 效果'),
+              value: exoLibass,
+              onChanged: (value) => ref.read(exoLibassProvider.notifier).state = value,
+            ),
         ],
       ),
     );
@@ -761,10 +768,10 @@ class PlayerSettingsScreen extends ConsumerWidget {
       builder: (context) => AlertDialog(
         title: const Text('播放器内核'),
         content: RadioGroup<String>(
-          groupValue: ref.read(playerCoreProvider),
+          groupValue: normalizePlayerCore(ref.read(playerCoreProvider)),
           onChanged: (value) {
             if (value != null) {
-              ref.read(playerCoreProvider.notifier).state = value;
+              ref.read(playerCoreProvider.notifier).state = normalizePlayerCore(value);
             }
             Navigator.pop(context);
           },
@@ -774,12 +781,12 @@ class PlayerSettingsScreen extends ConsumerWidget {
               RadioListTile<String>(
                 title: Text('ExoPlayer/AVPlayer（默认）'),
                 subtitle: Text('轻量稳定，适合大多数场景'),
-                value: 'video_player',
+                value: 'exoPlayer',
               ),
               RadioListTile<String>(
-                title: Text('MPV（media_kit）'),
+                title: Text('MPV'),
                 subtitle: Text('支持PGS/SUP图形字幕、HDR'),
-                value: 'media_kit',
+                value: 'mpv',
               ),
             ],
           ),

@@ -6,6 +6,7 @@ import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
 import '../../../core/services/cast_service.dart';
 import '../../../core/utils/color_extractor.dart';
+import '../../../core/utils/platform_utils.dart';
 import '../../screens/download/download_screen.dart';
 import '../../utils/media_helpers.dart';
 import '../../widgets/common/media_widgets.dart';
@@ -214,11 +215,12 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
 
   Future<void> _extractColor() async {
     final api = ref.read(apiClientProvider);
-    final imageUrl = widget.item.primaryImageTag != null
-        ? api.image.getPrimaryImageUrl(widget.item.id, tag: widget.item.primaryImageTag, maxWidth: 400)
-        : widget.item.backdropImageTag != null
-            ? api.image.getBackdropImageUrl(widget.item.id, tag: widget.item.backdropImageTag, maxWidth: 400)
-            : null;
+    final imageUrls = resolveMediaItemLandscapeImageUrls(
+      api,
+      widget.item,
+      maxWidth: 640,
+    );
+    final imageUrl = imageUrls.isNotEmpty ? imageUrls.first : null;
 
     if (imageUrl == null) return;
 
@@ -236,16 +238,18 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMovie = widget.item.type == 'Movie';
-    // 电影：根据手机屏幕比例适配，使用 cover 填满宽度，高度设为屏幕宽度的85%（显示更多海报内容）
-    // 剧集：使用 cover 展示更多 backdrop
-    final headerHeight = isMovie ? screenWidth * 0.85 : screenWidth * 0.75;
     final api = ref.read(apiClientProvider);
-    
-    final imageUrl = widget.item.primaryImageTag != null
-        ? api.image.getPrimaryImageUrl(widget.item.id, tag: widget.item.primaryImageTag, maxWidth: 600)
-        : widget.item.backdropImageTag != null
-            ? api.image.getBackdropImageUrl(widget.item.id, tag: widget.item.backdropImageTag, maxWidth: 800)
-            : null;
+    final imageUrls = resolveMediaItemLandscapeImageUrls(
+      api,
+      widget.item,
+      maxWidth: isDesktopPlatform ? 1600 : 960,
+    );
+    final hasLandscapeImage = imageUrls.isNotEmpty;
+    final headerHeight = isDesktopPlatform
+        ? (isMovie ? 400.0 : 420.0)
+        : (hasLandscapeImage
+            ? screenWidth * 0.6
+            : (isMovie ? screenWidth * 0.85 : screenWidth * 0.75));
 
     return Stack(
       children: [
@@ -254,7 +258,8 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
           width: double.infinity,
           color: _dominantColor,
           child: MediaImage(
-            imageUrl: imageUrl,
+            imageUrl: imageUrls.isNotEmpty ? imageUrls.first : null,
+            imageUrls: imageUrls.length > 1 ? imageUrls.sublist(1) : null,
             width: double.infinity,
             height: headerHeight,
             fit: BoxFit.cover,
@@ -465,10 +470,10 @@ class _SeasonsSection extends ConsumerWidget {
           children: [
             const SectionHeader(title: '季度选择'),
             HorizontalList(
-              height: 210,
+              height: 182,
               children: seasons.map((season) {
                 return SizedBox(
-                  width: 120,
+                  width: 196,
                   child: InkWell(
                     onTap: () => onSeasonTap(season),
                     borderRadius: BorderRadius.circular(8),
@@ -507,18 +512,18 @@ class _SeasonCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final api = ref.read(apiClientProvider);
-    final imageUrls = resolveSeasonImageUrls(api, season, maxWidth: 300);
+    final imageUrls = resolveSeasonLandscapeImageUrls(api, season, maxWidth: 480);
 
     if (imageUrls.isNotEmpty) {
       return AspectRatio(
-        aspectRatio: 2 / 3,
+        aspectRatio: 16 / 9,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(8),
           child: MediaImage(
             imageUrl: imageUrls.first,
             imageUrls: imageUrls.length > 1 ? imageUrls.sublist(1) : null,
-            width: 120,
-            height: 180,
+            width: 196,
+            height: 110,
             fit: BoxFit.cover,
             borderRadius: BorderRadius.circular(8),
           ),
@@ -527,7 +532,7 @@ class _SeasonCard extends ConsumerWidget {
     }
 
     return AspectRatio(
-      aspectRatio: 2 / 3,
+      aspectRatio: 16 / 9,
       child: Container(
         decoration: BoxDecoration(
           color: const Color(0xFF5B8DEF).withValues(alpha: 0.1),
@@ -648,11 +653,10 @@ class _EpisodeListTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isWatched = episode.userData?.played ?? false;
     final api = ref.read(apiClientProvider);
-    final imageUrls = resolveEpisodeImageUrls(
+    final imageUrls = resolveEpisodeLandscapeImageUrls(
       api,
       episode,
-      maxWidth: 300,
-      preferThumb: true,
+      maxWidth: 480,
     );
     
     return ListTile(
@@ -671,7 +675,7 @@ class _EpisodeListTile extends ConsumerWidget {
                 imageUrls: imageUrls.length > 1 ? imageUrls.sublist(1) : null,
                 width: 100,
                 height: 60,
-                fit: BoxFit.contain,
+                fit: BoxFit.cover,
               )
             : const Center(child: Icon(Icons.play_arrow)),
       ),
