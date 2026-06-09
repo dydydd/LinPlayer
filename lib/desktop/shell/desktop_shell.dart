@@ -96,7 +96,9 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
                       itemBuilder: (context, index) {
                         final item = _navItems[index];
                         final isSelected = currentPath == item.path ||
-                            (item.path == '/' && currentPath == '/home');
+                            (item.path == '/' &&
+                                (currentPath == '/home' ||
+                                    currentPath == resumeRoutePath));
                         return _buildNavItem(item, isSelected, isDark, currentPath);
                       },
                     ),
@@ -118,7 +120,7 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
           // 内容区
           Expanded(
             child: Container(
-              color: isDark ? const Color(0xFF121212) : const Color(0xFFF5F5F5),
+              color: Theme.of(context).scaffoldBackgroundColor,
               child: widget.child,
             ),
           ),

@@ -20,9 +20,10 @@ import '../shell/desktop_shell.dart';
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
 
 final desktopRouterProvider = Provider<GoRouter>((ref) {
+  final startupPage = ref.watch(startupPageProvider);
   return GoRouter(
     navigatorKey: _rootNavigatorKey,
-    initialLocation: '/',
+    initialLocation: desktopStartupLocationFor(startupPage),
     redirect: (context, state) {
       final servers = ref.read(serverListProvider);
       final isAuthRoute = state.uri.path == '/servers' || state.uri.path == '/add-server';
@@ -42,6 +43,13 @@ final desktopRouterProvider = Provider<GoRouter>((ref) {
             path: '/',
             pageBuilder: (context, state) => _buildFadePage(
               child: const DesktopHomeScreen(),
+              state: state,
+            ),
+          ),
+          GoRoute(
+            path: resumeRoutePath,
+            pageBuilder: (context, state) => _buildFadePage(
+              child: const DesktopResumeScreen(),
               state: state,
             ),
           ),

@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -56,6 +57,17 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen> {
               const SliverToBoxAdapter(
                 child: RepaintBoundary(child: _HeroSection()),
               ),
+            if (hideDailyRecommendations)
+              const SliverToBoxAdapter(
+                child: RepaintBoundary(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(24, 16, 24, 12),
+                    child: _DesktopContinueWatching(
+                      compactLayout: true,
+                    ),
+                  ),
+                ),
+              ),
             const SliverToBoxAdapter(
               child: RepaintBoundary(child: _LibrariesSection()),
             ),
@@ -64,6 +76,115 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen> {
             ),
             const SliverPadding(padding: EdgeInsets.only(bottom: 48)),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+class DesktopResumeScreen extends ConsumerWidget {
+  const DesktopResumeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final resumeAsync = ref.watch(resumeItemsProvider);
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: Column(
+        children: [
+          const _DesktopTopBar(),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surface,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: theme.colorScheme.outlineVariant.withValues(alpha: 0.28),
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+                  child: resumeAsync.when(
+                    data: (items) {
+                      final visibleItems = items
+                          .where((item) => !(item.userData?.played ?? false))
+                          .toList(growable: false);
+
+                      if (visibleItems.isEmpty) {
+                        return Center(
+                          child: Text(
+                            '没有继续观看的内容',
+                            style: theme.textTheme.bodyLarge?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        );
+                      }
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '继续观看',
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -0.3,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '继续上次停下来的内容',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          Expanded(
+                            child: LayoutBuilder(
+                              builder: (context, constraints) {
+                                final crossAxisCount =
+                                    constraints.maxWidth >= 1380 ? 3 : 2;
+                                return GridView.builder(
+                                  gridDelegate:
+                                      SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: crossAxisCount,
+                                    childAspectRatio: 2.6,
+                                    crossAxisSpacing: 16,
+                                    mainAxisSpacing: 16,
+                                  ),
+                                  itemCount: visibleItems.length,
+                                  itemBuilder: (context, index) {
+                                    return _DesktopContinueItem(
+                                      item: visibleItems[index],
+                                    );
+                                  },
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                    loading: () => const Center(
+                      child: CircularProgressIndicator(),
+                    ),
+                    error: (error, _) => Center(
+                      child: Text(
+                        '加载继续观看失败：$error',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.error,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -1005,87 +1126,252 @@ class _CarouselImage extends StatelessWidget {
 }
 
 class _DesktopContinueWatching extends ConsumerWidget {
-  final double panelHeight;
+  final double? panelHeight;
+  final bool compactLayout;
 
-  const _DesktopContinueWatching({required this.panelHeight});
+  const _DesktopContinueWatching({
+    this.panelHeight,
+    this.compactLayout = false,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final resumeAsync = ref.watch(resumeItemsProvider);
+    final theme = Theme.of(context);
 
     return Container(
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(compactLayout ? 18 : 12),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.28),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.fromLTRB(
+              compactLayout ? 18 : 16,
+              compactLayout ? 16 : 16,
+              compactLayout ? 12 : 16,
+              compactLayout ? 12 : 16,
+            ),
             child: Row(
               children: [
-                const Text(
+                Text(
                   '继续观看',
-                  style: TextStyle(
-                    fontSize: 16,
+                  style: theme.textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.w700,
+                    letterSpacing: -0.2,
                   ),
                 ),
                 const Spacer(),
                 TextButton(
-                  onPressed: () {},
+                  onPressed: () => _showContinueWatchingDialog(context, ref),
                   child: const Text('查看全部'),
                 ),
               ],
             ),
           ),
-          const Divider(height: 1),
-          Expanded(
-            child: resumeAsync.when(
-              data: (items) {
-                if (items.isEmpty) {
-                  return const Center(
-                    child: Text('没有继续观看的内容', style: TextStyle(color: Colors.grey)),
+          Divider(height: 1, color: theme.colorScheme.outlineVariant.withValues(alpha: 0.18)),
+          if (compactLayout)
+            SizedBox(
+              height: 214,
+              child: resumeAsync.when(
+                data: (items) {
+                  final visibleItems = items
+                      .where((item) => !(item.userData?.played ?? false))
+                      .toList(growable: false);
+                  if (visibleItems.isEmpty) {
+                    return const Center(
+                      child: Text(
+                        '没有继续观看的内容',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    );
+                  }
+                  return _DesktopContinueRail(
+                    items: visibleItems,
+                    compactLayout: true,
                   );
-                }
-
-                final visibleCount = panelHeight >= 520 ? 4 : 3;
-                final visibleItems = items.take(visibleCount).toList(growable: false);
-
-                return Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    children: [
-                      for (var index = 0; index < visibleItems.length; index++) ...[
-                        Expanded(
-                          child: _DesktopContinueItem(item: visibleItems[index]),
-                        ),
-                        if (index != visibleItems.length - 1)
-                          const SizedBox(height: 12),
-                      ],
-                    ],
-                  ),
-                );
-              },
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (error, _) => Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(
-                    '加载失败: $error',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).colorScheme.error,
+                },
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (error, _) => Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(
+                      '加载继续观看失败：$error',
+                      textAlign: TextAlign.center,
                     ),
-                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+            )
+          else
+            Expanded(
+              child: resumeAsync.when(
+                data: (items) {
+                  final visibleItems = items
+                      .where((item) => !(item.userData?.played ?? false))
+                      .toList(growable: false);
+                  if (visibleItems.isEmpty) {
+                    return const Center(
+                      child: Text(
+                        '没有继续观看的内容',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    );
+                  }
+
+                  final visibleCount = (panelHeight ?? 0) >= 520 ? 4 : 3;
+                  return _DesktopContinueRail(
+                    items: visibleItems.take(visibleCount).toList(growable: false),
+                  );
+                },
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (error, _) => Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(
+                      '加载失败: $error',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
         ],
       ),
+    );
+  }
+
+  void _showContinueWatchingDialog(BuildContext context, WidgetRef ref) {
+    final resumeAsync = ref.read(resumeItemsProvider);
+    resumeAsync.whenData((items) {
+      final visibleItems = items
+          .where((item) => !(item.userData?.played ?? false))
+          .toList(growable: false);
+      if (visibleItems.isEmpty) {
+        return;
+      }
+      showDialog(
+        context: context,
+        builder: (context) => Dialog(
+          insetPadding: const EdgeInsets.symmetric(horizontal: 48, vertical: 32),
+          clipBehavior: Clip.antiAlias,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1180, maxHeight: 760),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        '继续观看',
+                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: _DesktopContinueDialogGrid(items: visibleItems),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    });
+  }
+}
+
+class _DesktopContinueRail extends StatefulWidget {
+  final List<MediaItem> items;
+  final bool compactLayout;
+
+  const _DesktopContinueRail({
+    required this.items,
+    this.compactLayout = false,
+  });
+
+  @override
+  State<_DesktopContinueRail> createState() => _DesktopContinueRailState();
+}
+
+class _DesktopContinueRailState extends State<_DesktopContinueRail> {
+  late final ScrollController _controller = DesktopSmoothScrollController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final padding = widget.compactLayout
+        ? const EdgeInsets.fromLTRB(18, 14, 18, 18)
+        : const EdgeInsets.all(12);
+    return Padding(
+      padding: padding,
+      child: Listener(
+        onPointerSignal: (event) {
+          if (event is PointerScrollEvent) {
+            final nextOffset =
+                (_controller.offset + event.scrollDelta.dy).clamp(
+              0.0,
+              _controller.position.maxScrollExtent,
+            );
+            _controller.jumpTo(nextOffset);
+          }
+        },
+        child: ListView.separated(
+          controller: _controller,
+          primary: false,
+          physics: const ClampingScrollPhysics(),
+          itemCount: widget.items.length,
+          itemBuilder: (context, index) =>
+              _DesktopContinueItem(item: widget.items[index]),
+          separatorBuilder: (context, index) => SizedBox(
+            height: widget.compactLayout ? 14 : 12,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopContinueDialogGrid extends StatelessWidget {
+  final List<MediaItem> items;
+
+  const _DesktopContinueDialogGrid({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.builder(
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        childAspectRatio: 2.6,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+      ),
+      itemCount: items.length,
+      itemBuilder: (context, index) => _DesktopContinueItem(item: items[index]),
     );
   }
 }

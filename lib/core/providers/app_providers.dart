@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,6 +9,22 @@ import '../api/emby_api.dart';
 import '../services/cache_service.dart';
 import '../services/ext_domain_service.dart';
 import '../utils/platform_utils.dart';
+
+SharedPreferences? _sharedPreferences;
+
+Future<void> initializeAppPreferences() async {
+  _sharedPreferences = await SharedPreferences.getInstance();
+}
+
+SharedPreferences get _prefs {
+  final prefs = _sharedPreferences;
+  if (prefs == null) {
+    throw StateError(
+      'SharedPreferences has not been initialized. Call initializeAppPreferences() before running the app.',
+    );
+  }
+  return prefs;
+}
 
 /// 当前API客户端Provider
 /// 
@@ -49,35 +66,76 @@ String normalizePlayerCore(String? value) {
   }
 }
 
+typedef PreferenceReader<T> = T? Function(SharedPreferences prefs);
+typedef PreferenceWriter<T> = Future<void> Function(SharedPreferences prefs, T value);
+
+class PreferenceNotifier<T> extends StateNotifier<T> {
+  PreferenceNotifier({
+    required T defaultValue,
+    required PreferenceReader<T> readValue,
+    required PreferenceWriter<T> writeValue,
+  })  : _writeValue = writeValue,
+        super(readValue(_prefs) ?? defaultValue);
+
+  final PreferenceWriter<T> _writeValue;
+
+  @override
+  set state(T value) {
+    super.state = value;
+    _save(value);
+  }
+
+  Future<void> _save(T value) async {
+    try {
+      await _writeValue(_prefs, value);
+    } catch (_) {
+      // Ignore preference write failures and keep the in-memory state.
+    }
+  }
+}
+
 /// 当前服务器Provider
 final currentServerProvider = StateNotifierProvider<CurrentServerNotifier, ServerConfig?>((ref) {
-  return CurrentServerNotifier();
+  return CurrentServerNotifier(ref.read(serverListProvider));
 });
 
 class CurrentServerNotifier extends StateNotifier<ServerConfig?> {
-  CurrentServerNotifier() : super(null);
+  CurrentServerNotifier([List<ServerConfig> availableServers = const []])
+      : super(_restoreCurrentServer(availableServers));
 
   static const _currentServerKey = 'linplayer_current_server_id';
 
-  Future<void> loadFromSaved(List<ServerConfig> servers) async {
-    if (state != null) return;
+  static ServerConfig? _restoreCurrentServer(
+    List<ServerConfig> servers, {
+    String? preferredServerId,
+  }) {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final serverId = prefs.getString(_currentServerKey);
+      final serverId = preferredServerId ?? _prefs.getString(_currentServerKey);
       if (serverId != null) {
         final saved = servers.where((s) => s.id == serverId).firstOrNull;
         if (saved != null) {
-          super.state = saved;
+          return saved;
         }
       }
-    } catch (e) {
-      // 加载失败
+    } catch (_) {
+      // Ignore restore failures and fall back below.
     }
+    return servers.firstOrNull;
+  }
+
+  Future<void> loadFromSaved(
+    List<ServerConfig> servers, {
+    String? preferredServerId,
+  }) async {
+    super.state = _restoreCurrentServer(
+      servers,
+      preferredServerId: preferredServerId,
+    );
   }
 
   Future<void> _saveCurrentServer() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = _prefs;
       if (state != null) {
         await prefs.setString(_currentServerKey, state!.id);
       } else {
@@ -173,32 +231,32 @@ final serverListProvider = StateNotifierProvider<ServerListNotifier, List<Server
 });
 
 class ServerListNotifier extends StateNotifier<List<ServerConfig>> {
-  ServerListNotifier() : super([]) {
-    _loadServers();
-  }
+  ServerListNotifier() : super(_loadServersSync());
 
   static const _serversKey = 'linplayer_servers';
 
-  Future<void> _loadServers() async {
+  static List<ServerConfig> _loadServersSync() {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = _prefs;
       final jsonStr = prefs.getString(_serversKey);
       if (jsonStr != null) {
         final List<dynamic> jsonList = jsonDecode(jsonStr);
-        state = jsonList.map((e) => _serverConfigFromJson(e as Map<String, dynamic>)).toList();
-        debugPrint('[ServerList] Loaded ${state.length} servers');
-        for (final server in state) {
+        final servers = jsonList.map((e) => _serverConfigFromJson(e as Map<String, dynamic>)).toList();
+        debugPrint('[ServerList] Loaded ${servers.length} servers');
+        for (final server in servers) {
           debugPrint('[ServerList] Loaded ${server.name}: authToken=${server.authToken != null ? 'present' : 'null'}, userId=${server.userId}');
         }
+        return servers;
       }
     } catch (e) {
       debugPrint('[ServerList] Load failed: $e');
     }
+    return const [];
   }
 
   Future<void> _saveServers() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = _prefs;
       final jsonList = state.map((s) => _serverConfigToJson(s)).toList();
       debugPrint('[ServerList] Saving ${state.length} servers');
       for (final server in state) {
@@ -223,6 +281,11 @@ class ServerListNotifier extends StateNotifier<List<ServerConfig>> {
 
   void updateServer(ServerConfig server) {
     state = state.map((s) => s.id == server.id ? server : s).toList();
+    _saveServers();
+  }
+
+  void replaceServers(List<ServerConfig> servers) {
+    state = List<ServerConfig>.from(servers);
     _saveServers();
   }
 
@@ -288,6 +351,10 @@ ServerConfig _serverConfigFromJson(Map<String, dynamic> json) {
   );
 }
 
+Map<String, dynamic> serverConfigToJson(ServerConfig server) => _serverConfigToJson(server);
+
+ServerConfig serverConfigFromJson(Map<String, dynamic> json) => _serverConfigFromJson(json);
+
 /// 将空字符串转换为 null（清理旧数据中的空字符串）
 String? _emptyToNull(String? value) {
   if (value == null || value.isEmpty) return null;
@@ -309,45 +376,313 @@ final currentUserProvider = FutureProvider<User?>((ref) async {
 });
 
 /// 主题模式Provider
-final themeModeProvider = StateProvider<ThemeModeOption>((ref) => ThemeModeOption.system);
-
 enum ThemeModeOption { light, dark, system }
 
+enum StartupPageOption { home, servers, resume }
+
+ThemeModeOption parseThemeMode(String? value) {
+  return switch (value) {
+    'light' => ThemeModeOption.light,
+    'dark' => ThemeModeOption.dark,
+    _ => ThemeModeOption.system,
+  };
+}
+
+String themeModeLabel(ThemeModeOption mode) {
+  switch (mode) {
+    case ThemeModeOption.light:
+      return '浅色';
+    case ThemeModeOption.dark:
+      return '深色';
+    case ThemeModeOption.system:
+      return '跟随系统';
+  }
+}
+
+Locale? parseLocaleTag(String? value) {
+  switch (value) {
+    case null:
+    case '':
+    case 'system':
+      return null;
+    case 'zh':
+    case 'zh_CN':
+      return const Locale('zh', 'CN');
+    case 'en':
+      return const Locale('en');
+    default:
+      final parts = value.split(RegExp('[-_]'));
+      if (parts.isEmpty || parts.first.isEmpty) return null;
+      return parts.length > 1 ? Locale(parts.first, parts[1]) : Locale(parts.first);
+  }
+}
+
+String localeToPreferenceTag(Locale? locale) {
+  if (locale == null) return 'system';
+  return locale.toLanguageTag().replaceAll('-', '_');
+}
+
+StartupPageOption parseStartupPage(String? value) {
+  return switch (value) {
+    'servers' => StartupPageOption.servers,
+    'resume' => StartupPageOption.resume,
+    _ => StartupPageOption.home,
+  };
+}
+
+bool _usesEnglishLabels(Locale? locale) => locale?.languageCode == 'en';
+
+String localizedThemeModeLabel(ThemeModeOption mode, {Locale? displayLocale}) {
+  final english = _usesEnglishLabels(displayLocale);
+  switch (mode) {
+    case ThemeModeOption.light:
+      return english ? 'Light' : '浅色';
+    case ThemeModeOption.dark:
+      return english ? 'Dark' : '深色';
+    case ThemeModeOption.system:
+      return english ? 'Follow system' : '跟随系统';
+  }
+}
+
+String localizedLocaleLabel(Locale? locale, {Locale? displayLocale}) {
+  final english = _usesEnglishLabels(displayLocale);
+  if (locale == null) {
+    return english ? 'Follow system' : '跟随系统';
+  }
+  final normalized = locale.toLanguageTag().replaceAll('-', '_');
+  switch (normalized) {
+    case 'zh':
+    case 'zh_CN':
+      return english ? 'Simplified Chinese' : '简体中文';
+    case 'en':
+      return 'English';
+    default:
+      return normalized;
+  }
+}
+
+String startupPageLabel(StartupPageOption option, {Locale? displayLocale}) {
+  final english = _usesEnglishLabels(displayLocale);
+  switch (option) {
+    case StartupPageOption.home:
+      return english ? 'Home' : '首页';
+    case StartupPageOption.servers:
+      return english ? 'Servers' : '服务器列表';
+    case StartupPageOption.resume:
+      return english ? 'Continue watching' : '继续观看';
+  }
+}
+
+const String resumeRoutePath = '/resume';
+
+String mobileStartupLocationFor(StartupPageOption option) {
+  return switch (option) {
+    StartupPageOption.home => '/home',
+    StartupPageOption.servers => '/',
+    StartupPageOption.resume => resumeRoutePath,
+  };
+}
+
+String desktopStartupLocationFor(StartupPageOption option) {
+  return switch (option) {
+    StartupPageOption.home => '/',
+    StartupPageOption.servers => '/servers',
+    StartupPageOption.resume => resumeRoutePath,
+  };
+}
+
+final themeModeProvider =
+    StateNotifierProvider<PreferenceNotifier<ThemeModeOption>, ThemeModeOption>((ref) {
+  return PreferenceNotifier<ThemeModeOption>(
+    defaultValue: ThemeModeOption.system,
+    readValue: (prefs) => parseThemeMode(prefs.getString('linplayer_theme_mode')),
+    writeValue: (prefs, value) async {
+      await prefs.setString('linplayer_theme_mode', value.name);
+    },
+  );
+});
+
+final localeProvider = StateNotifierProvider<PreferenceNotifier<Locale?>, Locale?>((ref) {
+  return PreferenceNotifier<Locale?>(
+    defaultValue: null,
+    readValue: (prefs) => parseLocaleTag(prefs.getString('linplayer_locale')),
+    writeValue: (prefs, value) async {
+      if (value == null) {
+        await prefs.remove('linplayer_locale');
+      } else {
+        await prefs.setString('linplayer_locale', localeToPreferenceTag(value));
+      }
+    },
+  );
+});
+
+final startupPageProvider =
+    StateNotifierProvider<PreferenceNotifier<StartupPageOption>, StartupPageOption>((ref) {
+  return PreferenceNotifier<StartupPageOption>(
+    defaultValue: StartupPageOption.home,
+    readValue: (prefs) => parseStartupPage(prefs.getString('linplayer_startup_page')),
+    writeValue: (prefs, value) async {
+      await prefs.setString('linplayer_startup_page', value.name);
+    },
+  );
+});
+
+String localeLabel(Locale? locale) {
+  if (locale == null) {
+    return '跟随系统';
+  }
+  final normalized = locale.toLanguageTag().replaceAll('-', '_');
+  switch (normalized) {
+    case 'zh':
+    case 'zh_CN':
+      return '简体中文';
+    case 'en':
+      return 'English';
+    default:
+      return normalized;
+  }
+}
+
 /// 播放器内核Provider
-final playerCoreProvider = StateProvider<String>((ref) => defaultPlayerCoreKey);
+final playerCoreProvider = StateNotifierProvider<PreferenceNotifier<String>, String>((ref) {
+  return PreferenceNotifier<String>(
+    defaultValue: defaultPlayerCoreKey,
+    readValue: (prefs) => normalizePlayerCore(prefs.getString('linplayer_player_core')),
+    writeValue: (prefs, value) async {
+      await prefs.setString('linplayer_player_core', normalizePlayerCore(value));
+    },
+  );
+});
 
 /// 默认播放速度Provider
-final defaultPlaybackSpeedProvider = StateProvider<double>((ref) => 1.0);
+final defaultPlaybackSpeedProvider =
+    StateNotifierProvider<PreferenceNotifier<double>, double>((ref) {
+  return PreferenceNotifier<double>(
+    defaultValue: 1.0,
+    readValue: (prefs) => prefs.getDouble('linplayer_default_playback_speed'),
+    writeValue: (prefs, value) async {
+      await prefs.setDouble('linplayer_default_playback_speed', value);
+    },
+  );
+});
 
 /// 快进步长Provider（秒）
-final skipForwardStepProvider = StateProvider<int>((ref) => 10);
+final skipForwardStepProvider = StateNotifierProvider<PreferenceNotifier<int>, int>((ref) {
+  return PreferenceNotifier<int>(
+    defaultValue: 10,
+    readValue: (prefs) => prefs.getInt('linplayer_skip_forward_step'),
+    writeValue: (prefs, value) async {
+      await prefs.setInt('linplayer_skip_forward_step', value);
+    },
+  );
+});
 
 /// 长按快进倍速Provider
-final longPressSpeedProvider = StateProvider<double>((ref) => 2.0);
+final longPressSpeedProvider =
+    StateNotifierProvider<PreferenceNotifier<double>, double>((ref) {
+  return PreferenceNotifier<double>(
+    defaultValue: 2.0,
+    readValue: (prefs) => prefs.getDouble('linplayer_long_press_speed'),
+    writeValue: (prefs, value) async {
+      await prefs.setDouble('linplayer_long_press_speed', value);
+    },
+  );
+});
 
 /// 硬件解码Provider
-final hardwareDecodingProvider = StateProvider<bool>((ref) => true);
+final hardwareDecodingProvider =
+    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: true,
+    readValue: (prefs) => prefs.getBool('linplayer_hardware_decoding'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_hardware_decoding', value);
+    },
+  );
+});
 
 /// 后台播放Provider
-final backgroundPlaybackProvider = StateProvider<bool>((ref) => true);
+final backgroundPlaybackProvider =
+    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: true,
+    readValue: (prefs) => prefs.getBool('linplayer_background_playback'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_background_playback', value);
+    },
+  );
+});
 
 /// 自动播放下一集Provider
-final autoPlayNextProvider = StateProvider<bool>((ref) => true);
+final autoPlayNextProvider = StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: true,
+    readValue: (prefs) => prefs.getBool('linplayer_auto_play_next'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_auto_play_next', value);
+    },
+  );
+});
 
 /// 弹幕开关Provider
-final danmakuEnabledProvider = StateProvider<bool>((ref) => true);
+final danmakuEnabledProvider =
+    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: true,
+    readValue: (prefs) => prefs.getBool('linplayer_danmaku_enabled'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_danmaku_enabled', value);
+    },
+  );
+});
 
 /// 弹幕透明度Provider
-final danmakuOpacityProvider = StateProvider<double>((ref) => 0.8);
+final danmakuOpacityProvider =
+    StateNotifierProvider<PreferenceNotifier<double>, double>((ref) {
+  return PreferenceNotifier<double>(
+    defaultValue: 0.8,
+    readValue: (prefs) => prefs.getDouble('linplayer_danmaku_opacity'),
+    writeValue: (prefs, value) async {
+      await prefs.setDouble('linplayer_danmaku_opacity', value);
+    },
+  );
+});
 
 /// 弹幕字号Provider
-final danmakuFontSizeProvider = StateProvider<double>((ref) => 0.5);
+final danmakuFontSizeProvider =
+    StateNotifierProvider<PreferenceNotifier<double>, double>((ref) {
+  return PreferenceNotifier<double>(
+    defaultValue: 0.5,
+    readValue: (prefs) => prefs.getDouble('linplayer_danmaku_font_size'),
+    writeValue: (prefs, value) async {
+      await prefs.setDouble('linplayer_danmaku_font_size', value);
+    },
+  );
+});
 
 /// 弹幕速度Provider
-final danmakuSpeedProvider = StateProvider<double>((ref) => 0.5);
+final danmakuSpeedProvider =
+    StateNotifierProvider<PreferenceNotifier<double>, double>((ref) {
+  return PreferenceNotifier<double>(
+    defaultValue: 0.5,
+    readValue: (prefs) => prefs.getDouble('linplayer_danmaku_speed'),
+    writeValue: (prefs, value) async {
+      await prefs.setDouble('linplayer_danmaku_speed', value);
+    },
+  );
+});
 
 /// 弹幕密度Provider
-final danmakuDensityProvider = StateProvider<double>((ref) => 0.5);
+final danmakuDensityProvider =
+    StateNotifierProvider<PreferenceNotifier<double>, double>((ref) {
+  return PreferenceNotifier<double>(
+    defaultValue: 0.5,
+    readValue: (prefs) => prefs.getDouble('linplayer_danmaku_density'),
+    writeValue: (prefs, value) async {
+      await prefs.setDouble('linplayer_danmaku_density', value);
+    },
+  );
+});
 
 /// 弹幕延迟Provider (秒)
 final danmakuDelayProvider = StateProvider<double>((ref) => 0.0);
@@ -401,31 +736,101 @@ class DanmakuBlockwordsNotifier extends StateNotifier<List<String>> {
 /// ==========================================
 
 /// 首选字幕语言Provider
-final preferredSubtitleLanguageProvider = StateProvider<String>((ref) => 'chi');
+final preferredSubtitleLanguageProvider =
+    StateNotifierProvider<PreferenceNotifier<String>, String>((ref) {
+  return PreferenceNotifier<String>(
+    defaultValue: 'chi',
+    readValue: (prefs) => prefs.getString('linplayer_preferred_subtitle_language'),
+    writeValue: (prefs, value) async {
+      await prefs.setString('linplayer_preferred_subtitle_language', value);
+    },
+  );
+});
 
 /// 首选音频语言Provider
-final preferredAudioLanguageProvider = StateProvider<String>((ref) => 'jpn');
+final preferredAudioLanguageProvider =
+    StateNotifierProvider<PreferenceNotifier<String>, String>((ref) {
+  return PreferenceNotifier<String>(
+    defaultValue: 'jpn',
+    readValue: (prefs) => prefs.getString('linplayer_preferred_audio_language'),
+    writeValue: (prefs, value) async {
+      await prefs.setString('linplayer_preferred_audio_language', value);
+    },
+  );
+});
 
 /// 首选版本Provider
-final preferredVersionProvider = StateProvider<String>((ref) => '原盘');
+final preferredVersionProvider =
+    StateNotifierProvider<PreferenceNotifier<String>, String>((ref) {
+  return PreferenceNotifier<String>(
+    defaultValue: '原盘',
+    readValue: (prefs) => prefs.getString('linplayer_preferred_version'),
+    writeValue: (prefs, value) async {
+      await prefs.setString('linplayer_preferred_version', value);
+    },
+  );
+});
 
 /// 记忆亮度Provider
-final rememberBrightnessProvider = StateProvider<bool>((ref) => true);
+final rememberBrightnessProvider =
+    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: true,
+    readValue: (prefs) => prefs.getBool('linplayer_remember_brightness'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_remember_brightness', value);
+    },
+  );
+});
 
 /// 当前播放亮度值Provider (0.0 - 1.0)
 final playerBrightnessProvider = StateProvider<double>((ref) => 1.0);
 
 /// 字幕字体Provider
-final subtitleFontProvider = StateProvider<String>((ref) => '默认');
+final subtitleFontProvider = StateNotifierProvider<PreferenceNotifier<String>, String>((ref) {
+  return PreferenceNotifier<String>(
+    defaultValue: '默认',
+    readValue: (prefs) => prefs.getString('linplayer_subtitle_font'),
+    writeValue: (prefs, value) async {
+      await prefs.setString('linplayer_subtitle_font', value);
+    },
+  );
+});
 
 /// MPV自动修正杜比视界颜色Provider
-final mpvDolbyVisionFixProvider = StateProvider<bool>((ref) => false);
+final mpvDolbyVisionFixProvider =
+    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: false,
+    readValue: (prefs) => prefs.getBool('linplayer_mpv_dolby_vision_fix'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_mpv_dolby_vision_fix', value);
+    },
+  );
+});
 
 /// 启用Impeller渲染引擎Provider
-final impellerEnabledProvider = StateProvider<bool>((ref) => false);
+final impellerEnabledProvider =
+    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: false,
+    readValue: (prefs) => prefs.getBool('linplayer_impeller_enabled'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_impeller_enabled', value);
+    },
+  );
+});
 
 /// EXO播放器使用libass渲染ASS字幕Provider
-final exoLibassProvider = StateProvider<bool>((ref) => false);
+final exoLibassProvider = StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: false,
+    readValue: (prefs) => prefs.getBool('linplayer_exo_libass'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_exo_libass', value);
+    },
+  );
+});
 
 /// 画面比例Provider
 final aspectRatioProvider = StateProvider<String>((ref) => '自动');
@@ -461,7 +866,16 @@ final subtitleSizeProvider = StateProvider<double>((ref) => 0.5);
 final subtitlePositionProvider = StateProvider<double>((ref) => 0.5);
 
 /// 字幕黑色背景Provider
-final subtitleBackgroundProvider = StateProvider<bool>((ref) => false);
+final subtitleBackgroundProvider =
+    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: false,
+    readValue: (prefs) => prefs.getBool('linplayer_subtitle_background'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_subtitle_background', value);
+    },
+  );
+});
 
 /// Anime4K 档位Provider ('off', 'modeA', 'modeB', 'modeC')
 final anime4KLevelProvider = StateProvider<String>((ref) => 'off');
@@ -471,7 +885,16 @@ final anime4KLevelProvider = StateProvider<String>((ref) => 'off');
 /// ==========================================
 
 /// 隐藏每日推荐Provider
-final hideDailyRecommendationsProvider = StateProvider<bool>((ref) => false);
+final hideDailyRecommendationsProvider =
+    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: false,
+    readValue: (prefs) => prefs.getBool('linplayer_hide_daily_recommendations'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_hide_daily_recommendations', value);
+    },
+  );
+});
 
 /// 屏蔽的媒体库ID列表Provider
 final hiddenLibrariesProvider = StateNotifierProvider<HiddenLibrariesNotifier, Set<String>>((ref) {

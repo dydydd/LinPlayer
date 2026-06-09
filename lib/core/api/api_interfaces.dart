@@ -426,6 +426,12 @@ abstract class PlaybackApi {
     String? container,
     String? playSessionId,
     bool staticStream = true,
+    bool allowDirectPlay = true,
+    bool allowDirectStream = true,
+    bool allowTranscoding = false,
+    bool enableAutoStreamCopy = true,
+    bool enableAutoStreamCopyAudio = true,
+    bool enableAutoStreamCopyVideo = true,
   });
   
   /// 获取字幕流URL

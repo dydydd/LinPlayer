@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../../core/api/api_interfaces.dart';
 import '../../../core/providers/media_providers.dart';
 import '../../utils/desktop_smooth_scroll.dart';
 import '../../widgets/desktop_media_card.dart';
@@ -19,10 +18,16 @@ class DesktopLibraryDetailScreen extends ConsumerStatefulWidget {
 
 class _DesktopLibraryDetailScreenState
     extends ConsumerState<DesktopLibraryDetailScreen> {
-  String _sortBy = '加入日期';
-  final String _sortOrder = '降序';
+  static const Map<String, String> _sortMap = {
+    '加入日期': 'DateCreated',
+    '标题': 'SortName',
+    '首映日期': 'PremiereDate',
+    '评分': 'CommunityRating',
+  };
+
+  String _sortBy = 'DateCreated';
+  String _sortOrder = 'Descending';
   final ScrollController _scrollController = DesktopSmoothScrollController();
-  bool _isGridMode = true;
 
   @override
   void dispose() {
@@ -77,51 +82,7 @@ class _DesktopLibraryDetailScreenState
                     ),
                   ),
                   const SizedBox(width: 16),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest
-                          .withValues(alpha: 0.42),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      _isGridMode ? '网格视图' : '列表视图',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
                   _buildSortDropdown(theme),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    icon: const Icon(Icons.grid_view_rounded),
-                    onPressed: () => setState(() => _isGridMode = true),
-                    tooltip: '网格视图',
-                    color: _isGridMode ? theme.colorScheme.primary : null,
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.view_list_rounded),
-                    onPressed: () => setState(() => _isGridMode = false),
-                    tooltip: '列表视图',
-                    color: !_isGridMode ? theme.colorScheme.primary : null,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          SliverToBoxAdapter(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _buildFilterChip(context, '全部'),
-                  _buildFilterChip(context, '电影'),
-                  _buildFilterChip(context, '剧集'),
-                  _buildFilterChip(context, '动画'),
                 ],
               ),
             ),
@@ -145,52 +106,40 @@ class _DesktopLibraryDetailScreenState
                 padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
                 sliver: SliverLayoutBuilder(
                   builder: (context, constraints) {
-                    if (_isGridMode) {
-                      const crossAxisSpacing = 18.0;
-                      const mainAxisSpacing = 28.0;
-                      const targetCardWidth = 144.0;
+                    const crossAxisSpacing = 18.0;
+                    const mainAxisSpacing = 28.0;
+                    const targetCardWidth = 168.0;
 
-                      final availableWidth = constraints.crossAxisExtent;
-                      final crossAxisCount =
-                          ((availableWidth + crossAxisSpacing) /
-                                  (targetCardWidth + crossAxisSpacing))
-                              .floor()
-                              .clamp(2, 8)
-                              .toInt();
-                      final actualWidth = (availableWidth -
-                              crossAxisSpacing * (crossAxisCount - 1)) /
-                          crossAxisCount;
-                      final cardHeight = actualWidth / (2 / 3) + 42;
+                    final availableWidth = constraints.crossAxisExtent;
+                    final crossAxisCount =
+                        ((availableWidth + crossAxisSpacing) /
+                                (targetCardWidth + crossAxisSpacing))
+                            .floor()
+                            .clamp(2, 8)
+                            .toInt();
+                    final actualWidth = (availableWidth -
+                            crossAxisSpacing * (crossAxisCount - 1)) /
+                        crossAxisCount;
+                    final cardHeight = actualWidth / (2 / 3) + 58;
 
-                      return SliverGrid(
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: crossAxisCount,
-                          childAspectRatio: actualWidth / cardHeight,
-                          crossAxisSpacing: crossAxisSpacing,
-                          mainAxisSpacing: mainAxisSpacing,
-                        ),
-                        delegate: SliverChildBuilderDelegate(
-                          (context, index) {
-                            final item = items[index];
-                            return DesktopMediaCard(
-                              item: item,
-                              width: actualWidth,
-                              compact: true,
-                            );
-                          },
-                          childCount: items.length,
-                        ),
-                      );
-                    }
-
-                    return SliverList.separated(
-                      itemCount: items.length,
-                      itemBuilder: (context, index) {
-                        final item = items[index];
-                        return _DesktopLibraryListItem(item: item);
-                      },
-                      separatorBuilder: (context, index) =>
-                          const SizedBox(height: 14),
+                    return SliverGrid(
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: crossAxisCount,
+                        childAspectRatio: actualWidth / cardHeight,
+                        crossAxisSpacing: crossAxisSpacing,
+                        mainAxisSpacing: mainAxisSpacing,
+                      ),
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          final item = items[index];
+                          return DesktopMediaCard(
+                            item: item,
+                            width: actualWidth,
+                            titleMaxLines: 2,
+                          );
+                        },
+                        childCount: items.length,
+                      ),
                     );
                   },
                 ),
@@ -227,7 +176,7 @@ class _DesktopLibraryDetailScreenState
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
-          value: _sortBy,
+          value: _currentSortLabel,
           isDense: true,
           items: ['加入日期', '标题', '首映日期', '评分'].map((value) {
             return DropdownMenuItem<String>(
@@ -238,7 +187,14 @@ class _DesktopLibraryDetailScreenState
           onChanged: (newValue) {
             if (newValue != null) {
               setState(() {
-                _sortBy = newValue;
+                final mappedValue = _sortMap[newValue] ?? _sortBy;
+                if (_sortBy == mappedValue) {
+                  _sortOrder =
+                      _sortOrder == 'Descending' ? 'Ascending' : 'Descending';
+                } else {
+                  _sortBy = mappedValue;
+                  _sortOrder = 'Descending';
+                }
               });
             }
           },
@@ -247,99 +203,11 @@ class _DesktopLibraryDetailScreenState
     );
   }
 
-  Widget _buildFilterChip(BuildContext context, String label) {
-    final theme = Theme.of(context);
-    final isSelected = label == '全部';
-
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: () {},
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-          decoration: BoxDecoration(
-            color: isSelected
-                ? theme.colorScheme.primary.withValues(alpha: 0.1)
-                : theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: isSelected
-                  ? theme.colorScheme.primary.withValues(alpha: 0.3)
-                  : theme.dividerColor.withValues(alpha: 0.3),
-            ),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-              color: isSelected
-                  ? theme.colorScheme.primary
-                  : theme.textTheme.bodyMedium?.color,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _DesktopLibraryListItem extends StatelessWidget {
-  final MediaItem item;
-
-  const _DesktopLibraryListItem({required this.item});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: theme.dividerColor.withValues(alpha: 0.18),
-        ),
-      ),
-      child: Row(
-        children: [
-          DesktopMediaCard(
-            item: item,
-            width: 72,
-            height: 102,
-            compact: true,
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  item.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  [
-                    if (item.type.isNotEmpty) item.type,
-                    if (item.productionYear != null) '${item.productionYear}',
-                  ].join(' · '),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
+  String get _currentSortLabel {
+    return _sortMap.entries
+            .where((entry) => entry.value == _sortBy)
+            .firstOrNull
+            ?.key ??
+        '加入日期';
   }
 }

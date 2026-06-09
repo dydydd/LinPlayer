@@ -11,6 +11,7 @@ import '../../../core/api/api_interfaces.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
 import '../../../core/services/video_player_service.dart';
+import '../../../core/utils/playback_url_resolver.dart';
 import '../../utils/desktop_smooth_scroll.dart';
 
 /// 桌面端播放器 - 全新设计
@@ -125,15 +126,48 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
       final item = await api.media.getItemDetails(widget.itemId);
 
       final playbackInfo = await api.playback.getPlaybackInfo(widget.itemId);
-      final mediaSource = _resolveMediaSource(playbackInfo);
-      final videoStream = mediaSource?.mediaStreams.where((s) => s.isVideo).firstOrNull;
-
-      final videoUrl = api.playback.getVideoStreamUrl(
-        widget.itemId,
-        mediaSourceId: mediaSource?.id,
-        container: mediaSource?.container ?? videoStream?.codec,
+      final selection = buildPlaybackSelection(
+        playbackInfo: playbackInfo,
+        itemId: widget.itemId,
+        preferredMediaSourceId:
+            widget.mediaSourceId ?? ref.read(selectedMediaSourceProvider),
         playSessionId: '${widget.itemId}-${DateTime.now().microsecondsSinceEpoch}',
       );
+      final mediaSource = selection.mediaSource;
+
+      final videoUrl = api.playback.getVideoStreamUrl(
+        selection.primaryRequest.itemId,
+        mediaSourceId: selection.primaryRequest.mediaSourceId,
+        container: selection.primaryRequest.container,
+        playSessionId: selection.primaryRequest.playSessionId,
+        staticStream: selection.primaryRequest.staticStream,
+        allowDirectPlay: selection.primaryRequest.allowDirectPlay,
+        allowDirectStream: selection.primaryRequest.allowDirectStream,
+        allowTranscoding: selection.primaryRequest.allowTranscoding,
+        enableAutoStreamCopy: selection.primaryRequest.enableAutoStreamCopy,
+        enableAutoStreamCopyAudio:
+            selection.primaryRequest.enableAutoStreamCopyAudio,
+        enableAutoStreamCopyVideo:
+            selection.primaryRequest.enableAutoStreamCopyVideo,
+      );
+      final fallbackVideoUrl = selection.fallbackRequest == null
+          ? null
+          : api.playback.getVideoStreamUrl(
+              selection.fallbackRequest!.itemId,
+              mediaSourceId: selection.fallbackRequest!.mediaSourceId,
+              container: selection.fallbackRequest!.container,
+              playSessionId: selection.fallbackRequest!.playSessionId,
+              staticStream: selection.fallbackRequest!.staticStream,
+              allowDirectPlay: selection.fallbackRequest!.allowDirectPlay,
+              allowDirectStream: selection.fallbackRequest!.allowDirectStream,
+              allowTranscoding: selection.fallbackRequest!.allowTranscoding,
+              enableAutoStreamCopy:
+                  selection.fallbackRequest!.enableAutoStreamCopy,
+              enableAutoStreamCopyAudio:
+                  selection.fallbackRequest!.enableAutoStreamCopyAudio,
+              enableAutoStreamCopyVideo:
+                  selection.fallbackRequest!.enableAutoStreamCopyVideo,
+            );
 
       Duration? startPosition;
       if (item.userData?.playbackPositionTicks != null) {
@@ -157,11 +191,15 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
         videoUrl: videoUrl,
         itemId: widget.itemId,
         mediaSourceId: mediaSource?.id,
+        fallbackVideoUrl: fallbackVideoUrl,
         startPosition: startPosition,
         coreType: coreType,
         dolbyVisionFix: dolbyVisionFix,
         useLibass: useLibass,
         hardwareDecoding: hardwareDecoding,
+        startWithSoftwareDecoding:
+            selection.startsWithSoftwareDecoding && hardwareDecoding,
+        fallbackReason: selection.fallbackReason,
         preferredSubtitleLanguage: preferredSubtitleLanguage,
         onStart: (info) async {
           try { await api.playback.reportPlaybackStart(info); } catch (_) {}
@@ -198,17 +236,6 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
     } finally {
       _initializingPlayer = false;
     }
-  }
-
-  MediaSource? _resolveMediaSource(PlaybackInfo playbackInfo) {
-    final mediaSources = playbackInfo.mediaSources;
-    if (mediaSources.isEmpty) return null;
-
-    final targetSourceId = widget.mediaSourceId ?? ref.read(selectedMediaSourceProvider);
-    if (targetSourceId == null || targetSourceId.isEmpty) {
-      return mediaSources.firstOrNull;
-    }
-    return mediaSources.where((s) => s.id == targetSourceId).firstOrNull ?? mediaSources.firstOrNull;
   }
 
   Future<void> _applyInitialAudioTrack(List<MediaStream> audioStreams, int selectedIndex) async {

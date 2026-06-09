@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../core/providers/app_providers.dart';
 import '../ui/screens/detail/media_detail_screen.dart';
 import '../ui/screens/detail/season_detail_screen.dart';
 import '../ui/screens/download/download_screen.dart';
@@ -20,9 +21,23 @@ import '../ui/screens/settings/settings_screen.dart';
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
 
 final appRouterProvider = Provider<GoRouter>((ref) {
+  final startupPage = ref.watch(startupPageProvider);
   return GoRouter(
     navigatorKey: _rootNavigatorKey,
-    initialLocation: '/',
+    initialLocation: mobileStartupLocationFor(startupPage),
+    redirect: (context, state) {
+      final servers = ref.read(serverListProvider);
+      final path = state.uri.path;
+
+      if (servers.isEmpty) {
+        if (path == '/home' || path == resumeRoutePath) {
+          return '/';
+        }
+        return null;
+      }
+
+      return null;
+    },
     onException: (context, state, router) {
       router.go('/');
     },
@@ -55,6 +70,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                     path: 'home',
                     pageBuilder: (context, state) => _buildHorizontalPage(
                       child: const HomeScreen(),
+                      state: state,
+                      direction: _PageTransitionDirection.forward,
+                    ),
+                  ),
+                  GoRoute(
+                    path: 'resume',
+                    pageBuilder: (context, state) => _buildHorizontalPage(
+                      child: const _ResumeRouteScreen(),
                       state: state,
                       direction: _PageTransitionDirection.forward,
                     ),
@@ -316,7 +339,7 @@ class _MainShellState extends State<MainShell> {
   bool get _isHomePage => widget.currentPath == '/home';
   bool get _isServerListPage => widget.currentPath == '/';
   bool get _supportsFloatingTabBar => switch (widget.currentPath) {
-        '/' || '/home' || '/favorites' || '/settings' => true,
+        '/' || '/home' || '/resume' || '/favorites' || '/settings' => true,
         _ => false,
       };
 
@@ -459,6 +482,22 @@ class _FloatingTabBar extends StatelessWidget {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ResumeRouteScreen extends StatelessWidget {
+  const _ResumeRouteScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.only(top: 8, bottom: 24),
+          child: ContinueWatchingSection(),
         ),
       ),
     );

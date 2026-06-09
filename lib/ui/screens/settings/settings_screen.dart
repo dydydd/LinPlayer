@@ -14,6 +14,162 @@ import '../../../core/utils/platform_utils.dart';
 import '../../../core/api/danmaku/danmaku_source.dart';
 import '../../../core/api/danmaku/danmaku_service.dart';
 
+Map<String, dynamic> _buildBackupPayload(WidgetRef ref) {
+  return {
+    'version': '1.0.0',
+    'timestamp': DateTime.now().toIso8601String(),
+    'currentServerId': ref.read(currentServerProvider)?.id,
+    'servers': ref.read(serverListProvider).map(serverConfigToJson).toList(),
+    'settings': {
+      'themeMode': ref.read(themeModeProvider).name,
+      'locale': localeToPreferenceTag(ref.read(localeProvider)),
+      'startupPage': ref.read(startupPageProvider).name,
+      'playerCore': ref.read(playerCoreProvider),
+      'playbackSpeed': ref.read(defaultPlaybackSpeedProvider),
+      'skipForwardStep': ref.read(skipForwardStepProvider),
+      'longPressSpeed': ref.read(longPressSpeedProvider),
+      'hardwareDecoding': ref.read(hardwareDecodingProvider),
+      'backgroundPlayback': ref.read(backgroundPlaybackProvider),
+      'autoPlayNext': ref.read(autoPlayNextProvider),
+      'danmakuEnabled': ref.read(danmakuEnabledProvider),
+      'danmakuOpacity': ref.read(danmakuOpacityProvider),
+      'danmakuFontSize': ref.read(danmakuFontSizeProvider),
+      'danmakuSpeed': ref.read(danmakuSpeedProvider),
+      'danmakuDensity': ref.read(danmakuDensityProvider),
+      'preferredSubtitleLanguage': ref.read(preferredSubtitleLanguageProvider),
+      'preferredAudioLanguage': ref.read(preferredAudioLanguageProvider),
+      'preferredVersion': ref.read(preferredVersionProvider),
+      'rememberBrightness': ref.read(rememberBrightnessProvider),
+      'subtitleFont': ref.read(subtitleFontProvider),
+      'mpvDolbyVisionFix': ref.read(mpvDolbyVisionFixProvider),
+      'impellerEnabled': ref.read(impellerEnabledProvider),
+      'exoLibass': ref.read(exoLibassProvider),
+      'subtitleBackground': ref.read(subtitleBackgroundProvider),
+      'hideDailyRecommendations': ref.read(hideDailyRecommendationsProvider),
+    },
+  };
+}
+
+Future<void> _restoreBackupPayload(WidgetRef ref, Map<String, dynamic> payload) async {
+  final preferredServerId = payload['currentServerId'] as String?;
+  final serversJson = (payload['servers'] as List<dynamic>? ?? const [])
+      .whereType<Map<String, dynamic>>()
+      .map(serverConfigFromJson)
+      .toList();
+  final settings = (payload['settings'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
+
+  ref.read(serverListProvider.notifier).replaceServers(serversJson);
+  if (serversJson.isNotEmpty) {
+    await ref.read(currentServerProvider.notifier).loadFromSaved(
+      serversJson,
+      preferredServerId: preferredServerId,
+    );
+    ref.read(authStateProvider.notifier).state =
+        serverHasUsableAuth(ref.read(currentServerProvider))
+            ? AuthState.authenticated
+            : AuthState.unauthenticated;
+  } else {
+    ref.read(currentServerProvider.notifier).clear();
+    ref.read(authStateProvider.notifier).state = AuthState.unauthenticated;
+  }
+
+  ref.read(themeModeProvider.notifier).state =
+      parseThemeMode(settings['themeMode'] as String?);
+  ref.read(localeProvider.notifier).state =
+      parseLocaleTag(settings['locale'] as String?);
+  ref.read(startupPageProvider.notifier).state =
+      parseStartupPage(settings['startupPage'] as String?);
+
+  if (settings['playerCore'] is String) {
+    ref.read(playerCoreProvider.notifier).state =
+        normalizePlayerCore(settings['playerCore'] as String);
+  }
+  if (settings['playbackSpeed'] is num) {
+    ref.read(defaultPlaybackSpeedProvider.notifier).state =
+        (settings['playbackSpeed'] as num).toDouble();
+  }
+  if (settings['skipForwardStep'] is num) {
+    ref.read(skipForwardStepProvider.notifier).state =
+        (settings['skipForwardStep'] as num).toInt();
+  }
+  if (settings['longPressSpeed'] is num) {
+    ref.read(longPressSpeedProvider.notifier).state =
+        (settings['longPressSpeed'] as num).toDouble();
+  }
+  if (settings['hardwareDecoding'] is bool) {
+    ref.read(hardwareDecodingProvider.notifier).state =
+        settings['hardwareDecoding'] as bool;
+  }
+  if (settings['backgroundPlayback'] is bool) {
+    ref.read(backgroundPlaybackProvider.notifier).state =
+        settings['backgroundPlayback'] as bool;
+  }
+  if (settings['autoPlayNext'] is bool) {
+    ref.read(autoPlayNextProvider.notifier).state =
+        settings['autoPlayNext'] as bool;
+  }
+  if (settings['danmakuEnabled'] is bool) {
+    ref.read(danmakuEnabledProvider.notifier).state =
+        settings['danmakuEnabled'] as bool;
+  }
+  if (settings['danmakuOpacity'] is num) {
+    ref.read(danmakuOpacityProvider.notifier).state =
+        (settings['danmakuOpacity'] as num).toDouble();
+  }
+  if (settings['danmakuFontSize'] is num) {
+    ref.read(danmakuFontSizeProvider.notifier).state =
+        (settings['danmakuFontSize'] as num).toDouble();
+  }
+  if (settings['danmakuSpeed'] is num) {
+    ref.read(danmakuSpeedProvider.notifier).state =
+        (settings['danmakuSpeed'] as num).toDouble();
+  }
+  if (settings['danmakuDensity'] is num) {
+    ref.read(danmakuDensityProvider.notifier).state =
+        (settings['danmakuDensity'] as num).toDouble();
+  }
+  if (settings['preferredSubtitleLanguage'] is String) {
+    ref.read(preferredSubtitleLanguageProvider.notifier).state =
+        settings['preferredSubtitleLanguage'] as String;
+  }
+  if (settings['preferredAudioLanguage'] is String) {
+    ref.read(preferredAudioLanguageProvider.notifier).state =
+        settings['preferredAudioLanguage'] as String;
+  }
+  if (settings['preferredVersion'] is String) {
+    ref.read(preferredVersionProvider.notifier).state =
+        settings['preferredVersion'] as String;
+  }
+  if (settings['rememberBrightness'] is bool) {
+    ref.read(rememberBrightnessProvider.notifier).state =
+        settings['rememberBrightness'] as bool;
+  }
+  if (settings['subtitleFont'] is String) {
+    ref.read(subtitleFontProvider.notifier).state =
+        settings['subtitleFont'] as String;
+  }
+  if (settings['mpvDolbyVisionFix'] is bool) {
+    ref.read(mpvDolbyVisionFixProvider.notifier).state =
+        settings['mpvDolbyVisionFix'] as bool;
+  }
+  if (settings['impellerEnabled'] is bool) {
+    ref.read(impellerEnabledProvider.notifier).state =
+        settings['impellerEnabled'] as bool;
+  }
+  if (settings['exoLibass'] is bool) {
+    ref.read(exoLibassProvider.notifier).state =
+        settings['exoLibass'] as bool;
+  }
+  if (settings['subtitleBackground'] is bool) {
+    ref.read(subtitleBackgroundProvider.notifier).state =
+        settings['subtitleBackground'] as bool;
+  }
+  if (settings['hideDailyRecommendations'] is bool) {
+    ref.read(hideDailyRecommendationsProvider.notifier).state =
+        settings['hideDailyRecommendations'] as bool;
+  }
+}
+
 /// 设置主页
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -206,10 +362,13 @@ class _GeneralSettingsScreenState extends ConsumerState<GeneralSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeProvider);
+    final locale = ref.watch(localeProvider);
+    final startupPage = ref.watch(startupPageProvider);
     final hideDailyRecommendations = ref.watch(hideDailyRecommendationsProvider);
     final imageExpiryDays = ref.watch(imageCacheExpiryDaysProvider);
     final videoMaxSizeMB = ref.watch(videoCacheMaxSizeMBProvider);
     final cacheSizeAsync = ref.watch(cacheSizeProvider);
+    final displayLocale = locale ?? Localizations.localeOf(context);
 
     return Scaffold(
       appBar: AppBar(title: const Text('通用设置')),
@@ -218,22 +377,22 @@ class _GeneralSettingsScreenState extends ConsumerState<GeneralSettingsScreen> {
         children: [
           ListTile(
             title: const Text('外观'),
-            subtitle: Text(themeMode.name),
+            subtitle: Text(localizedThemeModeLabel(themeMode, displayLocale: displayLocale)),
             onTap: () => _showThemeSelector(context),
           ),
           ListTile(
             title: const Text('语言'),
-            subtitle: const Text('跟随系统'),
+            subtitle: Text(localizedLocaleLabel(locale, displayLocale: displayLocale)),
             onTap: () => _showLanguageSelector(context),
           ),
           ListTile(
             title: const Text('启动页'),
-            subtitle: const Text('首页'),
+            subtitle: Text(startupPageLabel(startupPage, displayLocale: displayLocale)),
             onTap: () => _showStartupPageSelector(context),
           ),
           SwitchListTile(
             title: const Text('隐藏每日推荐'),
-            subtitle: const Text('开启后首页将不再显示随机推荐'),
+            subtitle: const Text('开启后只隐藏每日推荐，继续观看仍会保留'),
             value: hideDailyRecommendations,
             onChanged: (value) => ref.read(hideDailyRecommendationsProvider.notifier).state = value,
           ),
@@ -443,13 +602,25 @@ class _GeneralSettingsScreenState extends ConsumerState<GeneralSettingsScreen> {
   }
 
   void _showLanguageSelector(BuildContext context) {
+    final current = ref.read(localeProvider);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('语言'),
         content: RadioGroup<String>(
-          groupValue: 'system',
-          onChanged: (_) => Navigator.pop(context),
+          groupValue: current?.toLanguageTag().replaceAll('-', '_') ?? 'system',
+          onChanged: (value) {
+            if (value == null) {
+              Navigator.pop(context);
+              return;
+            }
+            ref.read(localeProvider.notifier).state = switch (value) {
+              'zh_CN' => const Locale('zh', 'CN'),
+              'en' => const Locale('en'),
+              _ => null,
+            };
+            Navigator.pop(context);
+          },
           child: const Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -473,27 +644,34 @@ class _GeneralSettingsScreenState extends ConsumerState<GeneralSettingsScreen> {
   }
 
   void _showStartupPageSelector(BuildContext context) {
+    final current = ref.read(startupPageProvider);
+    final displayLocale = ref.read(localeProvider) ?? Localizations.localeOf(context);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('启动页'),
-        content: RadioGroup<String>(
-          groupValue: 'home',
-          onChanged: (_) => Navigator.pop(context),
-          child: const Column(
+        content: RadioGroup<StartupPageOption>(
+          groupValue: current,
+          onChanged: (value) {
+            if (value != null) {
+              ref.read(startupPageProvider.notifier).state = value;
+            }
+            Navigator.pop(context);
+          },
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              RadioListTile<String>(
-                title: Text('首页'),
-                value: 'home',
+              RadioListTile<StartupPageOption>(
+                title: Text(startupPageLabel(StartupPageOption.home, displayLocale: displayLocale)),
+                value: StartupPageOption.home,
               ),
-              RadioListTile<String>(
-                title: Text('服务器列表'),
-                value: 'servers',
+              RadioListTile<StartupPageOption>(
+                title: Text(startupPageLabel(StartupPageOption.servers, displayLocale: displayLocale)),
+                value: StartupPageOption.servers,
               ),
-              RadioListTile<String>(
-                title: Text('继续观看'),
-                value: 'resume',
+              RadioListTile<StartupPageOption>(
+                title: Text(startupPageLabel(StartupPageOption.resume, displayLocale: displayLocale)),
+                value: StartupPageOption.resume,
               ),
             ],
           ),
@@ -530,6 +708,7 @@ class _GeneralSettingsScreenState extends ConsumerState<GeneralSettingsScreen> {
 
   void _showThemeSelector(BuildContext context) {
     final current = ref.read(themeModeProvider);
+    final displayLocale = ref.read(localeProvider) ?? Localizations.localeOf(context);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -545,7 +724,7 @@ class _GeneralSettingsScreenState extends ConsumerState<GeneralSettingsScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: ThemeModeOption.values.map((mode) => RadioListTile<ThemeModeOption>(
-              title: Text(mode.name),
+              title: Text(localizedThemeModeLabel(mode, displayLocale: displayLocale)),
               value: mode,
             )).toList(),
           ),
@@ -1526,13 +1705,13 @@ class BackupRestoreScreen extends ConsumerWidget {
             ),
           ),
           FilledButton.icon(
-            onPressed: () => _showExportDialog(context),
+            onPressed: () => _showExportDialog(context, ref),
             icon: const Icon(Icons.backup),
             label: const Text('导出备份'),
           ),
           const SizedBox(height: 12),
           OutlinedButton.icon(
-            onPressed: () => _showImportDialog(context),
+            onPressed: () => _showImportDialog(context, ref),
             icon: const Icon(Icons.restore),
             label: const Text('导入备份'),
           ),
@@ -1600,7 +1779,7 @@ class BackupRestoreScreen extends ConsumerWidget {
     );
   }
 
-  void _showExportDialog(BuildContext context) {
+  void _showExportDialog(BuildContext context, WidgetRef ref) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1609,11 +1788,30 @@ class BackupRestoreScreen extends ConsumerWidget {
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
           FilledButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('备份已导出')),
+              final path = await FilePicker.platform.saveFile(
+                dialogTitle: '导出备份',
+                fileName: 'linplayer-backup.json',
+                type: FileType.custom,
+                allowedExtensions: const ['json'],
               );
+              if (path == null) return;
+              try {
+                final payload = jsonEncode(_buildBackupPayload(ref));
+                await File(path).writeAsString(payload);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('备份已导出到: $path')),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('导出失败: $e')),
+                  );
+                }
+              }
             },
             child: const Text('导出'),
           ),
@@ -1622,7 +1820,7 @@ class BackupRestoreScreen extends ConsumerWidget {
     );
   }
 
-  void _showImportDialog(BuildContext context) {
+  void _showImportDialog(BuildContext context, WidgetRef ref) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1631,11 +1829,31 @@ class BackupRestoreScreen extends ConsumerWidget {
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
           FilledButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('备份已导入')),
+              final result = await FilePicker.platform.pickFiles(
+                dialogTitle: '导入备份',
+                type: FileType.custom,
+                allowedExtensions: const ['json'],
               );
+              final path = result?.files.single.path;
+              if (path == null) return;
+              try {
+                final content = await File(path).readAsString();
+                final payload = jsonDecode(content) as Map<String, dynamic>;
+                await _restoreBackupPayload(ref, payload);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('备份已导入')),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('导入失败: $e')),
+                  );
+                }
+              }
             },
             child: const Text('导入'),
           ),
@@ -1758,41 +1976,7 @@ class BackupRestoreScreen extends ConsumerWidget {
                   password: config.password,
                 );
                 
-                // 准备备份数据
-                final backupData = jsonEncode({
-                  'version': '1.0.0',
-                  'timestamp': DateTime.now().toIso8601String(),
-                  'servers': ref.read(serverListProvider).map((s) => {
-                    'id': s.id,
-                    'name': s.name,
-                    'baseUrl': s.baseUrl,
-                    'iconUrl': s.iconUrl,
-                    'remark': s.remark,
-                    'lines': s.lines.map((l) => {
-                      'id': l.id,
-                      'name': l.name,
-                      'url': l.url,
-                      'remark': l.remark,
-                    }).toList(),
-                    'activeLineIndex': s.activeLineIndex,
-                  }).toList(),
-                  'settings': {
-                    'themeMode': ref.read(themeModeProvider).name,
-                    'playerCore': ref.read(playerCoreProvider),
-                    'playbackSpeed': ref.read(defaultPlaybackSpeedProvider),
-                    'skipForwardStep': ref.read(skipForwardStepProvider),
-                    'longPressSpeed': ref.read(longPressSpeedProvider),
-                    'hardwareDecoding': ref.read(hardwareDecodingProvider),
-                    'backgroundPlayback': ref.read(backgroundPlaybackProvider),
-                    'autoPlayNext': ref.read(autoPlayNextProvider),
-                    'danmakuEnabled': ref.read(danmakuEnabledProvider),
-                    'danmakuOpacity': ref.read(danmakuOpacityProvider),
-                    'danmakuFontSize': ref.read(danmakuFontSizeProvider),
-                    'danmakuSpeed': ref.read(danmakuSpeedProvider),
-                    'danmakuDensity': ref.read(danmakuDensityProvider),
-                    'hideDailyRecommendations': ref.read(hideDailyRecommendationsProvider),
-                  },
-                });
+                final backupData = jsonEncode(_buildBackupPayload(ref));
                 
                 await service.backupApp(backupData);
                 
@@ -1839,10 +2023,8 @@ class BackupRestoreScreen extends ConsumerWidget {
                 );
                 
                 final backupData = await service.restoreApp();
-                jsonDecode(backupData) as Map<String, dynamic>;
-                
-                // TODO: 恢复服务器列表和设置
-                // 这里需要解析 backupData 并恢复所有设置
+                final payload = jsonDecode(backupData) as Map<String, dynamic>;
+                await _restoreBackupPayload(ref, payload);
                 
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(

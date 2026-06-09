@@ -10,8 +10,8 @@ class AppColors {
   static const Color brandDark = Color(0xFF3B6FD0);
   
   // 浅色模式
-  static const Color lightBackground = Color(0xFFF5F5F5);
-  static const Color lightSurface = Color(0xFFFFFFFF);
+  static const Color lightBackground = Color(0xFFF4F1EA);
+  static const Color lightSurface = Color(0xFFFCFAF6);
   static const Color lightText = Color(0xFF1A1A1A);
   static const Color lightTextSecondary = Color(0xFF666666);
   static const Color lightDivider = Color(0xFFE0E0E0);

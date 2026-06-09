@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/providers/app_providers.dart';
 import '../core/theme/app_theme.dart';
@@ -22,12 +23,23 @@ class LinPlayerDesktopApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(desktopRouterProvider);
     final themeMode = ref.watch(themeModeProvider);
+    final locale = ref.watch(localeProvider);
     
     return MaterialApp.router(
       title: 'Linplayer',
       debugShowCheckedModeBanner: false,
       theme: _desktopTheme(AppTheme.lightTheme),
       darkTheme: _desktopTheme(AppTheme.darkTheme),
+      locale: locale,
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('zh', 'CN'),
+        Locale('en'),
+      ],
       scrollBehavior: const _DesktopAppScrollBehavior(),
       themeMode: switch (themeMode) {
         ThemeModeOption.light => ThemeMode.light,

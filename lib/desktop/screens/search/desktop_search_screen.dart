@@ -197,9 +197,9 @@ class _DesktopSearchScreenState extends ConsumerState<DesktopSearchScreen> {
 
                 return LayoutBuilder(
                   builder: (context, constraints) {
-                    const cardWidth = 156.0;
-                    const crossAxisSpacing = 20.0;
-                    const mainAxisSpacing = 24.0;
+                    const cardWidth = 168.0;
+                    const crossAxisSpacing = 18.0;
+                    const mainAxisSpacing = 28.0;
                     final crossAxisCount = ((constraints.maxWidth +
                                 crossAxisSpacing) /
                             (cardWidth + crossAxisSpacing))
@@ -211,7 +211,7 @@ class _DesktopSearchScreenState extends ConsumerState<DesktopSearchScreen> {
                       padding: const EdgeInsets.all(24),
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: crossAxisCount,
-                        childAspectRatio: 0.66,
+                        childAspectRatio: 0.60,
                         crossAxisSpacing: crossAxisSpacing,
                         mainAxisSpacing: mainAxisSpacing,
                       ),
@@ -220,6 +220,8 @@ class _DesktopSearchScreenState extends ConsumerState<DesktopSearchScreen> {
                         return DesktopMediaCard(
                           item: items[index],
                           width: cardWidth,
+                          titleMaxLines: 2,
+                          showMetadata: true,
                         );
                       },
                     );

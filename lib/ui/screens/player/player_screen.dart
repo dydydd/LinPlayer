@@ -19,6 +19,7 @@ import '../../../core/services/mpv_player_adapter.dart';
 import '../../../core/services/exo_player_adapter.dart';
 import '../../../core/services/app_logger.dart';
 import '../../../core/services/subtitle_processor.dart';
+import '../../../core/utils/playback_url_resolver.dart';
 import '../../../core/utils/platform_utils.dart';
 
 /// 播放页
@@ -48,22 +49,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     PlaybackInfo playbackInfo, {
     String? preferredMediaSourceId,
   }) {
-    final mediaSources = playbackInfo.mediaSources;
-    if (mediaSources.isEmpty) {
-      return null;
-    }
-
     final targetSourceId =
         preferredMediaSourceId ??
         ref.read(selectedMediaSourceProvider) ??
         widget.mediaSourceId;
-
-    if (targetSourceId == null || targetSourceId.isEmpty) {
-      return mediaSources.firstOrNull;
-    }
-
-    return mediaSources.where((source) => source.id == targetSourceId).firstOrNull ??
-        mediaSources.firstOrNull;
+    return resolvePreferredMediaSource(
+      playbackInfo,
+      preferredMediaSourceId: targetSourceId,
+    );
   }
 
   void _sanitizeSelectionState(MediaSource? mediaSource) {
@@ -194,10 +187,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     final item = await api.media.getItemDetails(widget.itemId);
 
     final playbackInfo = await api.playback.getPlaybackInfo(widget.itemId);
-    final mediaSource = _resolveMediaSource(
-      playbackInfo,
-      preferredMediaSourceId: widget.mediaSourceId,
+    final selection = buildPlaybackSelection(
+      playbackInfo: playbackInfo,
+      itemId: widget.itemId,
+      preferredMediaSourceId:
+          widget.mediaSourceId ?? ref.read(selectedMediaSourceProvider),
+      playSessionId: '${widget.itemId}-${DateTime.now().microsecondsSinceEpoch}',
     );
+    final mediaSource = selection.mediaSource;
     _sanitizeSelectionState(mediaSource);
     final videoStream = mediaSource?.mediaStreams.where((stream) => stream.isVideo).firstOrNull;
     _initialVideoAspectRatio = (videoStream?.width != null &&
@@ -208,11 +205,38 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
         : null;
 
     final videoUrl = api.playback.getVideoStreamUrl(
-      widget.itemId,
-      mediaSourceId: mediaSource?.id,
-      container: mediaSource?.container ?? videoStream?.codec,
-      playSessionId: '${widget.itemId}-${DateTime.now().microsecondsSinceEpoch}',
+      selection.primaryRequest.itemId,
+      mediaSourceId: selection.primaryRequest.mediaSourceId,
+      container: selection.primaryRequest.container,
+      playSessionId: selection.primaryRequest.playSessionId,
+      staticStream: selection.primaryRequest.staticStream,
+      allowDirectPlay: selection.primaryRequest.allowDirectPlay,
+      allowDirectStream: selection.primaryRequest.allowDirectStream,
+      allowTranscoding: selection.primaryRequest.allowTranscoding,
+      enableAutoStreamCopy: selection.primaryRequest.enableAutoStreamCopy,
+      enableAutoStreamCopyAudio:
+          selection.primaryRequest.enableAutoStreamCopyAudio,
+      enableAutoStreamCopyVideo:
+          selection.primaryRequest.enableAutoStreamCopyVideo,
     );
+    final fallbackVideoUrl = selection.fallbackRequest == null
+        ? null
+        : api.playback.getVideoStreamUrl(
+            selection.fallbackRequest!.itemId,
+            mediaSourceId: selection.fallbackRequest!.mediaSourceId,
+            container: selection.fallbackRequest!.container,
+            playSessionId: selection.fallbackRequest!.playSessionId,
+            staticStream: selection.fallbackRequest!.staticStream,
+            allowDirectPlay: selection.fallbackRequest!.allowDirectPlay,
+            allowDirectStream: selection.fallbackRequest!.allowDirectStream,
+            allowTranscoding: selection.fallbackRequest!.allowTranscoding,
+            enableAutoStreamCopy:
+                selection.fallbackRequest!.enableAutoStreamCopy,
+            enableAutoStreamCopyAudio:
+                selection.fallbackRequest!.enableAutoStreamCopyAudio,
+            enableAutoStreamCopyVideo:
+                selection.fallbackRequest!.enableAutoStreamCopyVideo,
+          );
 
     Duration? startPosition;
     if (item.userData?.playbackPositionTicks != null) {
@@ -243,11 +267,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
       videoUrl: videoUrl,
       itemId: widget.itemId,
       mediaSourceId: mediaSource?.id,
+      fallbackVideoUrl: fallbackVideoUrl,
       startPosition: startPosition,
       coreType: coreType,
       dolbyVisionFix: dolbyVisionFix,
       useLibass: useLibass,
       hardwareDecoding: hardwareDecoding,
+      startWithSoftwareDecoding:
+          selection.startsWithSoftwareDecoding && hardwareDecoding,
+      fallbackReason: selection.fallbackReason,
       preferredSubtitleLanguage: preferredSubtitleLanguage,
       onStart: (info) async {
         try {

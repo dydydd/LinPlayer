@@ -23,6 +23,8 @@ class VideoPlayerService extends ChangeNotifier {
   PlayerAdapter? _adapter;
   PlayerCoreType _coreType = PlayerCoreType.exoPlayer;
   bool _hasReportedStart = false;
+  bool _lastInitializationUsedFallback = false;
+  String? _lastFallbackReason;
 
   Timer? _progressTimer;
   Timer? _hideControlsTimer;
@@ -61,6 +63,8 @@ class VideoPlayerService extends ChangeNotifier {
   bool get isCompleted => _adapter?.isCompleted ?? false;
   double get progress => _adapter?.progress ?? 0.0;
   PlayerCoreType get coreType => _coreType;
+  bool get lastInitializationUsedFallback => _lastInitializationUsedFallback;
+  String? get lastFallbackReason => _lastFallbackReason;
 
   /// 当前播放器适配器（用于内核特定操作）
   PlayerAdapter? get adapter => _adapter;
@@ -118,39 +122,7 @@ class VideoPlayerService extends ChangeNotifier {
     }
   }
 
-  /// 初始化播放器
-  Future<void> initialize({
-    required String videoUrl,
-    required String itemId,
-    String? mediaSourceId,
-    Duration? startPosition,
-    PlayerCoreType? coreType,
-    Function(PlaybackStartInfo)? onStart,
-    Function(PlaybackProgressInfo)? onProgress,
-    Function(PlaybackStopInfo)? onStop,
-    bool? dolbyVisionFix,
-    bool? useLibass,
-    bool? hardwareDecoding,
-    String? preferredSubtitleLanguage,
-  }) async {
-    _currentItemId = itemId;
-    _mediaSourceId = mediaSourceId ?? itemId;
-    _onStartReport = onStart;
-    _onProgressReport = onProgress;
-    _onStopReport = onStop;
-    _hasReportedStart = false;
-
-    if (coreType != null) {
-      _coreType = coreType;
-    }
-
-    // 释放旧适配器
-    await _adapter?.dispose();
-
-    // 创建新适配器
-    _adapter = _createAdapter();
-
-    // 设置回调
+  void _bindAdapterCallbacks() {
     _adapter!.setCallbacks(PlayerStateCallbacks(
       onPositionChanged: () => notifyListeners(),
       onDurationChanged: () => notifyListeners(),
@@ -173,16 +145,83 @@ class VideoPlayerService extends ChangeNotifier {
       },
       onError: () => notifyListeners(),
     ));
+  }
+
+  /// 初始化播放器
+  Future<void> initialize({
+    required String videoUrl,
+    required String itemId,
+    String? mediaSourceId,
+    String? fallbackVideoUrl,
+    Duration? startPosition,
+    PlayerCoreType? coreType,
+    Function(PlaybackStartInfo)? onStart,
+    Function(PlaybackProgressInfo)? onProgress,
+    Function(PlaybackStopInfo)? onStop,
+    bool? dolbyVisionFix,
+    bool? useLibass,
+    bool? hardwareDecoding,
+    bool startWithSoftwareDecoding = false,
+    String? fallbackReason,
+    String? preferredSubtitleLanguage,
+  }) async {
+    _currentItemId = itemId;
+    _mediaSourceId = mediaSourceId ?? itemId;
+    _onStartReport = onStart;
+    _onProgressReport = onProgress;
+    _onStopReport = onStop;
+    _hasReportedStart = false;
+    _lastInitializationUsedFallback = false;
+    _lastFallbackReason = fallbackReason;
+
+    if (coreType != null) {
+      _coreType = coreType;
+    }
+
+    // 释放旧适配器
+    await _adapter?.dispose();
+
+    // 创建新适配器
+    _adapter = _createAdapter();
+
+    // 设置回调
+    _bindAdapterCallbacks();
 
     // 初始化
-    await _adapter!.initialize(
-      videoUrl: videoUrl,
-      startPosition: startPosition,
-      dolbyVisionFix: dolbyVisionFix ?? false,
-      useLibass: useLibass ?? false,
-      hardwareDecoding: hardwareDecoding ?? true,
-      preferredSubtitleLanguage: preferredSubtitleLanguage,
-    );
+    final desiredHardwareDecoding =
+        startWithSoftwareDecoding ? false : (hardwareDecoding ?? true);
+    try {
+      await _adapter!.initialize(
+        videoUrl: videoUrl,
+        startPosition: startPosition,
+        dolbyVisionFix: dolbyVisionFix ?? false,
+        useLibass: useLibass ?? false,
+        hardwareDecoding: desiredHardwareDecoding,
+        preferredSubtitleLanguage: preferredSubtitleLanguage,
+      );
+      if (!(_adapter?.isInitialized ?? false) || (_adapter?.hasError ?? false)) {
+        throw StateError(_adapter?.errorMessage ?? '播放器初始化失败');
+      }
+    } catch (_) {
+      if (fallbackVideoUrl == null || fallbackVideoUrl.isEmpty) {
+        rethrow;
+      }
+      await _adapter?.dispose();
+      _adapter = _createAdapter();
+      _bindAdapterCallbacks();
+      _lastInitializationUsedFallback = true;
+      await _adapter!.initialize(
+        videoUrl: fallbackVideoUrl,
+        startPosition: startPosition,
+        dolbyVisionFix: dolbyVisionFix ?? false,
+        useLibass: useLibass ?? false,
+        hardwareDecoding: false,
+        preferredSubtitleLanguage: preferredSubtitleLanguage,
+      );
+      if (!(_adapter?.isInitialized ?? false) || (_adapter?.hasError ?? false)) {
+        throw StateError(_adapter?.errorMessage ?? '播放器备用流初始化失败');
+      }
+    }
 
     // 加载 libass 字幕（如果启用）
     if (useLibass ?? false) {

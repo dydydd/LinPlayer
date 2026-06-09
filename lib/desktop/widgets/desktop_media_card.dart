@@ -15,6 +15,8 @@ class DesktopMediaCard extends ConsumerStatefulWidget {
   final bool showProgress;
   final VoidCallback? onTap;
   final bool compact;
+  final int titleMaxLines;
+  final bool showMetadata;
 
   const DesktopMediaCard({
     super.key,
@@ -24,6 +26,8 @@ class DesktopMediaCard extends ConsumerStatefulWidget {
     this.showProgress = false,
     this.onTap,
     this.compact = false,
+    this.titleMaxLines = 2,
+    this.showMetadata = true,
   });
 
   @override
@@ -41,12 +45,12 @@ class _DesktopMediaCardState extends ConsumerState<DesktopMediaCard> {
     final aspectRatio = widget.height != null ? widget.width / widget.height! : 2 / 3;
     final titleStyle = theme.textTheme.titleSmall?.copyWith(
       fontSize: widget.compact ? 13.5 : null,
-      height: widget.compact ? 1.15 : 1.2,
+      height: widget.compact ? 1.18 : 1.24,
       fontWeight: _isHovered ? FontWeight.w700 : FontWeight.w500,
     );
     final metaStyle = theme.textTheme.bodySmall?.copyWith(
       fontSize: widget.compact ? 11.5 : null,
-      height: 1.15,
+      height: 1.22,
     );
 
     return MouseRegion(
@@ -151,11 +155,13 @@ class _DesktopMediaCardState extends ConsumerState<DesktopMediaCard> {
               SizedBox(height: widget.compact ? 6 : 8),
               Text(
                 widget.item.name,
-                maxLines: 1,
+                maxLines: widget.titleMaxLines,
                 overflow: TextOverflow.ellipsis,
                 style: titleStyle,
               ),
-              if (widget.item.productionYear != null || widget.item.genres != null)
+              if (widget.showMetadata &&
+                  (widget.item.productionYear != null ||
+                      widget.item.genres != null))
                 Text(
                   widget.item.productionYear?.toString() ?? widget.item.genres?.first ?? '',
                   maxLines: 1,

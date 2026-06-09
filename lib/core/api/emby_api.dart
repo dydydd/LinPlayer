@@ -609,6 +609,12 @@ class EmbyPlaybackApi implements PlaybackApi {
     String? container,
     String? playSessionId,
     bool staticStream = true,
+    bool allowDirectPlay = true,
+    bool allowDirectStream = true,
+    bool allowTranscoding = false,
+    bool enableAutoStreamCopy = true,
+    bool enableAutoStreamCopyAudio = true,
+    bool enableAutoStreamCopyVideo = true,
   }) {
     final base = _client._currentLine.endsWith('/')
         ? _client._currentLine.substring(0, _client._currentLine.length - 1)
@@ -619,12 +625,12 @@ class EmbyPlaybackApi implements PlaybackApi {
     final params = <String>[
       'static=$staticStream',
       'download=false',
-      'EnableAutoStreamCopy=true',
-      'EnableAutoStreamCopyAudio=true',
-      'EnableAutoStreamCopyVideo=true',
-      'EnableDirectPlay=true',
-      'EnableDirectStream=true',
-      'EnableTranscoding=false',
+      'EnableAutoStreamCopy=$enableAutoStreamCopy',
+      'EnableAutoStreamCopyAudio=$enableAutoStreamCopyAudio',
+      'EnableAutoStreamCopyVideo=$enableAutoStreamCopyVideo',
+      'EnableDirectPlay=$allowDirectPlay',
+      'EnableDirectStream=$allowDirectStream',
+      'EnableTranscoding=$allowTranscoding',
       if (mediaSourceId != null && mediaSourceId.isNotEmpty)
         'MediaSourceId=${Uri.encodeQueryComponent(mediaSourceId)}',
       if (playSessionId != null && playSessionId.isNotEmpty)
