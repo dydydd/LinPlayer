@@ -75,6 +75,8 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
   Map<String, String> _playbackStats = {};
   Timer? _statsRefreshTimer;
   bool _statsRefreshInFlight = false;
+  bool _isSeekingWithSlider = false;
+  double? _sliderSeekValue;
   MediaSource? _currentMediaSource;
   String? _displayTitle;
 
@@ -415,8 +417,11 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
     final codec = (target.codec ?? '').toLowerCase();
     final targetTitle = target.displayTitle ?? target.title;
     final isExternal = target.isExternal == true;
+    final forceExternalBitmapSubtitle =
+        _playerService.coreType == PlayerCoreType.mpv &&
+        _isGraphicalSubtitleCodec(codec);
 
-    if (!isExternal) {
+    if (!isExternal && !forceExternalBitmapSubtitle) {
       _playerService.setSubtitleSelectionHint(codec: codec, title: targetTitle);
       final trackId = _matchSubtitleTrackId(
         subtitleStreams,
@@ -433,10 +438,14 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
       return;
     }
 
+    // Desktop mpv still fails to reliably latch some internal bitmap subtitle
+    // tracks (`sid` falls back to `no`). Route graphical subtitles through the
+    // server subtitle stream endpoint so mpv can load them as an external PGS/SUP
+    // file and render through its native bitmap pipeline.
     _playerService.setSubtitleSelectionHint();
     await _playerService.deselectSubtitleTrack();
     final subtitleFile = await _prepareExternalSubtitleFile(target, codec);
-    await _playerService.loadLibassSubtitle(subtitleFile.path);
+    await _loadExternalSubtitleWithRetry(subtitleFile);
   }
 
   String? _matchAudioTrackId(List<MediaStream> audioStreams, int selectedIndex) {
@@ -714,6 +723,11 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
       ),
     );
 
+    final shouldForceRefresh = _isGraphicalSubtitleCodec(codec);
+    if (shouldForceRefresh && file.existsSync()) {
+      await file.delete();
+    }
+
     if (!file.existsSync() || await file.length() == 0) {
       final server = ref.read(currentServerProvider);
       final dio = Dio(BaseOptions(
@@ -727,19 +741,32 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
       await dio.download(subtitleUrl, file.path);
     }
 
-    if (_isAssSubtitleCodec(codec) ||
-        _isGraphicalSubtitleCodec(codec) ||
-        codec == 'srt' ||
-        codec == 'subrip' ||
-        codec == 'vtt' ||
-        codec == 'webvtt') {
-      return file;
+    final fileSize = await file.length();
+    if (fileSize <= 0) {
+      throw StateError('下载到的字幕文件为空: ${file.path}');
     }
 
     return file;
   }
 
   // ========== 控制栏显隐 ==========
+
+  Future<void> _loadExternalSubtitleWithRetry(File subtitleFile) async {
+    Object? lastError;
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await _playerService.loadLibassSubtitle(subtitleFile.path);
+        return;
+      } catch (e) {
+        lastError = e;
+        if (attempt >= 3) {
+          break;
+        }
+        await Future.delayed(const Duration(milliseconds: 220));
+      }
+    }
+    throw lastError ?? StateError('外挂字幕加载失败');
+  }
 
   void _startHideControlsTimer() {
     _cancelHideControlsTimer();
@@ -908,18 +935,21 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
   }
 
   void _cycleSubtitleTrack() {
-    final subtitleTracks = _subtitleTracksFrom();
-    if (subtitleTracks.isEmpty) return;
+    final subtitleStreams = _subtitleStreamsFromCurrentSource();
+    if (subtitleStreams.isEmpty) return;
 
-    final currentIndex = subtitleTracks.indexWhere((t) => t['selected'] == true);
-    final nextIndex = (currentIndex + 1) % (subtitleTracks.length + 1);
+    final currentIndex = ref.read(subtitleTrackProvider);
+    final currentPosition =
+        subtitleStreams.indexWhere((stream) => stream.index == currentIndex);
+    final nextPosition = (currentPosition + 1) % (subtitleStreams.length + 1);
 
-    if (nextIndex >= subtitleTracks.length) {
-      _playerService.deselectSubtitleTrack();
-    } else {
-      final trackId = subtitleTracks[nextIndex]['id']?.toString();
-      if (trackId != null) _playerService.selectSubtitleTrack(trackId);
+    if (nextPosition >= subtitleStreams.length) {
+      ref.read(subtitleTrackProvider.notifier).state = null;
+      return;
     }
+
+    ref.read(subtitleTrackProvider.notifier).state =
+        subtitleStreams[nextPosition].index;
   }
 
   void _cycleAudioTrack() {
@@ -1128,12 +1158,41 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
       builder: (context) => _Anime4KLevelDialog(currentLevel: currentLevel),
     );
     if (result != null && mounted) {
-      ref.read(anime4KLevelProvider.notifier).state = result;
-      if (result == 'off') {
-        await _playerService.applySuperResolution(false);
-      } else {
-        await _playerService.applySuperResolutionLevel(result);
+      try {
+        if (result == 'off') {
+          await _playerService.applySuperResolution(false);
+        } else {
+          await _playerService.applySuperResolutionLevel(result);
+        }
+        ref.read(anime4KLevelProvider.notifier).state = result;
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              result == 'off' ? '已关闭 Anime4K 超分' : '已应用 Anime4K ${_anime4KLevelLabel(result)}',
+            ),
+          ),
+        );
+      } catch (e) {
+        ref.read(anime4KLevelProvider.notifier).state = 'off';
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Anime4K 应用失败: $e')),
+        );
       }
+    }
+  }
+
+  String _anime4KLevelLabel(String level) {
+    switch (level) {
+      case 'modeA':
+        return '模式 A';
+      case 'modeB':
+        return '模式 B';
+      case 'modeC':
+        return '模式 C';
+      default:
+        return level;
     }
   }
 
@@ -1962,7 +2021,13 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
   // ========== 进度条 ==========
 
   Widget _buildProgressBar() {
-    final currentTime = _formatDuration(_playerService.position);
+    final effectiveProgress = _sliderSeekValue ?? _playerService.progress.clamp(0.0, 1.0);
+    final effectivePosition = _isSeekingWithSlider
+        ? Duration(
+            milliseconds: (_playerService.duration.inMilliseconds * effectiveProgress).round(),
+          )
+        : _playerService.position;
+    final currentTime = _formatDuration(effectivePosition);
     final totalTime = _formatDuration(_playerService.duration);
 
     return Padding(
@@ -1991,11 +2056,27 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
               ),
               child: Slider(
-                value: _playerService.progress.clamp(0.0, 1.0),
+                value: effectiveProgress.clamp(0.0, 1.0),
+                onChangeStart: (_) {
+                  setState(() {
+                    _isSeekingWithSlider = true;
+                    _sliderSeekValue = _playerService.progress.clamp(0.0, 1.0);
+                  });
+                },
                 onChanged: (value) {
+                  setState(() {
+                    _isSeekingWithSlider = true;
+                    _sliderSeekValue = value.clamp(0.0, 1.0);
+                  });
+                },
+                onChangeEnd: (value) {
                   final position = Duration(
-                    milliseconds: (value * _playerService.duration.inMilliseconds).round(),
+                    milliseconds: (value.clamp(0.0, 1.0) * _playerService.duration.inMilliseconds).round(),
                   );
+                  setState(() {
+                    _isSeekingWithSlider = false;
+                    _sliderSeekValue = null;
+                  });
                   _playerService.seekTo(position);
                 },
               ),

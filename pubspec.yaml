@@ -97,5 +97,6 @@ flutter:
   assets:
     - assets/images/
     - assets/icons/
+    - assets/mpv/shaders/
 
 

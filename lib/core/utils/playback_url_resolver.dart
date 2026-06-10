@@ -109,8 +109,6 @@ PlaybackSelection buildPlaybackSelection({
     playSessionId: playSessionId,
   );
 
-  // 当前播放器链路只依赖本地内核解码，不应因为音频编码类型自动切到
-  // 服务端转码/“更安全”的流策略，否则会破坏直连与 seek 的稳定性。
   return PlaybackSelection(
     mediaSource: mediaSource,
     primaryRequest: primaryRequest,
