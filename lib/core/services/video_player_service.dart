@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../api/api_interfaces.dart';
+import 'app_logger.dart';
 import 'player_adapter.dart';
 import 'exo_player_adapter.dart';
 import 'mpv_player_adapter.dart';
@@ -20,6 +21,9 @@ enum PlayerCoreType {
 /// - ExoPlayer: Android 原生，轻量稳定
 /// - MPV: libmpv FFI，全格式支持、HDR、高级字幕控制
 class VideoPlayerService extends ChangeNotifier {
+  static final AppLogger _logger = AppLogger();
+  static const int _maxDirectRetryCount = 5;
+
   PlayerAdapter? _adapter;
   PlayerCoreType _coreType = PlayerCoreType.exoPlayer;
   bool _hasReportedStart = false;
@@ -29,9 +33,13 @@ class VideoPlayerService extends ChangeNotifier {
   bool _lastDolbyVisionFix = false;
   bool _lastUseLibass = false;
   String? _lastPreferredSubtitleLanguage;
+  bool _lastHardwareDecoding = true;
+  bool _lastStartWithSoftwareDecoding = false;
   String? _primaryVideoUrl;
   bool _autoRetryInFlight = false;
   int _startupRetryCount = 0;
+  String? _selectedSubtitleTrackId;
+  String? _selectedAudioTrackId;
 
   Timer? _progressTimer;
   Timer? _hideControlsTimer;
@@ -62,8 +70,8 @@ class VideoPlayerService extends ChangeNotifier {
   bool get isPlaying => _adapter?.isPlaying ?? false;
   bool get isBuffering => _adapter?.isBuffering ?? false;
   bool get isInitialized => _adapter?.isInitialized ?? false;
-  bool get hasError => _adapter?.hasError ?? false;
-  String? get errorMessage => _adapter?.errorMessage;
+  bool get hasError => (_adapter?.hasError ?? false) && !_autoRetryInFlight;
+  String? get errorMessage => hasError ? _adapter?.errorMessage : null;
   Duration get position => _adapter?.position ?? Duration.zero;
   Duration get duration => _adapter?.duration ?? Duration.zero;
   double get speed => _adapter?.speed ?? 1.0;
@@ -191,36 +199,103 @@ class VideoPlayerService extends ChangeNotifier {
 
   Future<void> _attemptStartupRetry() async {
     if (_autoRetryInFlight ||
-        _hasReportedStart ||
         _primaryVideoUrl == null ||
         _primaryVideoUrl!.isEmpty ||
         _adapter == null ||
         !(_adapter?.hasError ?? false) ||
-        _startupRetryCount >= 3) {
+        _startupRetryCount >= _maxDirectRetryCount) {
       return;
     }
 
+    final resumePosition = position > Duration.zero
+        ? position
+        : (_initialStartPosition ?? Duration.zero);
+    final hardwareDecoding =
+        _lastStartWithSoftwareDecoding ? false : _lastHardwareDecoding;
+    final audioTrackId = _selectedAudioTrackId;
+    final subtitleTrackId = _selectedSubtitleTrackId;
+
     _autoRetryInFlight = true;
+    notifyListeners();
     try {
-      _startupRetryCount += 1;
-      await _adapter?.dispose();
-      _adapter = _createAdapter();
-      _bindAdapterCallbacks();
-      await _adapter!.initialize(
-        videoUrl: _primaryVideoUrl!,
-        startPosition: _initialStartPosition,
-        dolbyVisionFix: _lastDolbyVisionFix,
-        useLibass: _lastUseLibass,
-        hardwareDecoding: true,
-        preferredSubtitleLanguage: _lastPreferredSubtitleLanguage,
-      );
-      if (!(_adapter?.isInitialized ?? false) || (_adapter?.hasError ?? false)) {
-        throw StateError(_adapter?.errorMessage ?? '播放器直连重试失败');
+      Object? lastError;
+      for (var attempt = _startupRetryCount + 1;
+          attempt <= _maxDirectRetryCount;
+          attempt++) {
+        _startupRetryCount = attempt;
+        try {
+          _logger.w(
+            'VideoPlayerService',
+            '播放器直连自动重试: attempt=$attempt, resume=${resumePosition.inMilliseconds}ms',
+          );
+
+          await _adapter?.dispose();
+          _adapter = _createAdapter();
+          _bindAdapterCallbacks();
+
+          await _adapter!.initialize(
+            videoUrl: _primaryVideoUrl!,
+            startPosition: resumePosition,
+            dolbyVisionFix: _lastDolbyVisionFix,
+            useLibass: _lastUseLibass,
+            hardwareDecoding: hardwareDecoding,
+            preferredSubtitleLanguage: _lastPreferredSubtitleLanguage,
+          );
+          if (!(_adapter?.isInitialized ?? false) ||
+              (_adapter?.hasError ?? false)) {
+            throw StateError(_adapter?.errorMessage ?? '播放器直连重试初始化失败');
+          }
+
+          await _adapter!.play();
+
+          if (audioTrackId != null && audioTrackId.isNotEmpty) {
+            try {
+              await _adapter!.selectAudioTrack(audioTrackId);
+            } catch (e, stackTrace) {
+              _logger.eWithStack(
+                'VideoPlayerService',
+                '恢复音轨选择失败: $audioTrackId',
+                e,
+                stackTrace,
+              );
+            }
+          }
+
+          if (subtitleTrackId != null && subtitleTrackId.isNotEmpty) {
+            try {
+              await _adapter!.selectSubtitleTrack(subtitleTrackId);
+            } catch (e, stackTrace) {
+              _logger.eWithStack(
+                'VideoPlayerService',
+                '恢复字幕轨选择失败: $subtitleTrackId',
+                e,
+                stackTrace,
+              );
+            }
+          }
+
+          _logger.i(
+            'VideoPlayerService',
+            '播放器直连自动重试成功: attempt=$attempt',
+          );
+          return;
+        } catch (error, stackTrace) {
+          lastError = error;
+          _logger.eWithStack(
+            'VideoPlayerService',
+            '播放器直连自动重试失败: attempt=$attempt',
+            error,
+            stackTrace,
+          );
+          if (attempt < _maxDirectRetryCount) {
+            await Future.delayed(const Duration(milliseconds: 350));
+          }
+        }
       }
-      await _adapter!.play();
-      notifyListeners();
+      throw lastError ?? StateError('播放器直连重试失败');
     } finally {
       _autoRetryInFlight = false;
+      notifyListeners();
     }
   }
 
@@ -255,8 +330,12 @@ class VideoPlayerService extends ChangeNotifier {
     _lastDolbyVisionFix = dolbyVisionFix ?? false;
     _lastUseLibass = useLibass ?? false;
     _lastPreferredSubtitleLanguage = preferredSubtitleLanguage;
+    _lastHardwareDecoding = hardwareDecoding ?? true;
+    _lastStartWithSoftwareDecoding = startWithSoftwareDecoding;
     _autoRetryInFlight = false;
     _startupRetryCount = 0;
+    _selectedSubtitleTrackId = null;
+    _selectedAudioTrackId = null;
     _setPendingPlayingState(null, notify: false);
 
     if (coreType != null) {
@@ -319,18 +398,21 @@ class VideoPlayerService extends ChangeNotifier {
 
   /// 选择字幕轨道（内封字幕切换）
   Future<void> selectSubtitleTrack(String trackId) async {
+    _selectedSubtitleTrackId = trackId;
     await _adapter?.selectSubtitleTrack(trackId);
     notifyListeners();
   }
 
   /// 关闭字幕
   Future<void> deselectSubtitleTrack() async {
+    _selectedSubtitleTrackId = null;
     await _adapter?.deselectSubtitleTrack();
     notifyListeners();
   }
 
   /// 选择音频轨道
   Future<void> selectAudioTrack(String trackId) async {
+    _selectedAudioTrackId = trackId;
     await _adapter?.selectAudioTrack(trackId);
     notifyListeners();
   }
@@ -389,7 +471,8 @@ class VideoPlayerService extends ChangeNotifier {
           startPosition: _initialStartPosition,
           dolbyVisionFix: _lastDolbyVisionFix,
           useLibass: _lastUseLibass,
-          hardwareDecoding: true,
+          hardwareDecoding:
+              _lastStartWithSoftwareDecoding ? false : _lastHardwareDecoding,
           preferredSubtitleLanguage: _lastPreferredSubtitleLanguage,
         );
         if (!(_adapter?.isInitialized ?? false) || (_adapter?.hasError ?? false)) {

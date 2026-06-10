@@ -53,6 +53,7 @@ class MpvPlayerAdapter implements PlayerAdapter {
   List<SubtitleTrack> _subtitleTracks = [];
   List<AudioTrack> _audioTracks = [];
   String? _selectedSubtitleTrackId;
+  String? _selectedNativeSubtitleSid;
   String? _selectedAudioTrackId;
 
   PlayerStateCallbacks? _callbacks;
@@ -119,6 +120,13 @@ class MpvPlayerAdapter implements PlayerAdapter {
     final normalized = shaderRef.replaceAll('\\', '/');
     final slashIndex = normalized.lastIndexOf('/');
     return slashIndex >= 0 ? normalized.substring(slashIndex + 1) : normalized;
+  }
+
+  String _normalizeMpvPath(String path) {
+    if (Platform.isWindows) {
+      return path.replaceAll('\\', '/');
+    }
+    return path;
   }
 
   Future<String> _ensureShaderAssetFile(String shaderRef) async {
@@ -237,17 +245,20 @@ class MpvPlayerAdapter implements PlayerAdapter {
         await np.setProperty('blend-subtitles', 'video');
         await np.setProperty('sub-visibility', 'yes');
         await np.setProperty('hwdec', hardwareDecoding ? 'auto-safe' : 'no');
+        await _applyShaderList(_glslShaders);
         if (_isHttpUrl(videoUrl)) {
           await np.setProperty('cache', 'yes');
           await np.setProperty('cache-pause', 'yes');
-          await np.setProperty('cache-pause-wait', '8');
-          await np.setProperty('cache-pause-initial', 'yes');
+          // Don't block startup on an aggressive initial cache fill.
+          // We still keep pause-on-underflow for mid-playback stability.
+          await np.setProperty('cache-pause-wait', '2.5');
+          await np.setProperty('cache-pause-initial', 'no');
           await np.setProperty('cache-secs', '300');
           await np.setProperty('demuxer-max-bytes', '536870912');
           await np.setProperty('demuxer-max-back-bytes', '268435456');
           await np.setProperty('demuxer-readahead-secs', '180');
           await np.setProperty('demuxer-seekable-cache', 'yes');
-          await np.setProperty('demuxer-cache-wait', 'yes');
+          await np.setProperty('demuxer-cache-wait', 'no');
           await np.setProperty('network-timeout', '20');
           await np.setProperty('stream-buffer-size', '33554432');
           await np.setProperty('cache-on-disk', 'no');
@@ -491,12 +502,131 @@ class MpvPlayerAdapter implements PlayerAdapter {
     return rawId?.toString() == targetId;
   }
 
+  bool _languagesMatch(String? expected, String? actual) {
+    final e = (expected ?? '').trim().toLowerCase();
+    final a = (actual ?? '').trim().toLowerCase();
+    if (e.isEmpty || a.isEmpty) {
+      return false;
+    }
+    if (e == a) {
+      return true;
+    }
+    const zhAliases = {'chi', 'zh', 'zho', 'chs', 'cht'};
+    if (zhAliases.contains(e) && zhAliases.contains(a)) {
+      return true;
+    }
+    return false;
+  }
+
+  Future<String?> _resolveNativeSubtitleSid(
+    SubtitleTrack target, {
+    String? hintedCodec,
+    String? hintedTitle,
+  }) async {
+    final np = _nativePlayer;
+    if (np == null) {
+      return null;
+    }
+    try {
+      final trackListJson = await np.getProperty('track-list');
+      if (trackListJson.isEmpty || trackListJson == 'null') {
+        return null;
+      }
+      final decoded = jsonDecode(trackListJson);
+      if (decoded is! List) {
+        return null;
+      }
+
+      final targetKind = _classifySubtitleTrackKind(
+        target,
+        hintedCodec: hintedCodec,
+        hintedTitle: hintedTitle,
+      );
+      final targetTitleLower = (hintedTitle ?? target.title ?? '').toLowerCase();
+      final targetLang = target.language?.toLowerCase();
+      final targetCodecLower = (hintedCodec ?? target.codec ?? '').toLowerCase();
+      final candidates = <Map<String, dynamic>>[];
+
+      for (final raw in decoded) {
+        if (raw is! Map) continue;
+        final type = raw['type']?.toString();
+        if (type != 'sub') continue;
+        final rawId = raw['id']?.toString();
+        if (rawId == null || rawId.isEmpty || rawId == 'no' || rawId == 'auto') {
+          continue;
+        }
+        final title = raw['title']?.toString() ?? '';
+        final lang = raw['lang']?.toString() ?? raw['language']?.toString() ?? '';
+        final codec = raw['codec']?.toString() ?? '';
+        final bitmap = raw['image'] == true ||
+            raw['isBitmap'] == true ||
+            raw['albumart'] == true;
+        final ass = raw['isAss'] == true;
+        final kind = SubtitleTrackMatcher.classifyKind(
+          codec: codec,
+          title: title,
+          isBitmap: bitmap,
+          isAss: ass,
+          expectedCodec: targetCodecLower,
+          expectedTitle: targetTitleLower,
+        );
+        if (kind != targetKind) {
+          continue;
+        }
+        candidates.add({
+          'id': rawId,
+          'title': title,
+          'language': lang,
+          'codec': codec,
+        });
+      }
+
+      if (candidates.isEmpty) {
+        return null;
+      }
+      if (candidates.length == 1) {
+        return candidates.first['id']?.toString();
+      }
+
+      for (final candidate in candidates) {
+        final title = (candidate['title'] ?? '').toString();
+        if (targetTitleLower.isNotEmpty &&
+            title.isNotEmpty &&
+            _matchTitles(targetTitleLower, title.toLowerCase())) {
+          return candidate['id']?.toString();
+        }
+      }
+
+      for (final candidate in candidates) {
+        if (_languagesMatch(targetLang, candidate['language']?.toString())) {
+          return candidate['id']?.toString();
+        }
+      }
+
+      for (final candidate in candidates) {
+        final codec = (candidate['codec'] ?? '').toString().toLowerCase();
+        if (targetCodecLower.isNotEmpty && codec == targetCodecLower) {
+          return candidate['id']?.toString();
+        }
+      }
+
+      return candidates.first['id']?.toString();
+    } catch (e) {
+      _logger.w('MpvAdapter', '解析原生字幕 track-list 失败: $e');
+      return null;
+    }
+  }
+
   void _markTrackSelected({
     String? subtitleTrackId,
+    String? nativeSubtitleSid,
     String? audioTrackId,
   }) {
     if (subtitleTrackId != null) {
       _selectedSubtitleTrackId = subtitleTrackId;
+    }
+    if (nativeSubtitleSid != null) {
+      _selectedNativeSubtitleSid = nativeSubtitleSid;
     }
     if (audioTrackId != null) {
       _selectedAudioTrackId = audioTrackId;
@@ -511,21 +641,59 @@ class MpvPlayerAdapter implements PlayerAdapter {
     }
   }
 
-  Future<void> _ensureNativeSubtitleTrackSelection(String trackId) async {
+  Future<bool> _ensureNativeSubtitleTrackSelection(String trackId) async {
     final np = _nativePlayer;
     if (np == null) {
-      return;
+      return true;
     }
     try {
-      var sid = await np.getProperty('sid');
-      if (sid != trackId) {
-        await np.setProperty('sid', trackId);
-        sid = await np.getProperty('sid');
+      for (var attempt = 1; attempt <= 6; attempt++) {
+        var sid = await np.getProperty('sid');
+        if (sid != trackId) {
+          await np.setProperty('sid', trackId);
+          sid = await np.getProperty('sid');
+        }
+        _logger.d(
+          'MpvAdapter',
+          '字幕轨道校验: attempt=$attempt, expected=$trackId, sid=$sid',
+        );
+        if (sid == trackId) {
+          return true;
+        }
+        await Future.delayed(const Duration(milliseconds: 120));
       }
-      _logger.d('MpvAdapter', '字幕轨道校验: expected=$trackId, sid=$sid');
+      _logger.w('MpvAdapter', '字幕轨道校验失败: expected=$trackId');
     } catch (e) {
       _logger.w('MpvAdapter', '字幕轨道校验失败: $e');
     }
+    return false;
+  }
+
+  Future<bool> waitForSubtitleTrackSelection(
+    String trackId, {
+    String? hintedCodec,
+    String? hintedTitle,
+  }) async {
+    var expectedSid = trackId;
+    if (_selectedSubtitleTrackId == trackId &&
+        _selectedNativeSubtitleSid != null &&
+        _selectedNativeSubtitleSid!.isNotEmpty) {
+      expectedSid = _selectedNativeSubtitleSid!;
+    } else {
+      final target = _subtitleTracks
+          .where((track) => track.id != 'auto' && track.id != 'no')
+          .where((track) => _trackIdEquals(track.id, trackId))
+          .firstOrNull;
+      if (target != null) {
+        expectedSid = await _resolveNativeSubtitleSid(
+              target,
+              hintedCodec: hintedCodec,
+              hintedTitle: hintedTitle,
+            ) ??
+            trackId;
+      }
+    }
+    return _ensureNativeSubtitleTrackSelection(expectedSid);
   }
 
   Future<void> _ensureBitmapExternalSubtitleSelection() async {
@@ -679,13 +847,35 @@ class MpvPlayerAdapter implements PlayerAdapter {
         _usingExternalSubtitle = false;
         _logger.i('MpvAdapter', '字幕轨道已选择: id=${target.id}, title=${target.title}, lang=${target.language}, codec=${target.codec}, bitmap=$_hasBitmapSubtitle, ass=$_currentSubIsAss');
         await _player!.setSubtitleTrack(target);
-        await _ensureNativeSubtitleTrackSelection(target.id.toString());
-        _markTrackSelected(subtitleTrackId: target.id.toString());
-        await _logNativeSubtitleState('select:${target.id}');
+        final nativeSid = await _resolveNativeSubtitleSid(
+          target,
+          hintedCodec: hintedCodec,
+          hintedTitle: hintedTitle,
+        );
+        if (nativeSid != null && nativeSid.isNotEmpty) {
+          final np = _nativePlayer;
+          if (np != null) {
+            await np.setProperty('sid', nativeSid);
+          }
+          await _ensureNativeSubtitleTrackSelection(nativeSid);
+          _markTrackSelected(
+            subtitleTrackId: target.id.toString(),
+            nativeSubtitleSid: nativeSid,
+          );
+          await _logNativeSubtitleState('select:$nativeSid');
+        } else {
+          await _ensureNativeSubtitleTrackSelection(target.id.toString());
+          _markTrackSelected(
+            subtitleTrackId: target.id.toString(),
+            nativeSubtitleSid: target.id.toString(),
+          );
+          await _logNativeSubtitleState('select:${target.id}');
+        }
       } else {
         _logger.w('MpvAdapter', '未找到字幕轨道: id=$trackId, 可用: ${realTracks.map((t) => '${t.id}/${t.language}/${t.codec}').toList()}');
         await _player!.setSubtitleTrack(SubtitleTrack.auto());
         _selectedSubtitleTrackId = null;
+        _selectedNativeSubtitleSid = null;
         _usingExternalSubtitle = false;
         _markTrackSelected();
       }
@@ -769,10 +959,31 @@ class MpvPlayerAdapter implements PlayerAdapter {
       _currentSubIsAss = kind == SubtitleKind.ass;
       _usingExternalSubtitle = false;
       await _player!.setSubtitleTrack(target);
-      await _ensureNativeSubtitleTrackSelection(target.id.toString());
-      _markTrackSelected(subtitleTrackId: target.id.toString());
+      final nativeSid = await _resolveNativeSubtitleSid(
+        target,
+        hintedCodec: targetCodec,
+        hintedTitle: targetTitle,
+      );
+      if (nativeSid != null && nativeSid.isNotEmpty) {
+        final np = _nativePlayer;
+        if (np != null) {
+          await np.setProperty('sid', nativeSid);
+        }
+        await _ensureNativeSubtitleTrackSelection(nativeSid);
+        _markTrackSelected(
+          subtitleTrackId: target.id.toString(),
+          nativeSubtitleSid: nativeSid,
+        );
+        await _logNativeSubtitleState('deferred-select:$nativeSid');
+      } else {
+        await _ensureNativeSubtitleTrackSelection(target.id.toString());
+        _markTrackSelected(
+          subtitleTrackId: target.id.toString(),
+          nativeSubtitleSid: target.id.toString(),
+        );
+        await _logNativeSubtitleState('deferred-select:${target.id}');
+      }
       await _applySubtitleRuntimeProperties();
-      await _logNativeSubtitleState('deferred-select:${target.id}');
       _logger.i('MpvAdapter', '延迟字幕选择成功: id=${target.id}, title=${target.title}, codec=${target.codec}');
     }
   }
@@ -800,6 +1011,7 @@ class MpvPlayerAdapter implements PlayerAdapter {
       await _player!.setSubtitleTrack(SubtitleTrack.no());
       await _removeExternalSubtitleTracks();
       _selectedSubtitleTrackId = null;
+      _selectedNativeSubtitleSid = null;
       _hasBitmapSubtitle = false;
       _currentSubIsAss = false;
       _usingExternalSubtitle = false;
@@ -861,12 +1073,14 @@ class MpvPlayerAdapter implements PlayerAdapter {
         final np = _nativePlayer;
         if (_hasBitmapSubtitle && np != null) {
           await _removeExternalSubtitleTracks();
-          await np.command(['sub-add', path, 'select', 'External Subtitle', 'und']);
+          final subtitlePath = _normalizeMpvPath(path);
+          await np.command(['sub-add', subtitlePath, 'select', 'External Subtitle', 'und']);
           await _ensureBitmapExternalSubtitleSelection();
         } else {
           await _player!.setSubtitleTrack(SubtitleTrack.uri(path));
         }
         _selectedSubtitleTrackId = 'external';
+        _selectedNativeSubtitleSid = 'external';
         await _applySubtitleRuntimeProperties();
         await _logNativeSubtitleState('load-http-external');
         _logger.i('MpvAdapter', 'HTTP外挂字幕加载成功');
@@ -886,11 +1100,13 @@ class MpvPlayerAdapter implements PlayerAdapter {
           await _removeExternalSubtitleTracks();
           await np.setProperty('sub-ass', 'no');
           await np.setProperty('sub-ass-override', 'no');
-          await np.command(['sub-add', path, 'select', 'External Subtitle', 'und']);
+          final subtitlePath = _normalizeMpvPath(path);
+          await np.command(['sub-add', subtitlePath, 'select', 'External Subtitle', 'und']);
         } else {
           await _player!.setSubtitleTrack(SubtitleTrack.uri(path));
         }
         _selectedSubtitleTrackId = 'external';
+        _selectedNativeSubtitleSid = 'external';
         await _ensureBitmapExternalSubtitleSelection();
         await _applySubtitleRuntimeProperties();
         await _logNativeSubtitleState('load-bitmap-external');
@@ -923,6 +1139,7 @@ class MpvPlayerAdapter implements PlayerAdapter {
 
       await _player!.setSubtitleTrack(SubtitleTrack.uri(processedPath));
       _selectedSubtitleTrackId = 'external';
+      _selectedNativeSubtitleSid = 'external';
       await _applySubtitleRuntimeProperties();
       await _logNativeSubtitleState('load-text-external');
 
@@ -1370,6 +1587,8 @@ class MpvPlayerAdapter implements PlayerAdapter {
     _isSeekBuffering = false;
     _isSeekInFlight = false;
     _selectedSubtitleTrackId = null;
+    _selectedNativeSubtitleSid = null;
     _selectedAudioTrackId = null;
+    _errorMessage = null;
   }
 }

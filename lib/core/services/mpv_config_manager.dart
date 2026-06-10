@@ -128,11 +128,11 @@ class MpvConfigManager {
       buffer.writeln('video-aspect-override=$value');
     }
 
-    // GLSL Shaders (Anime4K)
+    // Anime4K shaders are applied at runtime through NativePlayer commands.
+    // Persisting the raw shader list here can make Windows mpv treat the
+    // whole joined string as a single file path during startup.
     if (glslShaders != null && glslShaders.isNotEmpty) {
-      buffer.writeln('# GLSL Shaders');
-      final shaderPaths = glslShaders.join(':');
-      buffer.writeln('glsl-shaders="$shaderPaths"');
+      buffer.writeln('# Anime4K shaders are applied at runtime');
     }
 
     // 字幕黑色背景

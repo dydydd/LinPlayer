@@ -12,6 +12,7 @@ import '../../../core/api/api_interfaces.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
 import '../../../core/services/app_logger.dart';
+import '../../../core/services/mpv_player_adapter.dart';
 import '../../../core/services/subtitle_track_matcher.dart';
 import '../../../core/services/video_player_service.dart';
 import '../../../core/utils/playback_url_resolver.dart';
@@ -80,6 +81,9 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
   double? _sliderSeekValue;
   MediaSource? _currentMediaSource;
   String? _displayTitle;
+  bool _suppressTrackSelectionListeners = false;
+  bool _hasUserTouchedSubtitleSelection = false;
+  bool _subtitleBootstrapInFlight = false;
 
   @override
   void initState() {
@@ -95,7 +99,10 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.listenManual(audioTrackProvider, (prev, next) {
-        if (_initializingPlayer || prev == next || next == null) {
+        if (_initializingPlayer ||
+            _suppressTrackSelectionListeners ||
+            prev == next ||
+            next == null) {
           return;
         }
         final audioStreams = _audioStreamsFromCurrentSource();
@@ -105,9 +112,12 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
         unawaited(_applyAudioStreamSelection(audioStreams, next));
       });
       ref.listenManual(subtitleTrackProvider, (prev, next) {
-        if (_initializingPlayer || prev == next) {
+        if (_initializingPlayer ||
+            _suppressTrackSelectionListeners ||
+            prev == next) {
           return;
         }
+        _hasUserTouchedSubtitleSelection = true;
         unawaited(_onSubtitleSelectionChanged(prev, next));
       });
       ref.listenManual(subtitleDelayProvider, (prev, next) {
@@ -178,7 +188,9 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
   Future<void> _initializePlayer() async {
     if (_initializingPlayer) return;
     _initializingPlayer = true;
+    _hasUserTouchedSubtitleSelection = false;
     final api = ref.read(apiClientProvider);
+    List<MediaStream> deferredSubtitleStreams = const <MediaStream>[];
     try {
       final cachedItem = ref.read(currentPlayingItemProvider);
       final item = cachedItem != null && cachedItem.id == widget.itemId
@@ -289,7 +301,6 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
       final subtitleStreams = mediaSource?.mediaStreams.where((s) => s.isSubtitle).toList() ?? [];
       await _waitForTracksReady(
         requireAudio: audioStreams.isNotEmpty,
-        requireSubtitle: subtitleStreams.isNotEmpty,
       );
 
       final selectedAudioIndex = ref.read(audioTrackProvider);
@@ -302,12 +313,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
       }
 
       if (subtitleStreams.isNotEmpty) {
-        final selectedSubtitleIndex = ref.read(subtitleTrackProvider);
-        if (selectedSubtitleIndex != null) {
-          await _applyInitialSubtitleTrack(subtitleStreams, selectedSubtitleIndex);
-        } else {
-          await _applyPreferredSubtitleTrack(subtitleStreams);
-        }
+        deferredSubtitleStreams = subtitleStreams;
       } else {
         ref.read(subtitleTrackProvider.notifier).state = null;
       }
@@ -315,6 +321,68 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
       _startHideControlsTimer();
     } finally {
       _initializingPlayer = false;
+      if (mounted) {
+        setState(() {});
+      }
+    }
+
+    if (deferredSubtitleStreams.isNotEmpty) {
+      unawaited(_initializeSubtitleSelectionAfterStartup(deferredSubtitleStreams));
+    }
+  }
+
+  Future<T> _runWithSuppressedTrackSelectionListeners<T>(
+    Future<T> Function() action,
+  ) async {
+    _suppressTrackSelectionListeners = true;
+    try {
+      return await action();
+    } finally {
+      _suppressTrackSelectionListeners = false;
+    }
+  }
+
+  Future<void> _initializeSubtitleSelectionAfterStartup(
+    List<MediaStream> subtitleStreams,
+  ) async {
+    if (_subtitleBootstrapInFlight || subtitleStreams.isEmpty) {
+      return;
+    }
+    _subtitleBootstrapInFlight = true;
+    try {
+      AppLogger().i(
+        'DesktopPlayer',
+        '起播后异步初始化字幕轨道: count=${subtitleStreams.length}',
+      );
+      await _waitForTracksReady(requireSubtitle: true);
+      if (!mounted) {
+        return;
+      }
+
+      final selectedSubtitleIndex = ref.read(subtitleTrackProvider);
+      if (selectedSubtitleIndex != null) {
+        await _applyInitialSubtitleTrack(subtitleStreams, selectedSubtitleIndex);
+        return;
+      }
+
+      if (_hasUserTouchedSubtitleSelection) {
+        AppLogger().i(
+          'DesktopPlayer',
+          '用户已手动处理字幕选择，跳过默认字幕自动挂载',
+        );
+        return;
+      }
+
+      await _applyPreferredSubtitleTrack(subtitleStreams);
+    } catch (e, stackTrace) {
+      AppLogger().eWithStack(
+        'DesktopPlayer',
+        '起播后异步初始化字幕失败',
+        e,
+        stackTrace,
+      );
+    } finally {
+      _subtitleBootstrapInFlight = false;
     }
   }
 
@@ -333,6 +401,14 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
     }).toList();
   }
 
+  List<Map<String, dynamic>> _selectableSubtitleTracksFrom([
+    List<Map<String, dynamic>>? tracks,
+  ]) {
+    return _subtitleTracksFrom(tracks)
+        .where((track) => track['id'] != 'auto' && track['id'] != 'no')
+        .toList();
+  }
+
   Future<void> _waitForTracksReady({
     bool requireAudio = false,
     bool requireSubtitle = false,
@@ -340,15 +416,26 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
     if (!requireAudio && !requireSubtitle) {
       return;
     }
-    for (var i = 0; i < 30; i++) {
+    final waitBudget = requireSubtitle && _playerService.coreType == PlayerCoreType.mpv
+        ? const Duration(seconds: 18)
+        : const Duration(milliseconds: 4500);
+    final deadline = DateTime.now().add(waitBudget);
+    while (DateTime.now().isBefore(deadline)) {
       final tracks = _playerService.tracksInfo;
       final audioReady = !requireAudio || tracks.any((track) => track['type'] == 'audio');
-      final subtitleReady = !requireSubtitle || _subtitleTracksFrom(tracks).isNotEmpty;
+      final subtitleReady =
+          !requireSubtitle || _selectableSubtitleTracksFrom(tracks).isNotEmpty;
       if (audioReady && subtitleReady) {
         return;
       }
       await Future.delayed(const Duration(milliseconds: 150));
     }
+    AppLogger().w(
+      'DesktopPlayer',
+      '等待轨道就绪超时: audio=$requireAudio, subtitle=$requireSubtitle, '
+      'knownTracks=${_playerService.tracksInfo.length}, '
+      'selectableSubtitles=${_selectableSubtitleTracksFrom().length}',
+    );
   }
 
   Future<void> _applyInitialSubtitleTrack(
@@ -367,8 +454,10 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
       (stream) => (stream.language ?? '').trim().toLowerCase() == preferredLanguage,
       orElse: () => subtitleStreams.first,
     );
-    ref.read(subtitleTrackProvider.notifier).state = preferredTrack.index;
-    await _onSubtitleSelectionChanged(null, preferredTrack.index);
+    await _runWithSuppressedTrackSelectionListeners(() async {
+      ref.read(subtitleTrackProvider.notifier).state = preferredTrack.index;
+      await _onSubtitleSelectionChanged(null, preferredTrack.index);
+    });
   }
 
   List<MediaStream> _audioStreamsFromCurrentSource() {
@@ -422,18 +511,112 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
       codec: target.codec,
       title: targetTitle,
     );
-    final forceExternalBitmapSubtitle =
+    final shouldPreferNativeBitmapSubtitle =
         _playerService.coreType == PlayerCoreType.mpv &&
-        subtitleKind == SubtitleKind.bitmap;
+        subtitleKind == SubtitleKind.bitmap &&
+        !isExternal;
 
     AppLogger().i(
       'DesktopPlayer',
       '字幕切换请求: index=${target.index}, codec=${target.codec}, title=$targetTitle, '
-      'external=$isExternal, kind=$subtitleKind, forceBitmapExternal=$forceExternalBitmapSubtitle',
+      'external=$isExternal, kind=$subtitleKind, preferNativeBitmap=$shouldPreferNativeBitmapSubtitle',
     );
 
-    if (!isExternal && !forceExternalBitmapSubtitle) {
+    if (!isExternal) {
       _playerService.setSubtitleSelectionHint(codec: codec, title: targetTitle);
+      var trackId = _matchSubtitleTrackId(
+        subtitleStreams,
+        target.language,
+        targetTitle,
+        target.codec,
+        target.index,
+      );
+      if ((trackId == null || trackId.isEmpty) &&
+          _playerService.coreType == PlayerCoreType.mpv) {
+        AppLogger().i(
+          'DesktopPlayer',
+          '字幕轨道尚未就绪，等待 MPV 暴露真实字幕轨道: index=${target.index}, codec=${target.codec}, title=$targetTitle',
+        );
+        trackId = await _waitForInternalSubtitleTrackId(
+          subtitleStreams,
+          target,
+          targetTitle,
+        );
+      }
+      if (trackId != null && trackId.isNotEmpty) {
+        await _playerService.selectSubtitleTrack(trackId);
+        if (!shouldPreferNativeBitmapSubtitle) {
+          return;
+        }
+        final nativeBitmapSelected = await _verifyNativeBitmapSubtitleSelection(
+          trackId,
+          codec: codec,
+          title: targetTitle,
+        );
+        if (nativeBitmapSelected) {
+          AppLogger().i(
+            'DesktopPlayer',
+            'PGS/SUP 内封字幕已通过 mpv 原生轨道选中: trackId=$trackId',
+          );
+          return;
+        }
+        AppLogger().w(
+          'DesktopPlayer',
+          'PGS/SUP 内封字幕原生选轨未挂载成功，回退外挂加载: trackId=$trackId',
+        );
+      } else if (_playerService.coreType == PlayerCoreType.mpv) {
+        if (!shouldPreferNativeBitmapSubtitle) {
+          AppLogger().w(
+            'DesktopPlayer',
+            'MPV 内封字幕轨道仍未匹配成功，保留当前字幕状态: index=${target.index}, codec=${target.codec}',
+          );
+          return;
+        }
+        AppLogger().w(
+          'DesktopPlayer',
+          'PGS/SUP 未匹配到内封轨道 ID，回退外挂加载: index=${target.index}',
+        );
+      } else {
+        return;
+      }
+    }
+
+    // Only use the external bitmap subtitle path as a fallback after native
+    // track selection fails, or when the subtitle is already external.
+    _playerService.setSubtitleSelectionHint();
+    await _playerService.deselectSubtitleTrack();
+    try {
+      final subtitleFile = await _prepareExternalSubtitleFile(
+        target,
+        codec,
+        title: targetTitle,
+        kind: subtitleKind,
+      );
+      await _loadExternalSubtitleWithRetry(subtitleFile);
+    } catch (e, stackTrace) {
+      AppLogger().eWithStack(
+        'DesktopPlayer',
+        '图形字幕加载失败: index=${target.index}, codec=${target.codec}, title=$targetTitle',
+        e,
+        stackTrace,
+      );
+      await _playerService.deselectSubtitleTrack();
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('字幕加载失败: $e')),
+      );
+    }
+  }
+
+  Future<String?> _waitForInternalSubtitleTrackId(
+    List<MediaStream> subtitleStreams,
+    MediaStream target,
+    String? targetTitle,
+  ) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 14));
+    while (DateTime.now().isBefore(deadline)) {
       final trackId = _matchSubtitleTrackId(
         subtitleStreams,
         target.language,
@@ -442,26 +625,41 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
         target.index,
       );
       if (trackId != null && trackId.isNotEmpty) {
-        await _playerService.selectSubtitleTrack(trackId);
-      } else if (_playerService.coreType == PlayerCoreType.mpv) {
-        await _playerService.selectSubtitleTrack('auto');
+        AppLogger().i(
+          'DesktopPlayer',
+          '等待后匹配到内封字幕轨道: index=${target.index}, trackId=$trackId',
+        );
+        return trackId;
       }
-      return;
+      await Future.delayed(const Duration(milliseconds: 250));
     }
+    return null;
+  }
 
-    // Desktop mpv still fails to reliably latch some internal bitmap subtitle
-    // tracks (`sid` falls back to `no`). Route graphical subtitles through the
-    // server subtitle stream endpoint so mpv can load them as an external PGS/SUP
-    // file and render through its native bitmap pipeline.
-    _playerService.setSubtitleSelectionHint();
-    await _playerService.deselectSubtitleTrack();
-    final subtitleFile = await _prepareExternalSubtitleFile(
-      target,
-      codec,
-      title: targetTitle,
-      kind: subtitleKind,
-    );
-    await _loadExternalSubtitleWithRetry(subtitleFile);
+  Future<bool> _verifyNativeBitmapSubtitleSelection(
+    String trackId, {
+    String? codec,
+    String? title,
+  }) async {
+    final adapter = _playerService.adapter;
+    if (adapter is! MpvPlayerAdapter) {
+      return true;
+    }
+    try {
+      return await adapter.waitForSubtitleTrackSelection(
+        trackId,
+        hintedCodec: codec,
+        hintedTitle: title,
+      );
+    } catch (e, stackTrace) {
+      AppLogger().eWithStack(
+        'DesktopPlayer',
+        '校验 PGS/SUP 内封字幕轨道失败: trackId=$trackId',
+        e,
+        stackTrace,
+      );
+      return false;
+    }
   }
 
   String? _matchAudioTrackId(List<MediaStream> audioStreams, int selectedIndex) {
@@ -698,6 +896,29 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
     return 'ass';
   }
 
+  List<String> _embySubtitleCodecCandidates(
+    String codec, {
+    String? title,
+    SubtitleKind? kind,
+  }) {
+    final primary = _embySubtitleCodec(
+      codec,
+      title: title,
+      kind: kind,
+    );
+    final resolvedKind = kind ??
+        SubtitleTrackMatcher.classifyKind(
+          codec: codec,
+          title: title,
+        );
+    if (resolvedKind != SubtitleKind.bitmap) {
+      return [primary];
+    }
+
+    final candidates = <String>['sup', primary, 'pgs'];
+    return candidates.toSet().toList();
+  }
+
   String _subtitleFileExtension(String codec, {String? title, SubtitleKind? kind}) {
     final lower = codec.toLowerCase();
     final resolvedKind = kind ??
@@ -735,7 +956,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
           codec: codec,
           title: title,
         );
-    final embyCodec = _embySubtitleCodec(
+    final embyCodecCandidates = _embySubtitleCodecCandidates(
       codec,
       title: title,
       kind: resolvedKind,
@@ -745,14 +966,6 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
       title: title,
       kind: resolvedKind,
     );
-    final api = ref.read(apiClientProvider);
-    final subtitleUrl = api.playback.getSubtitleStreamUrl(
-      widget.itemId,
-      currentSource.id,
-      target.index,
-      embyCodec,
-    );
-
     final tempDir = await getTemporaryDirectory();
     final file = File(
       p.join(
@@ -765,7 +978,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
     AppLogger().i(
       'DesktopPlayer',
       '准备外挂字幕文件: index=${target.index}, codec=${target.codec}, title=$title, '
-      'kind=$resolvedKind, embyCodec=$embyCodec, file=${file.path}',
+      'kind=$resolvedKind, embyCodecs=${embyCodecCandidates.join('/')}, file=${file.path}',
     );
     if (shouldForceRefresh && file.existsSync()) {
       await file.delete();
@@ -781,7 +994,43 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
         dio.options.headers['X-Emby-Token'] = server!.authToken;
         dio.options.headers['X-MediaBrowser-Token'] = server.authToken;
       }
-      await dio.download(subtitleUrl, file.path);
+      Object? lastError;
+      final subtitleUrls = _subtitleUrlCandidates(
+        target: target,
+        currentSource: currentSource,
+        codecCandidates: embyCodecCandidates,
+      );
+      AppLogger().i(
+        'DesktopPlayer',
+        '外挂字幕候选地址: ${subtitleUrls.join(' | ')}',
+      );
+      for (final subtitleUrl in subtitleUrls) {
+        try {
+          AppLogger().i(
+            'DesktopPlayer',
+            '下载外挂字幕: url=$subtitleUrl',
+          );
+          await dio.download(subtitleUrl, file.path);
+          final downloadedSize = await file.length();
+          if (downloadedSize <= 0) {
+            throw StateError('下载到的字幕文件为空');
+          }
+          lastError = null;
+          break;
+        } catch (e) {
+          lastError = e;
+          AppLogger().w(
+            'DesktopPlayer',
+            '外挂字幕下载失败: url=$subtitleUrl, error=$e',
+          );
+          if (file.existsSync()) {
+            await file.delete();
+          }
+        }
+      }
+      if (lastError != null) {
+        throw lastError;
+      }
     }
 
     final fileSize = await file.length();
@@ -790,6 +1039,60 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
     }
 
     return file;
+  }
+
+  List<String> _subtitleUrlCandidates({
+    required MediaStream target,
+    required MediaSource currentSource,
+    required List<String> codecCandidates,
+  }) {
+    final api = ref.read(apiClientProvider);
+    final urls = <String>[];
+
+    final deliveryUrl = target.deliveryUrl?.trim();
+    if (deliveryUrl != null && deliveryUrl.isNotEmpty) {
+      urls.add(_resolveServerRelativeUrl(deliveryUrl));
+    }
+
+    final path = target.path?.trim();
+    if (path != null &&
+        path.isNotEmpty &&
+        (path.startsWith('http://') || path.startsWith('https://'))) {
+      urls.add(path);
+    }
+
+    for (final codec in codecCandidates) {
+      urls.add(
+        api.playback.getSubtitleStreamUrl(
+          widget.itemId,
+          currentSource.id,
+          target.index,
+          codec,
+        ),
+      );
+    }
+
+    return urls.toSet().toList();
+  }
+
+  String _resolveServerRelativeUrl(String rawUrl) {
+    if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+      return rawUrl;
+    }
+    final server = ref.read(currentServerProvider);
+    final baseUrl = (server?.activeLineUrl ?? server?.baseUrl ?? '').trim();
+    if (baseUrl.isEmpty) {
+      return rawUrl;
+    }
+    final normalizedBase =
+        baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+    final normalizedPath = rawUrl.startsWith('/') ? rawUrl : '/$rawUrl';
+    final authToken = server?.authToken?.trim();
+    if (authToken == null || authToken.isEmpty || normalizedPath.contains('api_key=')) {
+      return '$normalizedBase$normalizedPath';
+    }
+    final separator = normalizedPath.contains('?') ? '&' : '?';
+    return '$normalizedBase$normalizedPath${separator}api_key=${Uri.encodeQueryComponent(authToken)}';
   }
 
   // ========== 控制栏显隐 ==========
@@ -806,6 +1109,10 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen> {
         return;
       } catch (e) {
         lastError = e;
+        AppLogger().e(
+          'DesktopPlayer',
+          '外挂字幕加载失败: attempt=$attempt, path=${subtitleFile.path}, error=$e',
+        );
         if (attempt >= 3) {
           break;
         }

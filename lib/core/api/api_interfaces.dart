@@ -492,6 +492,10 @@ class MediaStream {
   final bool? isDefault;
   final bool? isExternal;
   final String? displayTitle;
+  final String? path;
+  final String? deliveryUrl;
+  final String? deliveryMethod;
+  final bool? isExternalUrl;
   final String? videoCodec;
   final int? width;
   final int? height;
@@ -507,6 +511,10 @@ class MediaStream {
     this.isDefault,
     this.isExternal,
     this.displayTitle,
+    this.path,
+    this.deliveryUrl,
+    this.deliveryMethod,
+    this.isExternalUrl,
     this.videoCodec,
     this.width,
     this.height,
