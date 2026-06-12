@@ -70,6 +70,14 @@ class _GeneralSettingsScreenState extends ConsumerState<GeneralSettingsScreen> {
                 .read(hideDailyRecommendationsProvider.notifier)
                 .state = value,
           ),
+          SwitchListTile(
+            title: const Text('使用视频背景'),
+            subtitle: const Text('开启后在详情页使用预告片视频作为背景（如可用），关闭则使用封面图'),
+            value: ref.watch(useVideoBackgroundProvider),
+            onChanged: (value) => ref
+                .read(useVideoBackgroundProvider.notifier)
+                .state = value,
+          ),
           const Divider(),
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 8, 16, 0),

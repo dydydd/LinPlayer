@@ -15,6 +15,7 @@ import '../../../core/utils/color_extractor.dart';
 
 import '../../../ui/utils/media_helpers.dart';
 import '../../../ui/widgets/common/media_widgets.dart';
+import '../../../ui/widgets/common/video_background.dart';
 import '../../utils/desktop_smooth_scroll.dart';
 import '../../widgets/desktop_media_card.dart';
 

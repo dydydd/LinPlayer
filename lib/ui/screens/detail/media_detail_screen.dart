@@ -11,6 +11,7 @@ import '../../screens/download/download_screen.dart';
 import '../../utils/media_helpers.dart';
 import '../../widgets/common/media_widgets.dart';
 import '../../widgets/common/playback_options.dart';
+import '../../widgets/common/video_background.dart';
 
 /// 媒体详情页（剧/电影通用）
 class MediaDetailScreen extends ConsumerWidget {
@@ -251,6 +252,7 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMovie = widget.item.type == 'Movie';
     final api = ref.read(apiClientProvider);
+    final useVideoBackground = ref.watch(useVideoBackgroundProvider);
     final imageUrls = resolveMediaItemLandscapeImageUrls(
       api,
       widget.item,
@@ -262,6 +264,9 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
         : (hasLandscapeImage
             ? screenWidth * 0.6
             : (isMovie ? screenWidth * 0.85 : screenWidth * 0.75));
+    final videoUrl = (useVideoBackground && widget.item.remoteTrailers != null && widget.item.remoteTrailers!.isNotEmpty)
+        ? widget.item.remoteTrailers!.first
+        : null;
 
     return Stack(
       children: [
@@ -269,13 +274,29 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
           height: headerHeight,
           width: double.infinity,
           color: _dominantColor,
-          child: MediaImage(
-            imageUrl: imageUrls.isNotEmpty ? imageUrls.first : null,
-            imageUrls: imageUrls.length > 1 ? imageUrls.sublist(1) : null,
-            width: double.infinity,
-            height: headerHeight,
-            fit: BoxFit.cover,
-          ),
+          child: videoUrl != null
+              ? VideoBackground(
+                  videoUrl: videoUrl,
+                  width: double.infinity,
+                  height: headerHeight,
+                  fit: BoxFit.cover,
+                  placeholder: imageUrls.isNotEmpty
+                      ? MediaImage(
+                          imageUrl: imageUrls.first,
+                          imageUrls: imageUrls.length > 1 ? imageUrls.sublist(1) : null,
+                          width: double.infinity,
+                          height: headerHeight,
+                          fit: BoxFit.cover,
+                        )
+                      : null,
+                )
+              : MediaImage(
+                  imageUrl: imageUrls.isNotEmpty ? imageUrls.first : null,
+                  imageUrls: imageUrls.length > 1 ? imageUrls.sublist(1) : null,
+                  width: double.infinity,
+                  height: headerHeight,
+                  fit: BoxFit.cover,
+                ),
         ),
 
         // 底部渐变

@@ -955,6 +955,16 @@ MediaItem _parseMediaItem(Map<String, dynamic> d) {
     recursiveItemCount: recursiveItemCount,
     people: people,
     canDownload: d['CanDownload'] as bool? ?? d['SupportsSync'] as bool?,
+    remoteTrailers: (d['RemoteTrailers'] as List<dynamic>?)
+        ?.map((e) {
+          if (e is Map<String, dynamic>) {
+            return e['Url']?.toString() ?? e['url']?.toString();
+          }
+          return e?.toString();
+        })
+        .where((url) => url != null && url.isNotEmpty)
+        .cast<String>()
+        .toList(),
   );
 }
 

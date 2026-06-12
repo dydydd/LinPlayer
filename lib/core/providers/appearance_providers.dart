@@ -184,6 +184,17 @@ final hideDailyRecommendationsProvider =
   );
 });
 
+final useVideoBackgroundProvider =
+    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: false,
+    readValue: (prefs) => prefs.getBool('linplayer_use_video_background'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_use_video_background', value);
+    },
+  );
+});
+
 final hiddenLibrariesProvider =
     StateNotifierProvider<HiddenLibrariesNotifier, Set<String>>((ref) {
   return HiddenLibrariesNotifier();

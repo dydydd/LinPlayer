@@ -228,6 +228,7 @@ class MediaItem {
   final int? recursiveItemCount; // 递归子项数量（剧集总集数）
   final List<Person>? people;
   final bool? canDownload;
+  final List<String>? remoteTrailers;
 
   MediaItem({
     required this.id,
@@ -262,6 +263,7 @@ class MediaItem {
     this.recursiveItemCount,
     this.people,
     this.canDownload,
+    this.remoteTrailers,
   });
   
   String? get formattedRuntime {
@@ -334,6 +336,7 @@ class Episode {
   final int? runTimeTicks;
   final UserData? userData;
   final String? overview;
+  final List<String>? remoteTrailers;
   
   Episode({
     required this.id,
@@ -352,6 +355,7 @@ class Episode {
     this.runTimeTicks,
     this.userData,
     this.overview,
+    this.remoteTrailers,
   });
   
   String? get formattedRuntime {

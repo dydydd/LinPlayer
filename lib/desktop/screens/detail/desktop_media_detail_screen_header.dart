@@ -34,6 +34,7 @@ class _HeroSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final api = ref.read(apiClientProvider);
+    final useVideoBackground = ref.watch(useVideoBackgroundProvider);
     final titleColor = _heroTitleColor(backgroundColor);
     final secondaryColor = _heroSecondaryColor(backgroundColor);
     final shadowColor = _heroShadowColor(backgroundColor);
@@ -48,10 +49,13 @@ class _HeroSection extends ConsumerWidget {
       item,
       maxWidth: 600,
     );
+    final videoUrl = (useVideoBackground && item.remoteTrailers != null && item.remoteTrailers!.isNotEmpty)
+        ? item.remoteTrailers!.first
+        : null;
 
     return Stack(
       children: [
-        // 背景图
+        // 背景图/视频
         SizedBox(
           height: heroHeight,
           width: double.infinity,
@@ -61,8 +65,24 @@ class _HeroSection extends ConsumerWidget {
               // 底色
               Container(color: dominantColor),
 
-              // 背景图
-              if (imageUrls.isNotEmpty)
+              // 背景视频或图片
+              if (videoUrl != null)
+                VideoBackground(
+                  videoUrl: videoUrl,
+                  width: double.infinity,
+                  height: heroHeight,
+                  fit: BoxFit.cover,
+                  placeholder: imageUrls.isNotEmpty
+                      ? MediaImage(
+                          imageUrl: imageUrls.first,
+                          imageUrls: imageUrls.length > 1 ? imageUrls.sublist(1) : null,
+                          width: double.infinity,
+                          height: heroHeight,
+                          fit: BoxFit.cover,
+                        )
+                      : null,
+                )
+              else if (imageUrls.isNotEmpty)
                 MediaImage(
                   imageUrl: imageUrls.first,
                   imageUrls: imageUrls.length > 1 ? imageUrls.sublist(1) : null,

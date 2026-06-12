@@ -51,6 +51,7 @@ Map<String, dynamic> _buildBackupPayload(WidgetRef ref) {
       'exoLibass': ref.read(exoLibassProvider),
       'subtitleBackground': ref.read(subtitleBackgroundProvider),
       'hideDailyRecommendations': ref.read(hideDailyRecommendationsProvider),
+      'useVideoBackground': ref.read(useVideoBackgroundProvider),
     },
   };
 }
@@ -173,5 +174,9 @@ Future<void> _restoreBackupPayload(
   if (settings['hideDailyRecommendations'] is bool) {
     ref.read(hideDailyRecommendationsProvider.notifier).state =
         settings['hideDailyRecommendations'] as bool;
+  }
+  if (settings['useVideoBackground'] is bool) {
+    ref.read(useVideoBackgroundProvider.notifier).state =
+        settings['useVideoBackground'] as bool;
   }
 }
