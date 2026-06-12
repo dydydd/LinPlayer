@@ -356,6 +356,11 @@ List<String> resolveEpisodeImageUrls(
         tag: episode.primaryImageTag,
         maxWidth: maxWidth,
       ),
+    // 兜底：不带 tag 的备选 URL
+    api.image.getPrimaryImageUrl(
+      episode.id,
+      maxWidth: maxWidth,
+    ),
     if (!preferThumb && episode.thumbImageTag != null)
       api.image.getThumbImageUrl(
         episode.id,
@@ -385,6 +390,12 @@ List<String> resolveEpisodeImageUrls(
       api.image.getPrimaryImageUrl(
         episode.seriesId,
         tag: episode.seriesPrimaryImageTag,
+        maxWidth: maxWidth,
+      ),
+    // 兜底：不带 tag 的系列备选 URL
+    if (episode.seriesId.isNotEmpty)
+      api.image.getPrimaryImageUrl(
+        episode.seriesId,
         maxWidth: maxWidth,
       ),
   ]);

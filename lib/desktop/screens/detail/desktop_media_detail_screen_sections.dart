@@ -522,6 +522,7 @@ class _EpisodeCardState extends State<_EpisodeCard> {
         ? widget.episode.userData!.playbackPositionTicks! /
             widget.episode.runTimeTicks!
         : null;
+    final isActive = widget.isSelected || _isHovered;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
@@ -531,35 +532,19 @@ class _EpisodeCardState extends State<_EpisodeCard> {
         onTap: widget.onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
           width: 200 * scale,
+          transform: isActive
+              ? (Matrix4.identity()..scaleByDouble(1.04, 1.04, 1.0, 1.0))
+              : Matrix4.identity(),
+          transformAlignment: Alignment.center,
           decoration: BoxDecoration(
-            color: _detailCardSurface(context, hovered: _isHovered),
             borderRadius: BorderRadius.circular(8 * scale),
-            border: widget.isSelected
-                ? Border.all(
-                    color: widget.primaryColor,
-                    width: 2,
-                  )
-                : _isHovered
-                    ? Border.all(
-                        color: _detailBorder(context, emphasis: 0.28),
-                        width: 1,
-                      )
-                    : null,
-            boxShadow: _isHovered
-                ? [
-                    BoxShadow(
-                      color: _detailShadow(context, opacity: 0.18),
-                      blurRadius: 16 * scale,
-                      offset: Offset(0, 4 * scale),
-                    ),
-                  ]
-                : null,
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(8 * scale),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 // 缩略图
                 AspectRatio(
@@ -578,6 +563,9 @@ class _EpisodeCardState extends State<_EpisodeCard> {
                           return MediaImage(
                             imageUrl:
                                 imageUrls.isNotEmpty ? imageUrls.first : null,
+                            imageUrls: imageUrls.length > 1
+                                ? imageUrls.sublist(1)
+                                : null,
                             width: 200 * scale,
                             height: 112 * scale,
                             fit: BoxFit.cover,
@@ -665,27 +653,32 @@ class _EpisodeCardState extends State<_EpisodeCard> {
                 Padding(
                   padding: EdgeInsets.all(8 * scale),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Text(
                         widget.episode.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 13 * scale,
-                          fontWeight: FontWeight.w500,
-                          color: _detailPrimaryText(context),
+                          fontWeight: widget.isSelected
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                          color: widget.isSelected
+                              ? widget.primaryColor
+                              : _detailPrimaryText(context),
                         ),
                       ),
                       SizedBox(height: 2 * scale),
-                      if (widget.episode.formattedRuntime != null)
-                        Text(
-                          widget.episode.formattedRuntime!,
-                          style: TextStyle(
-                            fontSize: 11 * scale,
-                            color: _detailHintText(context),
-                          ),
+                      Text(
+                        '第 ${widget.episode.indexNumber ?? '?'} 集',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 11 * scale,
+                          color: _detailHintText(context),
                         ),
+                      ),
                     ],
                   ),
                 ),
@@ -843,8 +836,8 @@ class _SeasonsSectionState extends ConsumerState<_SeasonsSection> {
           title: '分季',
           primaryColor: widget.primaryColor,
           scaleFactor: widget.scaleFactor,
-          itemWidth: 120 * widget.scaleFactor,
-          itemHeight: 200 * widget.scaleFactor,
+          itemWidth: 150 * widget.scaleFactor,
+          itemHeight: 240 * widget.scaleFactor,
           children: sorted.map((season) {
             final isSelected = season.id == widget.selectedSeasonId;
             final isSpecial = (season.indexNumber ?? 0) == 0;
@@ -855,6 +848,7 @@ class _SeasonsSectionState extends ConsumerState<_SeasonsSection> {
               isSpecial: isSpecial,
               scaleFactor: widget.scaleFactor,
               primaryColor: widget.primaryColor,
+              itemHeight: 240 * widget.scaleFactor,
               onTap: () => widget.onSeasonTap(season),
             );
           }).toList(),
@@ -867,6 +861,10 @@ class _SeasonsSectionState extends ConsumerState<_SeasonsSection> {
 
   Widget _buildSkeleton() {
     final scale = widget.scaleFactor;
+    const cardWidth = 150.0;
+    const cardHeight = 240.0;
+    const count = 3;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -877,13 +875,16 @@ class _SeasonsSectionState extends ConsumerState<_SeasonsSection> {
         ),
         SizedBox(height: 16 * scale),
         SizedBox(
-          height: 200 * scale,
+          height: cardHeight * scale,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            itemCount: 3,
+            primary: false,
+            physics: const ClampingScrollPhysics(),
+            itemCount: count,
             separatorBuilder: (_, __) => SizedBox(width: 16 * scale),
             itemBuilder: (_, __) => Container(
-              width: 120 * scale,
+              width: cardWidth * scale,
+              height: cardHeight * scale,
               decoration: BoxDecoration(
                 color: _detailPlaceholderSurface(context),
                 borderRadius: BorderRadius.circular(8 * scale),
@@ -907,6 +908,7 @@ class _SeasonCard extends StatefulWidget {
   final double scaleFactor;
   final Color primaryColor;
   final VoidCallback onTap;
+  final double itemHeight;
 
   const _SeasonCard({
     required this.season,
@@ -915,6 +917,7 @@ class _SeasonCard extends StatefulWidget {
     required this.scaleFactor,
     required this.primaryColor,
     required this.onTap,
+    required this.itemHeight,
   });
 
   @override
@@ -927,11 +930,9 @@ class _SeasonCardState extends State<_SeasonCard> {
   @override
   Widget build(BuildContext context) {
     final scale = widget.scaleFactor;
-    final opacity = widget.isSelected
-        ? 1.0
-        : _isHovered
-            ? 1.0
-            : 0.7;
+    const cardWidth = 150.0;
+    const posterHeight = 200.0;
+    final isActive = widget.isSelected || _isHovered;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
@@ -939,98 +940,89 @@ class _SeasonCardState extends State<_SeasonCard> {
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: widget.onTap,
-        child: AnimatedOpacity(
-          duration: const Duration(milliseconds: 150),
-          opacity: opacity,
-          child: Container(
-            width: 120 * scale,
-            decoration: BoxDecoration(
-              color: _detailCardSurface(context, hovered: _isHovered),
-              borderRadius: BorderRadius.circular(8 * scale),
-              border: widget.isSelected
-                  ? Border.all(
-                      color: widget.primaryColor,
-                      width: 2,
-                    )
-                  : null,
-              boxShadow: widget.isSelected
-                  ? [
-                      BoxShadow(
-                        color: widget.primaryColor.withValues(alpha: 0.3),
-                        blurRadius: 12 * scale,
-                        offset: Offset(0, 2 * scale),
-                      ),
-                    ]
-                  : null,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 海报
-                AspectRatio(
-                  aspectRatio: 2 / 3,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8 * scale),
-                    child: Consumer(
-                      builder: (context, ref, child) {
-                        final api = ref.read(apiClientProvider);
-                        final imageUrls = resolveSeasonImageUrls(
-                          api,
-                          widget.season,
-                          maxWidth: 300,
-                        );
-                        return MediaImage(
-                          imageUrl:
-                              imageUrls.isNotEmpty ? imageUrls.first : null,
-                          width: 120 * scale,
-                          height: 180 * scale,
-                          fit: BoxFit.cover,
-                          placeholder: Container(
-                            color: _detailPlaceholderSurface(context),
-                            child: Center(
-                              child: Text(
-                                widget.season.name.isNotEmpty
-                                    ? widget.season.name.substring(0, 1)
-                                    : '?',
-                                style: TextStyle(
-                                  fontSize: 32 * scale,
-                                  fontWeight: FontWeight.bold,
-                                  color: _detailHintText(context),
-                                ),
-                              ),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          width: cardWidth * scale,
+          height: widget.itemHeight,
+          transform: isActive
+              ? (Matrix4.identity()..scaleByDouble(1.04, 1.04, 1.0, 1.0))
+              : Matrix4.identity(),
+          transformAlignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8 * scale),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // 海报
+              ClipRRect(
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(8 * scale),
+                  topRight: Radius.circular(8 * scale),
+                ),
+                child: Consumer(
+                  builder: (context, ref, child) {
+                    final api = ref.read(apiClientProvider);
+                    final imageUrls = resolveSeasonImageUrls(
+                      api,
+                      widget.season,
+                      maxWidth: 400,
+                    );
+                    return MediaImage(
+                      imageUrl:
+                          imageUrls.isNotEmpty ? imageUrls.first : null,
+                      width: cardWidth * scale,
+                      height: posterHeight * scale,
+                      fit: BoxFit.cover,
+                      placeholder: Container(
+                        width: cardWidth * scale,
+                        height: posterHeight * scale,
+                        color: _detailPlaceholderSurface(context),
+                        child: Center(
+                          child: Text(
+                            widget.season.name.isNotEmpty
+                                ? widget.season.name.substring(0, 1)
+                                : '?',
+                            style: TextStyle(
+                              fontSize: 32 * scale,
+                              fontWeight: FontWeight.bold,
+                              color: _detailHintText(context),
                             ),
                           ),
-                        );
-                      },
-                    ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              // 文字区域
+              Expanded(
+                child: Padding(
+                  padding: EdgeInsets.all(8 * scale),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        widget.isSpecial ? '特别篇' : widget.season.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 13 * scale,
+                          fontWeight: widget.isSelected ? FontWeight.w700 : FontWeight.w500,
+                          color: widget.isSelected
+                              ? widget.primaryColor
+                              : _detailPrimaryText(context),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                SizedBox(height: 8 * scale),
-                // 季名称
-                Text(
-                  widget.isSpecial ? '特别篇' : widget.season.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13 * scale,
-                    fontWeight:
-                        widget.isSelected ? FontWeight.w600 : FontWeight.w400,
-                    color: _detailPrimaryText(context),
-                  ),
-                ),
-                // 选中指示器
-                if (widget.isSelected)
-                  Container(
-                    margin: EdgeInsets.only(top: 4 * scale),
-                    width: 16 * scale,
-                    height: 3 * scale,
-                    decoration: BoxDecoration(
-                      color: widget.primaryColor,
-                      borderRadius: BorderRadius.circular(2 * scale),
-                    ),
-                  ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -1226,30 +1218,21 @@ class _RelatedSectionState extends ConsumerState<_RelatedSection> {
         if (items.isEmpty) return const SizedBox.shrink();
 
         final scale = widget.scaleFactor;
-        final crossAxisCount = (items.length >= 6) ? 6 : items.length;
-        final cardWidth = (1400 - (crossAxisCount - 1) * 16) / crossAxisCount;
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _SectionTitle(
-              title: '相关推荐',
-              scaleFactor: scale,
-              primaryColor: widget.primaryColor,
-            ),
-            SizedBox(height: 16 * scale),
-            Wrap(
-              spacing: 16 * scale,
-              runSpacing: 16 * scale,
-              children: items.take(crossAxisCount).map((item) {
-                return DesktopMediaCard(
-                  item: item,
-                  width: cardWidth * scale,
-                  showProgress: false,
-                );
-              }).toList(),
-            ),
-          ],
+        return _HorizontalScrollList(
+          title: '相关推荐',
+          primaryColor: widget.primaryColor,
+          scaleFactor: scale,
+          itemWidth: 160 * scale,
+          itemHeight: 260 * scale,
+          children: items.map((item) {
+            return DesktopMediaCard(
+              item: item,
+              width: 160 * scale,
+              height: 200 * scale,
+              showProgress: false,
+            );
+          }).toList(),
         );
       },
       loading: () => _buildSkeleton(),
@@ -1259,6 +1242,11 @@ class _RelatedSectionState extends ConsumerState<_RelatedSection> {
 
   Widget _buildSkeleton() {
     final scale = widget.scaleFactor;
+    const cardWidth = 160.0;
+    const cardHeight = 260.0;
+    const spacing = 12.0;
+    const count = 8;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1268,13 +1256,17 @@ class _RelatedSectionState extends ConsumerState<_RelatedSection> {
           primaryColor: widget.primaryColor,
         ),
         SizedBox(height: 16 * scale),
-        Wrap(
-          spacing: 16 * scale,
-          children: List.generate(
-            6,
-            (_) => Container(
-              width: 160 * scale,
-              height: 240 * scale,
+        SizedBox(
+          height: cardHeight * scale,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            primary: false,
+            physics: const ClampingScrollPhysics(),
+            itemCount: count,
+            separatorBuilder: (_, __) => SizedBox(width: spacing * scale),
+            itemBuilder: (_, __) => Container(
+              width: cardWidth * scale,
+              height: cardHeight * scale,
               decoration: BoxDecoration(
                 color: _detailPlaceholderSurface(context),
                 borderRadius: BorderRadius.circular(8 * scale),

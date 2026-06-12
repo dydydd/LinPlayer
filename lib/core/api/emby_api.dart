@@ -970,7 +970,9 @@ MediaItem _parseMediaItem(Map<String, dynamic> d) {
 
 String? _extractImageTag(Map<String, dynamic> d, String type) {
   final tags = d['ImageTags'] as Map<String, dynamic>?;
-  return tags?[type]?.toString();
+  final value = tags?[type]?.toString();
+  if (value == null || value.isEmpty) return null;
+  return value;
 }
 
 int? _parseTicks(dynamic v) {
@@ -1012,34 +1014,34 @@ Season _parseSeason(Map<String, dynamic> d, String seriesId) {
   );
 }
 
-Episode _parseEpisode(Map<String, dynamic> d) {
-  final ud = d['UserData'] as Map<String, dynamic>?;
-  return Episode(
-    id: d['Id']?.toString() ?? '',
-    name: d['Name'] ?? '',
-    indexNumber: d['IndexNumber'] as int?,
-    primaryImageTag: _extractImageTag(d, 'Primary'),
-    thumbImageTag: _extractImageTag(d, 'Thumb'),
-    seriesId: d['SeriesId']?.toString() ?? '',
-    seasonId: d['SeasonId']?.toString() ?? '',
-    parentThumbItemId: d['ParentThumbItemId']?.toString(),
-    parentThumbImageTag: d['ParentThumbImageTag']?.toString(),
-    parentPrimaryImageItemId: d['ParentPrimaryImageItemId']?.toString(),
-    parentPrimaryImageTag: d['ParentPrimaryImageTag']?.toString(),
-    seriesThumbImageTag: d['SeriesThumbImageTag']?.toString(),
-    seriesPrimaryImageTag: d['SeriesPrimaryImageTag']?.toString(),
-    runTimeTicks: _parseTicks(d['RunTimeTicks']),
-    userData: ud != null
-        ? UserData(
-            playbackPositionTicks:
-                _parseTicksDouble(ud['PlaybackPositionTicks']),
-            played: ud['Played'] as bool?,
-            isFavorite: ud['IsFavorite'] as bool?,
-          )
-        : null,
-    overview: d['Overview']?.toString(),
-  );
-}
+  Episode _parseEpisode(Map<String, dynamic> d) {
+    final ud = d['UserData'] as Map<String, dynamic>?;
+    return Episode(
+      id: d['Id']?.toString() ?? '',
+      name: d['Name'] ?? '',
+      indexNumber: d['IndexNumber'] as int?,
+      primaryImageTag: _extractImageTag(d, 'Primary') ?? d['PrimaryImageTag']?.toString(),
+      thumbImageTag: _extractImageTag(d, 'Thumb') ?? d['ThumbImageTag']?.toString(),
+      seriesId: d['SeriesId']?.toString() ?? '',
+      seasonId: d['SeasonId']?.toString() ?? '',
+      parentThumbItemId: d['ParentThumbItemId']?.toString(),
+      parentThumbImageTag: d['ParentThumbImageTag']?.toString(),
+      parentPrimaryImageItemId: d['ParentPrimaryImageItemId']?.toString(),
+      parentPrimaryImageTag: d['ParentPrimaryImageTag']?.toString(),
+      seriesThumbImageTag: d['SeriesThumbImageTag']?.toString(),
+      seriesPrimaryImageTag: d['SeriesPrimaryImageTag']?.toString(),
+      runTimeTicks: _parseTicks(d['RunTimeTicks']),
+      userData: ud != null
+          ? UserData(
+              playbackPositionTicks:
+                  _parseTicksDouble(ud['PlaybackPositionTicks']),
+              played: ud['Played'] as bool?,
+              isFavorite: ud['IsFavorite'] as bool?,
+            )
+          : null,
+      overview: d['Overview']?.toString(),
+    );
+  }
 
 Person _parsePersonFromItem(Map<String, dynamic> d) {
   return Person(
