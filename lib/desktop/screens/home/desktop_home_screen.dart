@@ -20,21 +20,49 @@ class DesktopHomeScreen extends ConsumerStatefulWidget {
   ConsumerState<DesktopHomeScreen> createState() => _DesktopHomeScreenState();
 }
 
-class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen> {
+class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen>
+    with WidgetsBindingObserver {
   final ScrollController _scrollController = DesktopSmoothScrollController();
+
+  void _refreshHomeSummary() {
+    ref.invalidate(resumeItemsProvider);
+    ref.invalidate(librariesProvider);
+    ref.invalidate(randomRecommendationsProvider);
+    ref.invalidate(embyMediaCountsProvider);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _refreshHomeSummary();
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      _refreshHomeSummary();
+    }
+  }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _scrollController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final hideDailyRecommendations = ref.watch(hideDailyRecommendationsProvider);
+    final hideDailyRecommendations =
+        ref.watch(hideDailyRecommendationsProvider);
     final servers = ref.watch(serverListProvider);
     final currentServer = ref.watch(currentServerProvider);
-    final isUnauthenticated = currentServer != null && !serverHasUsableAuth(currentServer);
+    final isUnauthenticated =
+        currentServer != null && !serverHasUsableAuth(currentServer);
 
     return Scaffold(
       body: CustomScrollView(
@@ -102,7 +130,8 @@ class DesktopResumeScreen extends ConsumerWidget {
                   color: theme.colorScheme.surface,
                   borderRadius: BorderRadius.circular(18),
                   border: Border.all(
-                    color: theme.colorScheme.outlineVariant.withValues(alpha: 0.28),
+                    color: theme.colorScheme.outlineVariant
+                        .withValues(alpha: 0.28),
                   ),
                 ),
                 child: Padding(
@@ -211,9 +240,10 @@ class _DesktopTopBarState extends ConsumerState<_DesktopTopBar> {
   @override
   Widget build(BuildContext context) {
     final currentServer = ref.watch(currentServerProvider);
-    final mediaCountsAsync = currentServer != null && serverHasUsableAuth(currentServer)
-        ? ref.watch(embyMediaCountsProvider)
-        : null;
+    final mediaCountsAsync =
+        currentServer != null && serverHasUsableAuth(currentServer)
+            ? ref.watch(embyMediaCountsProvider)
+            : null;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
@@ -246,7 +276,8 @@ class _DesktopTopBarState extends ConsumerState<_DesktopTopBar> {
     );
   }
 
-  Widget _buildServerSelector(BuildContext context, WidgetRef ref, ServerConfig? server) {
+  Widget _buildServerSelector(
+      BuildContext context, WidgetRef ref, ServerConfig? server) {
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
@@ -289,7 +320,8 @@ class _DesktopTopBarState extends ConsumerState<_DesktopTopBar> {
                 ),
               ),
               const SizedBox(width: 4),
-              const Icon(Icons.keyboard_arrow_down, size: 18, color: Colors.grey),
+              const Icon(Icons.keyboard_arrow_down,
+                  size: 18, color: Colors.grey),
             ],
           ),
         ),
@@ -314,7 +346,8 @@ class _DesktopTopBarState extends ConsumerState<_DesktopTopBar> {
       letterSpacing: -0.2,
       color: theme.colorScheme.onSurface,
     );
-    final dividerColor = theme.colorScheme.outlineVariant.withValues(alpha: 0.35);
+    final dividerColor =
+        theme.colorScheme.outlineVariant.withValues(alpha: 0.35);
 
     Widget buildMetric(String label, String value) {
       return ConstrainedBox(
@@ -337,7 +370,8 @@ class _DesktopTopBarState extends ConsumerState<_DesktopTopBar> {
       );
     }
 
-    Widget buildContent(String movieValue, String seriesValue, String totalValue) {
+    Widget buildContent(
+        String movieValue, String seriesValue, String totalValue) {
       return Row(
         key: ValueKey('$movieValue-$seriesValue-$totalValue'),
         mainAxisSize: MainAxisSize.min,
@@ -401,13 +435,16 @@ class _DesktopTopBarState extends ConsumerState<_DesktopTopBar> {
 
     _hideServerMenu();
 
-    final renderBox = _serverButtonKey.currentContext?.findRenderObject() as RenderBox?;
+    final renderBox =
+        _serverButtonKey.currentContext?.findRenderObject() as RenderBox?;
     if (renderBox == null) {
       return;
     }
 
-    final overlayBox = Overlay.of(context).context.findRenderObject() as RenderBox;
-    final buttonPosition = renderBox.localToGlobal(Offset.zero, ancestor: overlayBox);
+    final overlayBox =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final buttonPosition =
+        renderBox.localToGlobal(Offset.zero, ancestor: overlayBox);
     final buttonSize = renderBox.size;
     final screenSize = MediaQuery.of(context).size;
 
@@ -422,13 +459,16 @@ class _DesktopTopBarState extends ConsumerState<_DesktopTopBar> {
         onSelect: (server) {
           ref.read(currentServerProvider.notifier).state = server;
           if (serverHasUsableAuth(server)) {
-            ref.read(authStateProvider.notifier).state = AuthState.authenticated;
+            ref.read(authStateProvider.notifier).state =
+                AuthState.authenticated;
           } else {
-            ref.read(authStateProvider.notifier).state = AuthState.unauthenticated;
+            ref.read(authStateProvider.notifier).state =
+                AuthState.unauthenticated;
           }
           ref.invalidate(librariesProvider);
           ref.invalidate(resumeItemsProvider);
           ref.invalidate(randomRecommendationsProvider);
+          ref.invalidate(embyMediaCountsProvider);
         },
       ),
     );
@@ -487,7 +527,8 @@ class _DesktopServerMenuOverlay extends StatefulWidget {
   });
 
   @override
-  State<_DesktopServerMenuOverlay> createState() => _DesktopServerMenuOverlayState();
+  State<_DesktopServerMenuOverlay> createState() =>
+      _DesktopServerMenuOverlayState();
 }
 
 class _DesktopServerMenuOverlayState extends State<_DesktopServerMenuOverlay>
@@ -539,7 +580,8 @@ class _DesktopServerMenuOverlayState extends State<_DesktopServerMenuOverlay>
       widget.screenSize.width - menuWidth - screenPadding,
     );
     final top = widget.buttonPosition.dy + widget.buttonSize.height + 8;
-    final maxHeight = (widget.screenSize.height - top - screenPadding).clamp(120.0, 360.0);
+    final maxHeight =
+        (widget.screenSize.height - top - screenPadding).clamp(120.0, 360.0);
     final theme = Theme.of(context);
     const surfaceTint = Colors.transparent;
 
@@ -566,14 +608,16 @@ class _DesktopServerMenuOverlayState extends State<_DesktopServerMenuOverlay>
                         borderRadius: BorderRadius.circular(18),
                       ),
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 8),
                         child: ConstrainedBox(
                           constraints: BoxConstraints(maxHeight: maxHeight),
                           child: SingleChildScrollView(
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: widget.servers.map((server) {
-                                final isCurrent = server.id == widget.currentServerId;
+                                final isCurrent =
+                                    server.id == widget.currentServerId;
                                 return MouseRegion(
                                   cursor: SystemMouseCursors.click,
                                   child: GestureDetector(
@@ -583,13 +627,17 @@ class _DesktopServerMenuOverlayState extends State<_DesktopServerMenuOverlay>
                                       widget.onSelect(server);
                                     },
                                     child: AnimatedContainer(
-                                      duration: const Duration(milliseconds: 140),
+                                      duration:
+                                          const Duration(milliseconds: 140),
                                       curve: Curves.easeOut,
-                                      margin: const EdgeInsets.symmetric(vertical: 2),
-                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                      margin: const EdgeInsets.symmetric(
+                                          vertical: 2),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 12, vertical: 10),
                                       decoration: BoxDecoration(
                                         color: isCurrent
-                                            ? const Color(0xFF5B8DEF).withValues(alpha: 0.14)
+                                            ? const Color(0xFF5B8DEF)
+                                                .withValues(alpha: 0.14)
                                             : Colors.transparent,
                                         borderRadius: BorderRadius.circular(12),
                                       ),
@@ -599,12 +647,16 @@ class _DesktopServerMenuOverlayState extends State<_DesktopServerMenuOverlay>
                                             width: 32,
                                             height: 32,
                                             decoration: BoxDecoration(
-                                              color: const Color(0xFF5B8DEF).withValues(alpha: 0.16),
-                                              borderRadius: BorderRadius.circular(8),
+                                              color: const Color(0xFF5B8DEF)
+                                                  .withValues(alpha: 0.16),
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
                                             ),
                                             child: server.iconUrl != null
                                                 ? ClipRRect(
-                                                    borderRadius: BorderRadius.circular(8),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            8),
                                                     child: MediaImage(
                                                       imageUrl: server.iconUrl,
                                                       width: 32,
@@ -616,8 +668,10 @@ class _DesktopServerMenuOverlayState extends State<_DesktopServerMenuOverlay>
                                                     Icons.dns_rounded,
                                                     size: 16,
                                                     color: isCurrent
-                                                        ? const Color(0xFFB7D0FF)
-                                                        : const Color(0xFF5B8DEF),
+                                                        ? const Color(
+                                                            0xFFB7D0FF)
+                                                        : const Color(
+                                                            0xFF5B8DEF),
                                                   ),
                                           ),
                                           const SizedBox(width: 12),
@@ -626,9 +680,14 @@ class _DesktopServerMenuOverlayState extends State<_DesktopServerMenuOverlay>
                                               server.name,
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
-                                              style: theme.textTheme.bodyMedium?.copyWith(
-                                                fontWeight: isCurrent ? FontWeight.w700 : FontWeight.w600,
-                                                color: theme.colorScheme.onSurface.withValues(alpha: 0.92),
+                                              style: theme.textTheme.bodyMedium
+                                                  ?.copyWith(
+                                                fontWeight: isCurrent
+                                                    ? FontWeight.w700
+                                                    : FontWeight.w600,
+                                                color: theme
+                                                    .colorScheme.onSurface
+                                                    .withValues(alpha: 0.92),
                                               ),
                                             ),
                                           ),
@@ -668,8 +727,9 @@ class _HeroSection extends ConsumerWidget {
           const spacing = 24.0;
           const carouselFlex = 3;
           const continueFlex = 2;
-          final carouselWidth =
-              (constraints.maxWidth - spacing) * carouselFlex / (carouselFlex + continueFlex);
+          final carouselWidth = (constraints.maxWidth - spacing) *
+              carouselFlex /
+              (carouselFlex + continueFlex);
           final sharedHeight = carouselWidth / (16 / 9);
 
           return SizedBox(
@@ -679,7 +739,8 @@ class _HeroSection extends ConsumerWidget {
               children: [
                 Expanded(
                   flex: carouselFlex,
-                  child: _DesktopCarousel(recommendationsAsync: recommendationsAsync),
+                  child: _DesktopCarousel(
+                      recommendationsAsync: recommendationsAsync),
                 ),
                 const SizedBox(width: spacing),
                 Expanded(
@@ -727,7 +788,9 @@ class _DesktopCarouselState extends ConsumerState<_DesktopCarousel> {
         final currentItem = _currentItemFor(displayItems);
         final candidateUrls = _imageCandidatesFor(currentItem);
         final preferredUrl = _readyImageByItemId[currentItem.id];
-        final fallbackUrls = candidateUrls.where((url) => url != preferredUrl).toList(growable: false);
+        final fallbackUrls = candidateUrls
+            .where((url) => url != preferredUrl)
+            .toList(growable: false);
         final canPaginate = displayItems.length > 1;
 
         return ClipRRect(
@@ -735,7 +798,8 @@ class _DesktopCarouselState extends ConsumerState<_DesktopCarousel> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              ColoredBox(color: Theme.of(context).colorScheme.surfaceContainerHighest),
+              ColoredBox(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest),
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 420),
                 switchInCurve: Curves.easeOutCubic,
@@ -758,7 +822,9 @@ class _DesktopCarouselState extends ConsumerState<_DesktopCarousel> {
                   );
                   final offsetTween = Tween<Offset>(
                     begin: Offset(
-                      isCurrent ? _transitionDirection * 0.14 : -_transitionDirection * 0.14,
+                      isCurrent
+                          ? _transitionDirection * 0.14
+                          : -_transitionDirection * 0.14,
                       0,
                     ),
                     end: Offset.zero,
@@ -776,7 +842,8 @@ class _DesktopCarouselState extends ConsumerState<_DesktopCarousel> {
                 child: KeyedSubtree(
                   key: ValueKey<String>(currentItem.id),
                   child: _CarouselImage(
-                    imageUrl: preferredUrl ?? (candidateUrls.isNotEmpty ? candidateUrls.first : null),
+                    imageUrl: preferredUrl ??
+                        (candidateUrls.isNotEmpty ? candidateUrls.first : null),
                     imageUrls: fallbackUrls.isNotEmpty ? fallbackUrls : null,
                   ),
                 ),
@@ -898,7 +965,8 @@ class _DesktopCarouselState extends ConsumerState<_DesktopCarousel> {
     });
   }
 
-  Future<void> _preloadItem(BuildContext context, MediaItem item, int generation) async {
+  Future<void> _preloadItem(
+      BuildContext context, MediaItem item, int generation) async {
     if (!_startedItemIds.add(item.id)) {
       return;
     }
@@ -948,7 +1016,8 @@ class _DesktopCarouselState extends ConsumerState<_DesktopCarousel> {
       return;
     }
 
-    final currentIndex = readyItems.indexWhere((item) => item.id == _currentItemId);
+    final currentIndex =
+        readyItems.indexWhere((item) => item.id == _currentItemId);
     final nextIndex = currentIndex == -1
         ? 0
         : (currentIndex + direction + readyItems.length) % readyItems.length;
@@ -970,7 +1039,8 @@ class _DesktopCarouselState extends ConsumerState<_DesktopCarousel> {
     return true;
   }
 
-  Widget _buildArrowButton({required IconData icon, required VoidCallback onTap}) {
+  Widget _buildArrowButton(
+      {required IconData icon, required VoidCallback onTap}) {
     return Center(
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
@@ -1174,7 +1244,9 @@ class _DesktopContinueWatching extends ConsumerWidget {
               ],
             ),
           ),
-          Divider(height: 1, color: theme.colorScheme.outlineVariant.withValues(alpha: 0.18)),
+          Divider(
+              height: 1,
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.18)),
           if (compactLayout)
             SizedBox(
               height: 214,
@@ -1226,7 +1298,8 @@ class _DesktopContinueWatching extends ConsumerWidget {
 
                   final visibleCount = (panelHeight ?? 0) >= 520 ? 4 : 3;
                   return _DesktopContinueRail(
-                    items: visibleItems.take(visibleCount).toList(growable: false),
+                    items:
+                        visibleItems.take(visibleCount).toList(growable: false),
                   );
                 },
                 loading: () => const Center(child: CircularProgressIndicator()),
@@ -1262,7 +1335,8 @@ class _DesktopContinueWatching extends ConsumerWidget {
       showDialog(
         context: context,
         builder: (context) => Dialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 48, vertical: 32),
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 48, vertical: 32),
           clipBehavior: Clip.antiAlias,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 1180, maxHeight: 760),
@@ -1275,9 +1349,10 @@ class _DesktopContinueWatching extends ConsumerWidget {
                     children: [
                       Text(
                         '继续观看',
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
+                        style:
+                            Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
                       ),
                       const Spacer(),
                       IconButton(
@@ -1384,7 +1459,8 @@ class _DesktopContinueItem extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final api = ref.read(apiClientProvider);
-    final imageUrls = resolveMediaItemLandscapeImageUrls(api, item, maxWidth: 720);
+    final imageUrls =
+        resolveMediaItemLandscapeImageUrls(api, item, maxWidth: 720);
     final title = _continueTitle(item);
     final subtitle = _continueSubtitle(item);
 
@@ -1394,13 +1470,17 @@ class _DesktopContinueItem extends ConsumerWidget {
         onTap: () => context.push(mediaRouteForItem(item)),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final posterHeight = (constraints.maxHeight - 20).clamp(78.0, 122.0).toDouble();
+            final posterHeight =
+                (constraints.maxHeight - 20).clamp(78.0, 122.0).toDouble();
             final posterWidth = posterHeight * 16 / 9;
 
             return Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.28),
+                color: Theme.of(context)
+                    .colorScheme
+                    .surfaceContainerHighest
+                    .withValues(alpha: 0.28),
                 borderRadius: desktopLandscapeCoverRadius,
               ),
               child: Row(
@@ -1408,10 +1488,12 @@ class _DesktopContinueItem extends ConsumerWidget {
                   ClipRRect(
                     borderRadius: desktopLandscapeCoverRadius,
                     child: ColoredBox(
-                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      color:
+                          Theme.of(context).colorScheme.surfaceContainerHighest,
                       child: MediaImage(
                         imageUrl: imageUrls.isNotEmpty ? imageUrls.first : null,
-                        imageUrls: imageUrls.length > 1 ? imageUrls.sublist(1) : null,
+                        imageUrls:
+                            imageUrls.length > 1 ? imageUrls.sublist(1) : null,
                         width: posterWidth,
                         height: posterHeight,
                         fit: BoxFit.cover,
@@ -1441,7 +1523,8 @@ class _DesktopContinueItem extends ConsumerWidget {
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontSize: 12,
-                              color: Theme.of(context).textTheme.bodySmall?.color,
+                              color:
+                                  Theme.of(context).textTheme.bodySmall?.color,
                             ),
                           ),
                         ],
@@ -1451,8 +1534,10 @@ class _DesktopContinueItem extends ConsumerWidget {
                             borderRadius: BorderRadius.circular(999),
                             child: LinearProgressIndicator(
                               value: item.progress,
-                              backgroundColor: Colors.grey.withValues(alpha: 0.2),
-                              valueColor: const AlwaysStoppedAnimation(Color(0xFF5B8DEF)),
+                              backgroundColor:
+                                  Colors.grey.withValues(alpha: 0.2),
+                              valueColor: const AlwaysStoppedAnimation(
+                                  Color(0xFF5B8DEF)),
                               minHeight: 4,
                             ),
                           ),
@@ -1546,7 +1631,8 @@ class _LibrariesSection extends ConsumerWidget {
                 itemBuilder: (context, index) {
                   final library = libraries[index];
                   return Padding(
-                    padding: EdgeInsets.only(right: index == libraries.length - 1 ? 0 : 14),
+                    padding: EdgeInsets.only(
+                        right: index == libraries.length - 1 ? 0 : 14),
                     child: _DesktopLibraryCard(library: library),
                   );
                 },
@@ -1626,7 +1712,8 @@ class _DesktopLibraryCard extends ConsumerWidget {
                 clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
                   borderRadius: desktopLandscapeCoverRadius,
-                  color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.28),
+                  color: theme.colorScheme.surfaceContainerHighest
+                      .withValues(alpha: 0.28),
                 ),
                 child: MediaImage(
                   imageUrl: imageUrls.isNotEmpty ? imageUrls.first : null,
@@ -1739,7 +1826,8 @@ class _LibraryLatestItems extends ConsumerWidget {
       },
       loading: () => const SizedBox.shrink(),
       error: (error, _) {
-        debugPrint('[_LibraryLatestItems] Error loading ${library.name}: $error');
+        debugPrint(
+            '[_LibraryLatestItems] Error loading ${library.name}: $error');
         return const SizedBox.shrink();
       },
     );
@@ -1848,7 +1936,8 @@ class _EmptyServerGuide extends StatelessWidget {
             child: GestureDetector(
               onTap: () => context.go('/servers'),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 decoration: BoxDecoration(
                   color: const Color(0xFF5B8DEF),
                   borderRadius: BorderRadius.circular(8),

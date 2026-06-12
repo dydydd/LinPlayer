@@ -28,7 +28,8 @@ class EmbyApiClient implements ApiClientFactory {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
         'User-Agent': 'Linplayer/1.0.0',
-        'X-Emby-Authorization': 'MediaBrowser Client="Linplayer", Device="Mobile", DeviceId="linplayer-mobile", Version="1.0.0"',
+        'X-Emby-Authorization':
+            'MediaBrowser Client="Linplayer", Device="Mobile", DeviceId="linplayer-mobile", Version="1.0.0"',
         'X-Emby-Device-Name': 'Mobile',
         'X-Emby-Device-Id': 'linplayer-mobile',
         'X-Emby-Client': 'Linplayer',
@@ -36,19 +37,21 @@ class EmbyApiClient implements ApiClientFactory {
         if (authToken != null) 'X-Emby-Token': authToken,
       },
     ));
-    
+
     // 处理自签名证书和证书验证问题
     (dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () {
       final client = HttpClient();
-      client.badCertificateCallback = (X509Certificate cert, String host, int port) {
+      client.badCertificateCallback =
+          (X509Certificate cert, String host, int port) {
         // 在生产环境中应该验证证书，但这里允许自签名证书以提高兼容性
         // TODO: 考虑添加证书指纹验证
         return true;
       };
       return client;
     };
-    
-    dio.interceptors.add(LogInterceptor(requestBody: true, responseBody: false));
+
+    dio.interceptors
+        .add(LogInterceptor(requestBody: true, responseBody: false));
     return dio;
   }
 
@@ -114,7 +117,8 @@ class EmbyApiClient implements ApiClientFactory {
   }
 
   /// 包装 Dio.get，自动去掉路径开头的 /，确保 baseUrl 子路径不被丢弃
-  Future<Response<T>> get<T>(String path, {Map<String, dynamic>? queryParameters, Options? options}) {
+  Future<Response<T>> get<T>(String path,
+      {Map<String, dynamic>? queryParameters, Options? options}) {
     return _dio.get<T>(
       path.startsWith('/') ? path.substring(1) : path,
       queryParameters: queryParameters,
@@ -123,7 +127,8 @@ class EmbyApiClient implements ApiClientFactory {
   }
 
   /// 包装 Dio.post，自动去掉路径开头的 /，确保 baseUrl 子路径不被丢弃
-  Future<Response<T>> post<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters, Options? options}) {
+  Future<Response<T>> post<T>(String path,
+      {dynamic data, Map<String, dynamic>? queryParameters, Options? options}) {
     return _dio.post<T>(
       path.startsWith('/') ? path.substring(1) : path,
       data: data,
@@ -133,7 +138,8 @@ class EmbyApiClient implements ApiClientFactory {
   }
 
   /// 包装 Dio.delete，自动去掉路径开头的 /，确保 baseUrl 子路径不被丢弃
-  Future<Response<T>> delete<T>(String path, {dynamic data, Map<String, dynamic>? queryParameters, Options? options}) {
+  Future<Response<T>> delete<T>(String path,
+      {dynamic data, Map<String, dynamic>? queryParameters, Options? options}) {
     return _dio.delete<T>(
       path.startsWith('/') ? path.substring(1) : path,
       data: data,
@@ -150,9 +156,11 @@ class EmbyAuthApi implements AuthApi {
   EmbyAuthApi(this._client);
 
   @override
-  Future<AuthResult> login({required String username, required String password}) async {
-    debugPrint('[EmbyAPI] login: username=$username, baseUrl=${_client.currentLine}');
-    
+  Future<AuthResult> login(
+      {required String username, required String password}) async {
+    debugPrint(
+        '[EmbyAPI] login: username=$username, baseUrl=${_client.currentLine}');
+
     try {
       final resp = await _client.post('/Users/AuthenticateByName', data: {
         'Username': username,
@@ -185,7 +193,8 @@ class EmbyAuthApi implements AuthApi {
       debugPrint('[EmbyAPI] request URL: ${e.requestOptions.uri}');
       debugPrint('[EmbyAPI] request headers: ${e.requestOptions.headers}');
       debugPrint('[EmbyAPI] request data: ${e.requestOptions.data}');
-      debugPrint('[EmbyAPI] response: ${e.response?.statusCode} | ${e.response?.data}');
+      debugPrint(
+          '[EmbyAPI] response: ${e.response?.statusCode} | ${e.response?.data}');
       rethrow;
     }
   }
@@ -201,8 +210,7 @@ class EmbyAuthApi implements AuthApi {
 
   @override
   Future<User> getCurrentUser() async {
-    final uid = _client._userId;
-    if (uid == null) throw Exception('Not authenticated');
+    final uid = _currentUserAliasForScopedRequest(_client);
     final resp = await _client.get('/Users/$uid');
     return _parseUser(resp.data as Map<String, dynamic>);
   }
@@ -257,16 +265,17 @@ class EmbyServerApi implements ServerApi {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
         'User-Agent': 'Linplayer/1.0.0',
-        'X-Emby-Authorization': 'MediaBrowser Client="Linplayer", Device="Mobile", DeviceId="linplayer-mobile", Version="1.0.0"',
+        'X-Emby-Authorization':
+            'MediaBrowser Client="Linplayer", Device="Mobile", DeviceId="linplayer-mobile", Version="1.0.0"',
         'X-Emby-Device-Name': 'Mobile',
         'X-Emby-Device-Id': 'linplayer-mobile',
         'X-Emby-Client': 'Linplayer',
         'X-Emby-Client-Version': '1.0.0',
       },
     ));
-    
+
     debugPrint('[EmbyAPI] getPublicInfo: baseUrl=$normalizedBaseUrl');
-    
+
     try {
       final resp = await dio.get('System/Info/Public');
       debugPrint('[EmbyAPI] getPublicInfo success: ${resp.statusCode}');
@@ -274,7 +283,8 @@ class EmbyServerApi implements ServerApi {
     } on DioException catch (e) {
       debugPrint('[EmbyAPI] getPublicInfo failed: ${e.type} | ${e.message}');
       debugPrint('[EmbyAPI] request URL: ${e.requestOptions.uri}');
-      debugPrint('[EmbyAPI] response: ${e.response?.statusCode} | ${e.response?.data}');
+      debugPrint(
+          '[EmbyAPI] response: ${e.response?.statusCode} | ${e.response?.data}');
       rethrow;
     }
   }
@@ -297,7 +307,8 @@ class EmbyServerApi implements ServerApi {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'User-Agent': 'Linplayer/1.0.0',
-          'X-Emby-Authorization': 'MediaBrowser Client="Linplayer", Device="Mobile", DeviceId="linplayer-mobile", Version="1.0.0"',
+          'X-Emby-Authorization':
+              'MediaBrowser Client="Linplayer", Device="Mobile", DeviceId="linplayer-mobile", Version="1.0.0"',
           'X-Emby-Device-Name': 'Mobile',
           'X-Emby-Device-Id': 'linplayer-mobile',
           'X-Emby-Client': 'Linplayer',
@@ -329,7 +340,8 @@ class EmbyHomeApi implements HomeApi {
   @override
   Future<List<MediaItem>> getResumeItems() async {
     final uid = _requireUserId(_client);
-    final resp = await _client.get('/Users/$uid/Items/Resume', queryParameters: {
+    final resp =
+        await _client.get('/Users/$uid/Items/Resume', queryParameters: {
       'Limit': 12,
       'MediaTypes': 'Video',
       'Fields': _mediaFields,
@@ -358,11 +370,14 @@ class EmbyHomeApi implements HomeApi {
 
   @override
   Future<MediaCounts> getMediaCounts() async {
-    final uid = _requireUserId(_client);
+    final uid = _currentUserAliasForScopedRequest(_client);
+    debugPrint(
+        '[EmbyAPI] getMediaCounts: baseUrl=${_client.currentLine}, userId=$uid');
     final resp = await _client.get('/Items/Counts', queryParameters: {
       'UserId': uid,
     });
     final data = resp.data as Map<String, dynamic>;
+    debugPrint('[EmbyAPI] getMediaCounts success: $data');
     return MediaCounts(
       movieCount: (data['MovieCount'] as num?)?.toInt() ?? 0,
       episodeCount: (data['EpisodeCount'] as num?)?.toInt() ?? 0,
@@ -371,15 +386,19 @@ class EmbyHomeApi implements HomeApi {
   }
 
   @override
-  Future<List<MediaItem>> getLatestItems(String libraryId, {int limit = 20}) async {
+  Future<List<MediaItem>> getLatestItems(String libraryId,
+      {int limit = 20}) async {
     final uid = _requireUserId(_client);
-    final resp = await _client.get('/Users/$uid/Items/Latest', queryParameters: {
+    final resp =
+        await _client.get('/Users/$uid/Items/Latest', queryParameters: {
       'ParentId': libraryId,
       'Limit': limit,
       'Fields': _mediaFields,
     });
     final items = resp.data as List<dynamic>;
-    return items.map((e) => _parseMediaItem(e as Map<String, dynamic>)).toList();
+    return items
+        .map((e) => _parseMediaItem(e as Map<String, dynamic>))
+        .toList();
   }
 
   @override
@@ -431,7 +450,8 @@ class EmbyLibraryApi implements LibraryApi {
       params['SortBy'] = sortBy;
       params['SortOrder'] = sortOrder ?? 'Ascending';
     }
-    final resp = await _client.get('/Users/$uid/Items', queryParameters: params);
+    final resp =
+        await _client.get('/Users/$uid/Items', queryParameters: params);
     return _parseItemList(resp.data);
   }
 
@@ -444,9 +464,16 @@ class EmbyLibraryApi implements LibraryApi {
     });
     final d = resp.data as Map<String, dynamic>;
     return Filters(
-      genres: (d['Genres'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
-      years: (d['Years'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
-      officialRatings: (d['OfficialRatings'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
+      genres:
+          (d['Genres'] as List<dynamic>?)?.map((e) => e.toString()).toList() ??
+              [],
+      years:
+          (d['Years'] as List<dynamic>?)?.map((e) => e.toString()).toList() ??
+              [],
+      officialRatings: (d['OfficialRatings'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          [],
     );
   }
 }
@@ -481,7 +508,8 @@ class EmbyMediaApi implements MediaApi {
     } on DioException catch (e) {
       if (e.response?.statusCode == 404 && uid != null) {
         try {
-          final resp = await _client.get('/Users/$uid/Items/$itemId', queryParameters: params);
+          final resp = await _client.get('/Users/$uid/Items/$itemId',
+              queryParameters: params);
           return _parseMediaItem(resp.data as Map<String, dynamic>);
         } catch (_) {
           // fallback 失败，继续抛出原始错误
@@ -500,18 +528,23 @@ class EmbyMediaApi implements MediaApi {
       'Fields': _detailFields,
     });
     final items = (resp.data as Map<String, dynamic>)['Items'] as List<dynamic>;
-    return items.map((e) => _parseMediaItem(e as Map<String, dynamic>)).toList();
+    return items
+        .map((e) => _parseMediaItem(e as Map<String, dynamic>))
+        .toList();
   }
 
   @override
   Future<List<Season>> getSeasons(String seriesId) async {
     final uid = _requireUserId(_client);
-    final resp = await _client.get('/Shows/$seriesId/Seasons', queryParameters: {
+    final resp =
+        await _client.get('/Shows/$seriesId/Seasons', queryParameters: {
       'UserId': uid,
       'Fields': 'Overview,ImageTags,SeriesPrimaryImageTag,SeriesThumbImageTag',
     });
     final items = (resp.data as Map<String, dynamic>)['Items'] as List<dynamic>;
-    return items.map((e) => _parseSeason(e as Map<String, dynamic>, seriesId)).toList();
+    return items
+        .map((e) => _parseSeason(e as Map<String, dynamic>, seriesId))
+        .toList();
   }
 
   @override
@@ -519,10 +552,12 @@ class EmbyMediaApi implements MediaApi {
     final uid = _requireUserId(_client);
     final params = <String, dynamic>{
       'UserId': uid,
-      'Fields': 'Overview,RunTimeTicks,ImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,SeriesThumbImageTag,SeriesPrimaryImageTag,CanDownload,SupportsSync',
+      'Fields':
+          'Overview,RunTimeTicks,ImageTags,ParentThumbItemId,ParentThumbImageTag,ParentPrimaryImageItemId,ParentPrimaryImageTag,SeriesThumbImageTag,SeriesPrimaryImageTag,CanDownload,SupportsSync',
     };
     if (seasonId != null) params['SeasonId'] = seasonId;
-    final resp = await _client.get('/Shows/$seriesId/Episodes', queryParameters: params);
+    final resp =
+        await _client.get('/Shows/$seriesId/Episodes', queryParameters: params);
     final items = (resp.data as Map<String, dynamic>)['Items'] as List<dynamic>;
     return items.map((e) => _parseEpisode(e as Map<String, dynamic>)).toList();
   }
@@ -530,12 +565,15 @@ class EmbyMediaApi implements MediaApi {
   @override
   Future<List<Person>> getPersonItems(String personName) async {
     final uid = _requireUserId(_client);
-    final resp = await _client.get('/Persons/$personName/Items', queryParameters: {
+    final resp =
+        await _client.get('/Persons/$personName/Items', queryParameters: {
       'UserId': uid,
       'Limit': 20,
     });
     final items = (resp.data as Map<String, dynamic>)['Items'] as List<dynamic>;
-    return items.map((e) => _parsePersonFromItem(e as Map<String, dynamic>)).toList();
+    return items
+        .map((e) => _parsePersonFromItem(e as Map<String, dynamic>))
+        .toList();
   }
 }
 
@@ -553,8 +591,11 @@ class EmbySearchApi implements SearchApi {
       'SearchTerm': query,
       'Limit': 20,
     });
-    final hints = (resp.data as Map<String, dynamic>)['SearchHints'] as List<dynamic>;
-    return hints.map((e) => _parseMediaItem(e as Map<String, dynamic>)).toList();
+    final hints =
+        (resp.data as Map<String, dynamic>)['SearchHints'] as List<dynamic>;
+    return hints
+        .map((e) => _parseMediaItem(e as Map<String, dynamic>))
+        .toList();
   }
 
   @override
@@ -564,7 +605,8 @@ class EmbySearchApi implements SearchApi {
       'SearchTerm': query,
       'Recursive': recursive,
       'Limit': 50,
-      'Fields': 'Overview,Genres,CommunityRating,OfficialRating,PremiereDate,RunTimeTicks,ProductionYear,Tags,SeriesName,IndexNumber,ParentIndexNumber',
+      'Fields':
+          'Overview,Genres,CommunityRating,OfficialRating,PremiereDate,RunTimeTicks,ProductionYear,Tags,SeriesName,IndexNumber,ParentIndexNumber',
     });
     return _parseItemList(resp.data);
   }
@@ -576,7 +618,8 @@ class EmbySearchApi implements SearchApi {
       'SearchTerm': query,
       'Recursive': true,
       'Limit': 50,
-      'Fields': 'Overview,Genres,CommunityRating,OfficialRating,PremiereDate,RunTimeTicks,ProductionYear,Tags,SeriesName,IndexNumber,ParentIndexNumber',
+      'Fields':
+          'Overview,Genres,CommunityRating,OfficialRating,PremiereDate,RunTimeTicks,ProductionYear,Tags,SeriesName,IndexNumber,ParentIndexNumber',
     });
     final items = _parseItemList(resp.data);
     final serverName = _client._dio.options.baseUrl;
@@ -621,7 +664,8 @@ class EmbyPlaybackApi implements PlaybackApi {
         : _client._currentLine;
     final token = _client._authToken;
     final normalizedContainer = (container ?? 'mkv').trim().toLowerCase();
-    final safeContainer = normalizedContainer.isEmpty ? 'mkv' : normalizedContainer;
+    final safeContainer =
+        normalizedContainer.isEmpty ? 'mkv' : normalizedContainer;
     final params = <String>[
       'static=$staticStream',
       'download=false',
@@ -641,7 +685,8 @@ class EmbyPlaybackApi implements PlaybackApi {
   }
 
   @override
-  String getSubtitleStreamUrl(String itemId, String mediaSourceId, int index, String codec) {
+  String getSubtitleStreamUrl(
+      String itemId, String mediaSourceId, int index, String codec) {
     final base = _client._currentLine;
     final token = _client._authToken;
     return '$base/Videos/$itemId/$mediaSourceId/Subtitles/$index/Stream.$codec${token != null ? '?api_key=$token' : ''}';
@@ -769,17 +814,30 @@ class EmbyImageApi implements ImageApi {
   }
 
   @override
-  String getPrimaryImageUrl(String itemId, {String? tag, int? maxWidth, String? format}) {
-    return getImageUrl(itemId: itemId, imageTag: tag, imageType: 'Primary', maxWidth: maxWidth, format: format);
+  String getPrimaryImageUrl(String itemId,
+      {String? tag, int? maxWidth, String? format}) {
+    return getImageUrl(
+        itemId: itemId,
+        imageTag: tag,
+        imageType: 'Primary',
+        maxWidth: maxWidth,
+        format: format);
   }
 
   @override
-  String getThumbImageUrl(String itemId, {String? tag, int? maxWidth, String? format}) {
-    return getImageUrl(itemId: itemId, imageTag: tag, imageType: 'Thumb', maxWidth: maxWidth, format: format);
+  String getThumbImageUrl(String itemId,
+      {String? tag, int? maxWidth, String? format}) {
+    return getImageUrl(
+        itemId: itemId,
+        imageTag: tag,
+        imageType: 'Thumb',
+        maxWidth: maxWidth,
+        format: format);
   }
 
   @override
-  String getBackdropImageUrl(String itemId, {String? tag, int? maxWidth, String? format}) {
+  String getBackdropImageUrl(String itemId,
+      {String? tag, int? maxWidth, String? format}) {
     return getImageUrl(
       itemId: itemId,
       imageTag: tag,
@@ -793,7 +851,6 @@ class EmbyImageApi implements ImageApi {
 
 // ==================== Danmaku (deprecated - see danmaku/ module) ====================
 
-
 // ==================== Parse Helpers ====================
 
 String _requireUserId(EmbyApiClient c) {
@@ -806,6 +863,13 @@ String _requireUserId(EmbyApiClient c) {
     throw Exception('Not authenticated: userId missing');
   }
   return uid;
+}
+
+String _currentUserAliasForScopedRequest(EmbyApiClient c) {
+  if (c._authToken != null && c._authToken!.isNotEmpty) {
+    return 'Me';
+  }
+  return _requireUserId(c);
 }
 
 User _parseUser(Map<String, dynamic> d) {
@@ -858,7 +922,8 @@ MediaItem _parseMediaItem(Map<String, dynamic> d) {
     tags: (d['Tags'] as List<dynamic>?)?.map((e) => e.toString()).toList(),
     userData: ud != null
         ? UserData(
-            playbackPositionTicks: _parseTicksDouble(ud['PlaybackPositionTicks']),
+            playbackPositionTicks:
+                _parseTicksDouble(ud['PlaybackPositionTicks']),
             played: ud['Played'] as bool?,
             isFavorite: ud['IsFavorite'] as bool?,
             playCount: (ud['PlayCount'] as num?)?.toDouble(),
@@ -947,7 +1012,8 @@ Episode _parseEpisode(Map<String, dynamic> d) {
     runTimeTicks: _parseTicks(d['RunTimeTicks']),
     userData: ud != null
         ? UserData(
-            playbackPositionTicks: _parseTicksDouble(ud['PlaybackPositionTicks']),
+            playbackPositionTicks:
+                _parseTicksDouble(ud['PlaybackPositionTicks']),
             played: ud['Played'] as bool?,
             isFavorite: ud['IsFavorite'] as bool?,
           )
@@ -991,7 +1057,9 @@ PlaybackInfo _parsePlaybackInfo(Map<String, dynamic> d, String itemId) {
   final sources = (d['MediaSources'] as List<dynamic>?) ?? [];
   return PlaybackInfo(
     itemId: d['ItemId']?.toString() ?? itemId,
-    mediaSources: sources.map((e) => _parseMediaSource(e as Map<String, dynamic>)).toList(),
+    mediaSources: sources
+        .map((e) => _parseMediaSource(e as Map<String, dynamic>))
+        .toList(),
   );
 }
 
@@ -1004,7 +1072,9 @@ MediaSource _parseMediaSource(Map<String, dynamic> d) {
     container: d['Container']?.toString(),
     size: d['Size'] as int?,
     runTimeTicks: _parseTicks(d['RunTimeTicks']),
-    mediaStreams: streams.map((e) => _parseMediaStream(e as Map<String, dynamic>)).toList(),
+    mediaStreams: streams
+        .map((e) => _parseMediaStream(e as Map<String, dynamic>))
+        .toList(),
   );
 }
 
