@@ -283,10 +283,10 @@ jobs:
           retention-days: 3
 
   # ============================================================
-  # iOS 移动端构建
+  # iOS Mobile 构建
   # ============================================================
   build-ios:
-    name: Build iOS App Bundle
+    name: Build iOS Mobile
     runs-on: macos-latest
     needs: [prepare, analyze]
 
@@ -348,6 +348,84 @@ jobs:
         with:
           name: build-logs-ios
           path: build/
+          retention-days: 3
+
+  # ============================================================
+  # Apple TV (tvOS) 构建 — 原生 Swift/SwiftUI，不依赖 Flutter
+  # ============================================================
+  build-tvos:
+    name: Build Apple TV (tvOS)
+    runs-on: macos-latest
+    needs: [prepare]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          # 使用最新可用的 Xcode
+          XCODE_PATH=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE_PATH" ]; then
+            echo "No Xcode found"
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE_PATH"
+          echo "Using Xcode: $(xcodebuild -version)"
+
+      - name: Resolve Swift packages
+        run: |
+          cd apple_tv
+          xcodebuild -resolvePackageDependencies \
+            -project LinPlayerTV.xcodeproj \
+            -scheme LinPlayerTV \
+            -clonedSourcePackagesDirPath ../build/tvos-spm \
+            2>&1 || true
+
+      - name: Build tvOS Release (unsigned)
+        run: |
+          cd apple_tv
+          xcodebuild build \
+            -project LinPlayerTV.xcodeproj \
+            -scheme LinPlayerTV \
+            -sdk appletvos \
+            -configuration Release \
+            -derivedDataPath ../build/tvos \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=NO
+
+      - name: Package tvOS app bundle
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          APP_PATH=$(find build/tvos/Build/Products/Release-appletvos -maxdepth 1 -type d -name "*.app" | head -n 1)
+
+          if [ -z "$APP_PATH" ]; then
+            echo "No tvOS app bundle found in build output"
+            ls -laR build/tvos/Build/Products/ || true
+            exit 1
+          fi
+
+          OUTPUT_NAME="LinPlayer-tvOS-v$VERSION-unsigned"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$OUTPUT_NAME.zip"
+
+          echo "Created: $OUTPUT_NAME.zip"
+          ls -lh "$OUTPUT_NAME.zip"
+
+      - name: Upload tvOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-tvos
+          path: LinPlayer-tvOS-*.zip
+          retention-days: 30
+
+      - name: Upload build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-tvos
+          path: build/tvos/
           retention-days: 3
 
   # ============================================================
@@ -583,7 +661,7 @@ jobs:
   # ============================================================
   create-prerelease:
     name: Create Pre-release
-    needs: [prepare, build-android, build-android-tv, build-ios, build-windows, build-linux, build-macos]
+    needs: [prepare, build-android, build-android-tv, build-ios, build-tvos, build-windows, build-linux, build-macos]
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
 
