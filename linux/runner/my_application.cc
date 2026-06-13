@@ -7,6 +7,34 @@
 
 #include "flutter/generated_plugin_registrant.h"
 
+namespace {
+
+gchar* get_app_icon_path() {
+  g_autofree gchar* executable_path = g_file_read_link("/proc/self/exe", nullptr);
+  if (executable_path == nullptr) {
+    return nullptr;
+  }
+
+  g_autofree gchar* executable_dir = g_path_get_dirname(executable_path);
+  return g_build_filename(executable_dir, "data", "flutter_assets", "assets",
+                          "images", "app_icon_source.png", nullptr);
+}
+
+void configure_app_icon() {
+  g_autofree gchar* icon_path = get_app_icon_path();
+  if (icon_path == nullptr || !g_file_test(icon_path, G_FILE_TEST_EXISTS)) {
+    return;
+  }
+
+  g_autoptr(GError) error = nullptr;
+  gtk_window_set_default_icon_from_file(icon_path, &error);
+  if (error != nullptr) {
+    g_warning("Failed to load app icon: %s", error->message);
+  }
+}
+
+}  // namespace
+
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
@@ -104,8 +132,8 @@ static void my_application_startup(GApplication* application) {
   // MyApplication* self = MY_APPLICATION(object);
 
   // Perform any actions required at application startup.
-
   G_APPLICATION_CLASS(my_application_parent_class)->startup(application);
+  configure_app_icon();
 }
 
 // Implements GApplication::shutdown.

@@ -162,6 +162,172 @@ jobs:
           retention-days: 3
 
   # ============================================================
+  # Android TV 构建
+  # ============================================================
+  build-android-tv:
+    name: Build Android TV APK
+    runs-on: ubuntu-latest
+    needs: [prepare, analyze]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Fix plugin namespaces for AGP 8
+        run: |
+          # brightness_volume 1.0.3 doesn't have namespace (required by AGP 8.x)
+          PLUGIN_DIR="/home/runner/.pub-cache/hosted/pub.dev/brightness_volume-1.0.3/android"
+          if [ -f "$PLUGIN_DIR/build.gradle" ] && ! grep -q "namespace" "$PLUGIN_DIR/build.gradle"; then
+            if [ -f "$PLUGIN_DIR/src/main/AndroidManifest.xml" ]; then
+              PACKAGE=$(grep -o 'package="[^"]*"' "$PLUGIN_DIR/src/main/AndroidManifest.xml" | head -1 | cut -d'"' -f2)
+              if [ -n "$PACKAGE" ]; then
+                echo "Adding namespace '$PACKAGE' to brightness_volume"
+                sed -i "/^android {/a\\    namespace '$PACKAGE'" "$PLUGIN_DIR/build.gradle"
+                echo "Patched build.gradle:"
+                cat "$PLUGIN_DIR/build.gradle"
+              fi
+            fi
+          fi
+
+      - name: Fix plugin compileSdk for androidx
+        run: |
+          # Many Flutter plugins use low compileSdk, but androidx dependencies require 36+
+          for dir in /home/runner/.pub-cache/hosted/pub.dev/*/android; do
+            if [ -f "$dir/build.gradle" ]; then
+              sed -i -E "s/compileSdkVersion [0-9]+/compileSdkVersion 36/g" "$dir/build.gradle"
+              sed -i -E "s/compileSdk = [0-9]+/compileSdk = 36/g" "$dir/build.gradle"
+              if [ -f "$dir/build.gradle.kts" ]; then
+                sed -i -E "s/compileSdkVersion = [0-9]+/compileSdkVersion = 36/g" "$dir/build.gradle.kts"
+                sed -i -E "s/compileSdk = [0-9]+/compileSdk = 36/g" "$dir/build.gradle.kts"
+              fi
+            fi
+            if [ -f "$dir/build.gradle.kts" ]; then
+              sed -i -E "s/compileSdkVersion = [0-9]+/compileSdkVersion = 36/g" "$dir/build.gradle.kts"
+              sed -i -E "s/compileSdk = [0-9]+/compileSdk = 36/g" "$dir/build.gradle.kts"
+            fi
+          done
+
+      - name: Build Android TV Release APK
+        env:
+          DANDANPLAY_APP_ID: ${{ secrets.DANDANPLAY_APP_ID }}
+          DANDANPLAY_APP_SECRET: ${{ secrets.DANDANPLAY_APP_SECRET }}
+        run: |
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-36" 2>/dev/null || true
+
+          CLEAN_ID=$(printf '%s' "$DANDANPLAY_APP_ID" | tr -d '\r\n')
+          CLEAN_SECRET=$(printf '%s' "$DANDANPLAY_APP_SECRET" | tr -d '\r\n')
+
+          # Build TV-specific APK with TV flavor and leanback feature
+          flutter build apk --release \
+            --target-platform android-arm,android-arm64 \
+            --dart-define=FLAVOR=tv \
+            --dart-define=DANDANPLAY_APP_ID="$CLEAN_ID" \
+            --dart-define=DANDANPLAY_APP_SECRET="$CLEAN_SECRET" \
+            --output=build/app/outputs/flutter-apk/linplayer-tv.apk
+
+      - name: Upload Android TV APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-android-tv
+          path: build/app/outputs/flutter-apk/linplayer-tv.apk
+          retention-days: 30
+
+      - name: Upload build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-android-tv
+          path: build/
+          retention-days: 3
+
+  # ============================================================
+  # Apple TV 构建 (实验性)
+  # ============================================================
+  build-apple-tv:
+    name: Build Apple TV (Experimental)
+    runs-on: macos-latest
+    needs: [prepare, analyze]
+    # Mark as experimental - Flutter tvOS support is limited
+    continue-on-error: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build Apple TV Release (Experimental)
+        env:
+          DANDANPLAY_APP_ID: ${{ secrets.DANDANPLAY_APP_ID }}
+          DANDANPLAY_APP_SECRET: ${{ secrets.DANDANPLAY_APP_SECRET }}
+        run: |
+          CLEAN_ID=$(printf '%s' "$DANDANPLAY_APP_ID" | tr -d '\r\n')
+          CLEAN_SECRET=$(printf '%s' "$DANDANPLAY_APP_SECRET" | tr -d '\r\n')
+
+          # Note: Flutter tvOS support is experimental
+          # This requires tvOS platform setup in the project
+          # For now, we create a placeholder artifact with build instructions
+          mkdir -p build/tv/apple
+          echo "LinPlayer Apple TV build - Experimental" > build/tv/apple/README.txt
+          echo "Flutter tvOS support is currently experimental." >> build/tv/apple/README.txt
+          echo "Build Date: $(date)" >> build/tv/apple/README.txt
+          echo "Version: ${{ needs.prepare.outputs.version }}" >> build/tv/apple/README.txt
+
+          # Attempt to build if tvOS is configured
+          if flutter build ios --release \
+            --dart-define=FLAVOR=tv \
+            --dart-define=DANDANPLAY_APP_ID="$CLEAN_ID" \
+            --dart-define=DANDANPLAY_APP_SECRET="$CLEAN_SECRET" 2>/dev/null; then
+            echo "iOS build succeeded - tvOS build may be possible with additional configuration"
+            # Copy iOS build artifacts as reference
+            cp -R build/ios/Release-iphoneos/Runner.app build/tv/apple/ 2>/dev/null || true
+          fi
+
+          # Package the TV build directory
+          cd build/tv/apple
+          zip -r "../../../LinPlayer-AppleTV-v${{ needs.prepare.outputs.version }}.zip" . || true
+          cd ../../..
+
+      - name: Upload Apple TV artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apple-tv
+          path: LinPlayer-AppleTV-*.zip
+          retention-days: 30
+
+      - name: Upload build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-apple-tv
+          path: build/
+          retention-days: 3
+
+  # ============================================================
   # Windows 桌面端构建
   # ============================================================
   build-windows:
@@ -394,7 +560,7 @@ jobs:
   # ============================================================
   create-prerelease:
     name: Create Pre-release
-    needs: [prepare, build-android, build-windows, build-linux, build-macos]
+    needs: [prepare, build-android, build-android-tv, build-windows, build-linux, build-macos, build-apple-tv]
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
 

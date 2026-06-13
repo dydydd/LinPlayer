@@ -6,6 +6,7 @@ import 'app.dart';
 import 'core/providers/app_providers.dart';
 import 'core/utils/platform_utils.dart';
 import 'desktop/desktop_app.dart';
+import 'tv/tv_app.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -13,7 +14,14 @@ Future<void> main() async {
 
   await initializeAppPreferences();
 
-  if (isDesktopPlatform) {
+  if (isTvPlatform) {
+    // TV 端入口
+    runApp(
+      const ProviderScope(
+        child: LinPlayerTvApp(),
+      ),
+    );
+  } else if (isDesktopPlatform) {
     runApp(
       const ProviderScope(
         child: LinPlayerDesktopApp(),
