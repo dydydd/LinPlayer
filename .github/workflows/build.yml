@@ -135,9 +135,23 @@ jobs:
           CLEAN_SECRET=$(printf '%s' "$DANDANPLAY_APP_SECRET" | tr -d '\r\n')
 
           flutter build apk --release --split-per-abi \
+            --flavor mobile \
             --target-platform android-arm,android-arm64 \
             --dart-define=DANDANPLAY_APP_ID="$CLEAN_ID" \
             --dart-define=DANDANPLAY_APP_SECRET="$CLEAN_SECRET"
+
+          APK_DIR="build/app/outputs/flutter-apk"
+          ARM64_SOURCE=$(find "$APK_DIR" -maxdepth 1 -type f -name '*arm64-v8a*release.apk' | head -n 1)
+          ARMEABI_SOURCE=$(find "$APK_DIR" -maxdepth 1 -type f -name '*armeabi-v7a*release.apk' | head -n 1)
+
+          if [ -z "$ARM64_SOURCE" ] || [ -z "$ARMEABI_SOURCE" ]; then
+            echo "Expected mobile split APKs not found in $APK_DIR"
+            ls -lah "$APK_DIR" || true
+            exit 1
+          fi
+
+          cp "$ARM64_SOURCE" "$APK_DIR/app-arm64-v8a-release.apk"
+          cp "$ARMEABI_SOURCE" "$APK_DIR/app-armeabi-v7a-release.apk"
 
       - name: Upload arm64-v8a APK
         uses: actions/upload-artifact@v4
@@ -233,13 +247,25 @@ jobs:
           CLEAN_ID=$(printf '%s' "$DANDANPLAY_APP_ID" | tr -d '\r\n')
           CLEAN_SECRET=$(printf '%s' "$DANDANPLAY_APP_SECRET" | tr -d '\r\n')
 
-          # Build TV-specific APK with TV flavor and leanback feature
+          # Build the dedicated TV variant and keep a stable artifact name for publishing.
           flutter build apk --release \
+            --flavor tv \
             --target-platform android-arm,android-arm64 \
             --dart-define=FLAVOR=tv \
             --dart-define=DANDANPLAY_APP_ID="$CLEAN_ID" \
-            --dart-define=DANDANPLAY_APP_SECRET="$CLEAN_SECRET" \
-            --output=build/app/outputs/flutter-apk/linplayer-tv.apk
+            --dart-define=DANDANPLAY_APP_SECRET="$CLEAN_SECRET"
+
+          TV_APK_DIR="build/app/outputs/flutter-apk"
+          TV_APK_SOURCE=$(find "$TV_APK_DIR" -maxdepth 1 -type f -name '*tv*release.apk' | head -n 1)
+          TV_APK_TARGET="$TV_APK_DIR/linplayer-tv.apk"
+
+          if [ -z "$TV_APK_SOURCE" ] || [ ! -f "$TV_APK_SOURCE" ]; then
+            echo "Expected TV APK not found in $TV_APK_DIR"
+            ls -lah "$TV_APK_DIR" || true
+            exit 1
+          fi
+
+          cp "$TV_APK_SOURCE" "$TV_APK_TARGET"
 
       - name: Upload Android TV APK
         uses: actions/upload-artifact@v4
