@@ -251,9 +251,15 @@ class PlayerSettingsScreen extends ConsumerWidget {
         subtitle: Text('轻量稳定，适合大多数场景'),
         value: 'exoPlayer',
       ),
+      if (!isDesktopPlatform)
+        const RadioListTile<String>(
+          title: Text('MPV 原生'),
+          subtitle: Text('通过 libplayer.so 直接调用 libmpv，支持 HDR/着色器/PGS/SUP'),
+          value: 'nativeMpv',
+        ),
       const RadioListTile<String>(
-        title: Text('MPV'),
-        subtitle: Text('libmpv，支持 HDR/着色器/PGS/SUP'),
+        title: Text('MPV (media_kit)'),
+        subtitle: Text('libmpv FFI，支持 HDR/着色器/PGS/SUP'),
         value: 'mpv',
       ),
     ];

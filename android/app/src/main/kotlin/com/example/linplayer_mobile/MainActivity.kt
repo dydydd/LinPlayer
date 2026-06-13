@@ -8,6 +8,7 @@ import io.flutter.plugin.common.MethodCall
 
 class MainActivity : FlutterActivity() {
     private var exoPlayerPlugin: ExoPlayerPlugin? = null
+    private var mpvPlayerPlugin: MpvPlayerPlugin? = null
     private var libassChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -22,6 +23,15 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.linplayer/exoplayer")
             .setMethodCallHandler(exoPlayerPlugin)
 
+        // 注册原生 MPV 插件（通过 libplayer.so 直接调用 libmpv）
+        mpvPlayerPlugin = MpvPlayerPlugin(
+            this,
+            flutterEngine.dartExecutor.binaryMessenger,
+            flutterEngine.renderer
+        )
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.linplayer/mpv")
+            .setMethodCallHandler(mpvPlayerPlugin)
+
         // 注册 legacy libass JNI 桥接 MethodChannel
         // 当前 ExoPlayer 已优先走 Media3/libass 原生字幕管线，这里仅保留兼容实现
         libassChannel = MethodChannel(
@@ -35,6 +45,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         exoPlayerPlugin?.disposeAll()
+        mpvPlayerPlugin?.disposeAll()
         super.onDestroy()
     }
 }

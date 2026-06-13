@@ -4,7 +4,11 @@ import '../api/api_interfaces.dart';
 import '../utils/platform_utils.dart';
 import 'app_preferences.dart';
 
-String get defaultPlayerCoreKey => isDesktopPlatform ? 'mpv' : 'exoPlayer';
+String get defaultPlayerCoreKey {
+  if (isDesktopPlatform) return 'mpv';
+  // Android 默认使用原生 MPV（通过 libplayer.so + 平台通道）
+  return 'nativeMpv';
+}
 
 String normalizePlayerCore(String? value) {
   switch (value) {
@@ -14,6 +18,8 @@ String normalizePlayerCore(String? value) {
     case 'exoPlayer':
     case 'video_player':
       return 'exoPlayer';
+    case 'nativeMpv':
+      return 'nativeMpv';
     default:
       return defaultPlayerCoreKey;
   }

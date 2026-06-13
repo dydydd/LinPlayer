@@ -8,11 +8,13 @@ import 'app_logger.dart';
 import 'player_adapter.dart';
 import 'exo_player_adapter.dart';
 import 'mpv_player_adapter.dart';
+import 'native_mpv_player_adapter.dart';
 
 /// 播放器内核类型
 enum PlayerCoreType {
   exoPlayer,  // ExoPlayer（Android 原生）
-  mpv,        // MPV（libmpv FFI）
+  mpv,        // MPV（libmpv FFI，桌面/iOS）
+  nativeMpv,  // MPV 原生 JNI（Android 专用，通过平台通道调用）
 }
 
 /// 视频播放器服务
@@ -142,6 +144,8 @@ class VideoPlayerService extends ChangeNotifier {
         return ExoPlayerAdapter();
       case PlayerCoreType.mpv:
         return MpvPlayerAdapter();
+      case PlayerCoreType.nativeMpv:
+        return NativeMpvPlayerAdapter();
     }
   }
 

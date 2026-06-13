@@ -109,6 +109,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     if (adapter is ExoPlayerAdapter) {
       return adapter.videoAspectRatio ?? _initialVideoAspectRatio;
     }
+    if (adapter is NativeMpvPlayerAdapter) {
+      return adapter.videoAspectRatio ?? _initialVideoAspectRatio;
+    }
     return _initialVideoAspectRatio;
   }
 
@@ -223,12 +226,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     ref.read(selectedMediaSourceProvider.notifier).state = mediaSource?.id;
 
     final coreString = normalizePlayerCore(ref.read(playerCoreProvider));
-    final coreType =
-        coreString == 'mpv' ? PlayerCoreType.mpv : PlayerCoreType.exoPlayer;
+    final coreType = switch (coreString) {
+      'mpv' => PlayerCoreType.mpv,
+      'nativeMpv' => PlayerCoreType.nativeMpv,
+      _ => PlayerCoreType.exoPlayer,
+    };
 
     final dolbyVisionFix = coreType == PlayerCoreType.mpv
         ? ref.read(mpvDolbyVisionFixProvider)
         : false;
+    // nativeMpv 的 libass 内置在 libmpv.so 中，始终启用，不需要开关
+    // exoPlayer 需要通过 exoLibass 设置控制
     final useLibass = coreType == PlayerCoreType.exoPlayer
         ? ref.read(exoLibassProvider)
         : false;
@@ -382,7 +390,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       } else {
         logger.i('Player', '内封字幕，通过播放器轨道选择');
         try {
-          if (_playerService.coreType == PlayerCoreType.mpv) {
+          if (_playerService.coreType == PlayerCoreType.mpv ||
+              _playerService.coreType == PlayerCoreType.nativeMpv) {
             await _selectInternalSubtitleMPV(target, preferredLang, logger);
           } else {
             await _selectInternalSubtitleEXO(target, preferredLang, logger);
@@ -395,7 +404,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     }
 
     try {
-      if (_playerService.coreType == PlayerCoreType.mpv) {
+      if (_playerService.coreType == PlayerCoreType.mpv ||
+          _playerService.coreType == PlayerCoreType.nativeMpv) {
         final embyCodec = _embySubtitleCodec(codec);
         final subUrl = api.playback.getSubtitleStreamUrl(
           widget.itemId,
@@ -475,7 +485,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         lower == 'pgs' ||
         lower == 'sup' ||
         lower.contains('hdmv');
-    if (_playerService.coreType == PlayerCoreType.mpv) {
+    if (_playerService.coreType == PlayerCoreType.mpv ||
+        _playerService.coreType == PlayerCoreType.nativeMpv) {
       switch (lower) {
         case 'srt' || 'subrip':
           return 'srt';
@@ -522,7 +533,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         lower.contains('pgs')) {
       return 'sup';
     }
-    if (coreType == PlayerCoreType.mpv) {
+    if (coreType == PlayerCoreType.mpv || coreType == PlayerCoreType.nativeMpv) {
       return 'ass';
     }
     return 'srt';
@@ -1028,7 +1039,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     String? trackId;
     final targetDisplayTitle = target.displayTitle ?? target.title;
 
-    if (_playerService.coreType == PlayerCoreType.mpv) {
+    if (_playerService.coreType == PlayerCoreType.mpv ||
+        _playerService.coreType == PlayerCoreType.nativeMpv) {
       trackId = _matchMpvSubtitleTrack(
         subtitleTracks,
         target.language,
@@ -1105,6 +1117,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         final isGraphicalExternal = _isGraphicalSubtitleCodec(codec);
 
         if (_playerService.coreType == PlayerCoreType.mpv ||
+            _playerService.coreType == PlayerCoreType.nativeMpv ||
             isGraphicalExternal) {
           final subUrl = api.playback.getSubtitleStreamUrl(
             item.id,
@@ -1184,7 +1197,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     final server = ref.read(currentServerProvider);
     final logger = AppLogger();
 
-    if (_playerService.coreType != PlayerCoreType.mpv) {
+    if (_playerService.coreType != PlayerCoreType.mpv &&
+        _playerService.coreType != PlayerCoreType.nativeMpv) {
       logger.w('Player', '次字幕仅支持MPV内核');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2471,8 +2485,23 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           }
         },
       ),
+      if (!isDesktopPlatform)
+        ListTile(
+          title: const Text('MPV 原生', style: TextStyle(color: Colors.white)),
+          subtitle: const Text('libplayer.so 直调 libmpv，全格式/HDR/字幕',
+              style: TextStyle(fontSize: 12, color: Colors.white70)),
+          leading: currentCore == 'nativeMpv'
+              ? const Icon(Icons.check_circle, color: Color(0xFF5B8DEF))
+              : null,
+          onTap: () {
+            Navigator.pop(context);
+            if (currentCore != 'nativeMpv') {
+              _switchCore('nativeMpv');
+            }
+          },
+        ),
       ListTile(
-        title: const Text('MPV', style: TextStyle(color: Colors.white)),
+        title: const Text('MPV (media_kit)', style: TextStyle(color: Colors.white)),
         subtitle: const Text('libmpv FFI，全格式/HDR/高级字幕',
             style: TextStyle(fontSize: 12, color: Colors.white70)),
         leading: currentCore == 'mpv'
