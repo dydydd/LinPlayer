@@ -532,36 +532,16 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
         enableAutoStreamCopyAudio: request.enableAutoStreamCopyAudio,
         enableAutoStreamCopyVideo: request.enableAutoStreamCopyVideo,
       );
-      final startSeconds = _resumeStartSeconds();
-      final arguments = <String>[
-        if (startSeconds != null) '--start=$startSeconds',
-        videoUrl,
-      ];
-
-      await Process.start(
-        externalMpvPath,
-        arguments,
-        mode: ProcessStartMode.detached,
-      );
-      final scopeKey =
-          buildWatchHistoryScopeKey(ref.read(currentServerProvider));
-      if (scopeKey != null) {
-        try {
-          await ref.read(watchHistoryProvider).capturePlayback(
-                scopeKey: scopeKey,
-                api: api,
-                item: widget.item,
-                positionTicks:
-                    (widget.item.userData?.playbackPositionTicks ?? 0).round(),
-                source: WatchHistoryWriteSource.externalMpv,
-                watchedThresholdPercent: ref.read(watchedThresholdProvider),
-                incrementPlayCount: true,
-                force: true,
-              );
-        } catch (_) {
-          // Ignore local history persistence failures for external players.
-        }
-      }
+      final startPositionTicks =
+          (widget.item.userData?.playbackPositionTicks ?? 0).round();
+      await ref.read(externalPlayerSessionServiceProvider).launchMpv(
+            executablePath: externalMpvPath,
+            item: widget.item,
+            mediaSourceId: mediaSource.id,
+            videoUrl: videoUrl,
+            startPositionTicks: startPositionTicks,
+            mediaSourceRunTimeTicks: mediaSource.runTimeTicks,
+          );
 
       if (!mounted) return;
       final videoStream = mediaSource.mediaStreams.firstWhere(
@@ -583,18 +563,6 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
         SnackBar(content: Text('获取外部播放地址失败：$error')),
       );
     }
-  }
-
-  String? _resumeStartSeconds() {
-    final ticks = widget.item.userData?.playbackPositionTicks;
-    if (ticks == null || ticks <= 0) {
-      return null;
-    }
-    final seconds = ticks / 10000000;
-    if (seconds < 5) {
-      return null;
-    }
-    return seconds.toStringAsFixed(3);
   }
 
   void _handleDownload() {

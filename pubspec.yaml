@@ -38,9 +38,11 @@ dependencies:
   media_kit_libs_video: ^1.0.7
 
   # 工具
+  ffi: ^2.2.0
   path_provider: ^2.1.2
   path: ^1.9.0
   uuid: ^4.3.3
+  win32: ^5.15.0
   
   # UI增强
   cupertino_icons: ^1.0.6
