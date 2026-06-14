@@ -110,41 +110,24 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
   }
 
   void _handleRematch() async {
-    final colorScheme = Theme.of(context).colorScheme;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: colorScheme.surface,
-        title: const Text('重新匹配'),
-        content: const Text('这将重新获取该媒体的元数据，是否继续？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('继续'),
-          ),
-        ],
-      ),
+    final confirmed = await showDesktopConfirm(
+      context,
+      title: '重新匹配',
+      message: '这将重新获取该媒体的元数据，是否继续？',
+      confirmText: '继续',
     );
 
-    if (confirmed == true) {
+    if (confirmed) {
       try {
         // TODO: 调用 Emby 刷新元数据 API
         await Future.delayed(const Duration(milliseconds: 300));
         if (mounted) {
           _handleRefresh();
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('已开始重新匹配')),
-          );
+          showDesktopMessage(context, '已开始重新匹配');
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('重新匹配失败: $e')),
-          );
+          showDesktopMessage(context, '重新匹配失败: $e', isError: true);
         }
       }
     }

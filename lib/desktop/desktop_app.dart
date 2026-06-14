@@ -1,11 +1,16 @@
+import 'package:fluent_ui/fluent_ui.dart' as fluent;
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:macos_ui/macos_ui.dart' as macos;
 import '../core/providers/app_providers.dart';
 import '../core/theme/app_theme.dart';
+import 'platform/desktop_ui_style.dart';
 import 'routes/desktop_router.dart';
+import 'theme/desktop_native_theme.dart';
 import 'utils/desktop_shortcuts.dart';
 import 'utils/desktop_smooth_scroll.dart';
+import 'window/desktop_window_chrome.dart';
 
 const _desktopFontFamily = 'Microsoft YaHei UI';
 const _desktopFontFallback = <String>[
@@ -15,40 +20,185 @@ const _desktopFontFallback = <String>[
   'Hiragino Sans GB',
 ];
 
-/// 桌面端应用入口
+const _supportedLocales = <Locale>[
+  Locale('zh', 'CN'),
+  Locale('en'),
+];
+
+const _localizationsDelegates = <LocalizationsDelegate<dynamic>>[
+  GlobalMaterialLocalizations.delegate,
+  GlobalWidgetsLocalizations.delegate,
+  GlobalCupertinoLocalizations.delegate,
+];
+
+/// 桌面端应用入口。
+///
+/// 按平台选择原生外观：
+/// - Windows -> [fluent.FluentApp]（仿 WinUI）
+/// - macOS   -> [macos.MacosApp]（仿 AppKit）
+/// - Linux   -> [MaterialApp]
+///
+/// 内容层（各业务页面）仍为 Material 实现，因此在 Fluent/Macos 根下需要补充
+/// Material 的 Theme / ScaffoldMessenger / Material 祖先，见 [_wrapContent]。
 class LinPlayerDesktopApp extends ConsumerWidget {
   const LinPlayerDesktopApp({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    switch (desktopUiStyle) {
+      case DesktopUiStyle.fluent:
+        return const _FluentDesktopApp();
+      case DesktopUiStyle.macos:
+        return const _MacosDesktopApp();
+      case DesktopUiStyle.material:
+        return const _MaterialDesktopApp();
+    }
+  }
+}
+
+ThemeMode _themeModeOf(ThemeModeOption option) => switch (option) {
+      ThemeModeOption.light => ThemeMode.light,
+      ThemeModeOption.dark => ThemeMode.dark,
+      ThemeModeOption.system => ThemeMode.system,
+    };
+
+/// 为非 Material 应用根（Fluent / Macos）补齐 Material 运行所需环境，
+/// 并叠加标题栏与快捷键。
+Widget _wrapContent({
+  required Brightness brightness,
+  required Widget child,
+  bool addTitleBar = true,
+}) {
+  final materialTheme = brightness == Brightness.dark
+      ? _desktopTheme(AppTheme.darkTheme)
+      : _desktopTheme(AppTheme.lightTheme);
+
+  Widget content = child;
+  if (addTitleBar) {
+    content = Column(
+      children: [
+        AppTitleBar(brightness: brightness),
+        Expanded(child: child),
+      ],
+    );
+  }
+
+  return Theme(
+    data: materialTheme,
+    child: Material(
+      type: MaterialType.transparency,
+      child: ScaffoldMessenger(
+        child: ScrollConfiguration(
+          behavior: const _DesktopAppScrollBehavior(),
+          child: DesktopShortcutsWrapper(child: content),
+        ),
+      ),
+    ),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Windows / Fluent
+// ---------------------------------------------------------------------------
+class _FluentDesktopApp extends ConsumerWidget {
+  const _FluentDesktopApp();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(desktopRouterProvider);
     final themeMode = ref.watch(themeModeProvider);
     final locale = ref.watch(localeProvider);
-    
+
+    return fluent.FluentApp.router(
+      title: 'Linplayer',
+      debugShowCheckedModeBanner: false,
+      theme: buildFluentTheme(Brightness.light),
+      darkTheme: buildFluentTheme(Brightness.dark),
+      themeMode: _themeModeOf(themeMode),
+      locale: locale,
+      supportedLocales: _supportedLocales,
+      localizationsDelegates: const [
+        ..._localizationsDelegates,
+        fluent.FluentLocalizations.delegate,
+      ],
+      routerConfig: router,
+      builder: (context, child) {
+        final brightness = fluent.FluentTheme.of(context).brightness;
+        return _wrapContent(
+          brightness: brightness,
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// macOS / macos_ui
+// ---------------------------------------------------------------------------
+class _MacosDesktopApp extends ConsumerWidget {
+  const _MacosDesktopApp();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final router = ref.watch(desktopRouterProvider);
+    final themeMode = ref.watch(themeModeProvider);
+    final locale = ref.watch(localeProvider);
+
+    return macos.MacosApp.router(
+      title: 'Linplayer',
+      debugShowCheckedModeBanner: false,
+      theme: buildMacosTheme(Brightness.light),
+      darkTheme: buildMacosTheme(Brightness.dark),
+      themeMode: _themeModeOf(themeMode),
+      locale: locale,
+      supportedLocales: _supportedLocales,
+      localizationsDelegates: _localizationsDelegates,
+      routerConfig: router,
+      builder: (context, child) {
+        final brightness = macos.MacosTheme.of(context).brightness;
+        return _wrapContent(
+          brightness: brightness,
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Linux / Material
+// ---------------------------------------------------------------------------
+class _MaterialDesktopApp extends ConsumerWidget {
+  const _MaterialDesktopApp();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final router = ref.watch(desktopRouterProvider);
+    final themeMode = ref.watch(themeModeProvider);
+    final locale = ref.watch(localeProvider);
+
     return MaterialApp.router(
       title: 'Linplayer',
       debugShowCheckedModeBanner: false,
       theme: _desktopTheme(AppTheme.lightTheme),
       darkTheme: _desktopTheme(AppTheme.darkTheme),
       locale: locale,
-      localizationsDelegates: const [
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
-      supportedLocales: const [
-        Locale('zh', 'CN'),
-        Locale('en'),
-      ],
+      localizationsDelegates: _localizationsDelegates,
+      supportedLocales: _supportedLocales,
       scrollBehavior: const _DesktopAppScrollBehavior(),
-      themeMode: switch (themeMode) {
-        ThemeModeOption.light => ThemeMode.light,
-        ThemeModeOption.dark => ThemeMode.dark,
-        ThemeModeOption.system => ThemeMode.system,
-      },
+      themeMode: _themeModeOf(themeMode),
       routerConfig: router,
       builder: (context, child) {
-        return DesktopShortcutsWrapper(child: child!);
+        final brightness = Theme.of(context).brightness;
+        return DesktopShortcutsWrapper(
+          child: Column(
+            children: [
+              AppTitleBar(brightness: brightness),
+              Expanded(child: child!),
+            ],
+          ),
+        );
       },
     );
   }

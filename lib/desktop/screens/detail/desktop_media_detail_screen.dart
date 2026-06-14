@@ -20,6 +20,7 @@ import '../../../ui/widgets/common/media_widgets.dart';
 import '../../../ui/widgets/common/video_background.dart';
 import '../../utils/desktop_smooth_scroll.dart';
 import '../../widgets/desktop_media_card.dart';
+import '../../widgets/native_feedback.dart';
 
 part 'desktop_media_detail_screen_state.dart';
 part 'desktop_media_detail_screen_header.dart';

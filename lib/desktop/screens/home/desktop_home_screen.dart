@@ -13,6 +13,7 @@ import '../../../ui/widgets/common/media_widgets.dart';
 import '../../widgets/desktop_cover_radii.dart';
 import '../../widgets/desktop_media_card.dart';
 import '../../widgets/desktop_section_header.dart';
+import '../../widgets/native_feedback.dart';
 import '../../utils/desktop_smooth_scroll.dart';
 
 /// 桌面端首页 - 宽屏布局
@@ -346,9 +347,7 @@ class _DesktopWatchHistoryRestoreBanner extends ConsumerWidget {
                 if (!context.mounted || restored) {
                   return;
                 }
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('恢复失败，请稍后再试')),
-                );
+                showDesktopMessage(context, '恢复失败，请稍后再试', isError: true);
               },
               child: const Text('恢复'),
             ),
@@ -1255,7 +1254,6 @@ class _CarouselInfo extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final api = ref.read(apiClientProvider);
-    final theme = Theme.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,

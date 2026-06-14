@@ -483,18 +483,14 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
   Future<void> _launchExternalPlayer() async {
     final externalMpvPath = ref.read(externalMpvPathProvider).trim();
     if (externalMpvPath.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先在设置里选择外部 MPV 路径')),
-      );
+      showDesktopMessage(context, '请先在设置里选择外部 MPV 路径', isError: true);
       return;
     }
 
     final executableFile = File(externalMpvPath);
     if (!await executableFile.exists()) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('外部 MPV 路径不存在，请重新在设置中选择')),
-      );
+      showDesktopMessage(context, '外部 MPV 路径不存在，请重新在设置中选择', isError: true);
       return;
     }
 
@@ -512,9 +508,7 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
       final mediaSource = selection.mediaSource;
       if (mediaSource == null) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('当前条目暂无可播放媒体源')),
-        );
+        showDesktopMessage(context, '当前条目暂无可播放媒体源', isError: true);
         return;
       }
 
@@ -549,27 +543,19 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
         orElse: () => MediaStream(index: 0, type: 'Video'),
       );
       final sourceLabel = _buildSourceDisplayName(mediaSource, videoStream);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('已调用外部播放器播放：$sourceLabel')),
-      );
+      showDesktopMessage(context, '已调用外部播放器播放：$sourceLabel');
     } on ProcessException catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('启动外部播放器失败：${error.message}')),
-      );
+      showDesktopMessage(context, '启动外部播放器失败：${error.message}', isError: true);
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('获取外部播放地址失败：$error')),
-      );
+      showDesktopMessage(context, '获取外部播放地址失败：$error', isError: true);
     }
   }
 
   void _handleDownload() {
     // TODO: 实现下载逻辑
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('已添加到下载队列')),
-    );
+    showDesktopMessage(context, '已添加到下载队列');
   }
 
   OverlayEntry _createMenuOverlay({
@@ -654,9 +640,7 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
       ref.invalidate(mediaItemProvider(widget.itemId));
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('操作失败: $e')),
-        );
+        showDesktopMessage(context, '操作失败: $e', isError: true);
       }
     }
   }
@@ -673,9 +657,7 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
       ref.invalidate(mediaItemProvider(widget.itemId));
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('操作失败: $e')),
-        );
+        showDesktopMessage(context, '操作失败: $e', isError: true);
       }
     }
   }

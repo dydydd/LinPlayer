@@ -7,6 +7,7 @@ import 'app.dart';
 import 'core/providers/app_providers.dart';
 import 'core/utils/platform_utils.dart';
 import 'desktop/desktop_app.dart';
+import 'desktop/window/desktop_window_chrome.dart';
 import 'tv/tv_app.dart';
 
 Future<void> main() async {
@@ -19,6 +20,11 @@ Future<void> main() async {
   }
 
   await initializeAppPreferences();
+
+  // 桌面端：初始化无边框窗口 + 自绘标题栏
+  if (isDesktopPlatform && !isTvPlatform) {
+    await initDesktopWindow();
+  }
 
   if (isTvPlatform) {
     // TV 端入口

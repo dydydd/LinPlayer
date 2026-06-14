@@ -2,59 +2,30 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/providers/app_providers.dart';
+import '../platform/desktop_ui_style.dart';
 import '../utils/desktop_smooth_scroll.dart';
+import 'desktop_nav_model.dart';
+import 'fluent_shell.dart';
+import 'macos_shell.dart';
 
-/// 桌面端侧边栏宽度
-const double _kSidebarWidth = 220;
-const double _kSidebarCollapsedWidth = 72;
-/// 桌面端导航项
-class _NavItem {
-  final String path;
-  final IconData icon;
-  final String label;
-  
-  const _NavItem({
-    required this.path,
-    required this.icon,
-    required this.label,
-  });
-}
-
-const _navItems = [
-  _NavItem(path: '/', icon: Icons.home_rounded, label: '首页'),
-  _NavItem(path: '/libraries', icon: Icons.collections_bookmark_rounded, label: '媒体库'),
-  _NavItem(path: '/favorites', icon: Icons.favorite_rounded, label: '收藏'),
-  _NavItem(path: '/servers', icon: Icons.dns_rounded, label: '服务器'),
-  _NavItem(path: '/settings', icon: Icons.settings_rounded, label: '设置'),
-];
-
-/// 桌面端外壳 - 侧边栏 + 内容区
+/// 桌面端外壳调度器：按平台选择原生导航外壳，并共享“恢复上次服务器”的逻辑。
 class DesktopShell extends ConsumerStatefulWidget {
   final Widget child;
-  
+
   const DesktopShell({super.key, required this.child});
-  
+
   @override
   ConsumerState<DesktopShell> createState() => _DesktopShellState();
 }
 
 class _DesktopShellState extends ConsumerState<DesktopShell> {
-  bool _isSidebarCollapsed = false;
   bool _hasAttemptedRestore = false;
-  final ScrollController _navScrollController = DesktopSmoothScrollController();
 
-  @override
-  void dispose() {
-    _navScrollController.dispose();
-    super.dispose();
-  }
-  
   @override
   Widget build(BuildContext context) {
     final servers = ref.watch(serverListProvider);
     final currentServer = ref.watch(currentServerProvider);
-    
-    // 服务器列表已加载且当前服务器未恢复时，尝试恢复
+
     if (servers.isNotEmpty && currentServer == null && !_hasAttemptedRestore) {
       _hasAttemptedRestore = true;
       Future.microtask(() async {
@@ -62,62 +33,90 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
       });
     }
 
+    switch (desktopUiStyle) {
+      case DesktopUiStyle.fluent:
+        return FluentDesktopShell(child: widget.child);
+      case DesktopUiStyle.macos:
+        return MacosDesktopShell(child: widget.child);
+      case DesktopUiStyle.material:
+        return MaterialDesktopShell(child: widget.child);
+    }
+  }
+}
+
+const double _kSidebarWidth = 220;
+const double _kSidebarCollapsedWidth = 72;
+
+/// Linux 外壳：Material 侧边栏（保留原桌面端外观）。
+class MaterialDesktopShell extends ConsumerStatefulWidget {
+  final Widget child;
+
+  const MaterialDesktopShell({super.key, required this.child});
+
+  @override
+  ConsumerState<MaterialDesktopShell> createState() =>
+      _MaterialDesktopShellState();
+}
+
+class _MaterialDesktopShellState extends ConsumerState<MaterialDesktopShell> {
+  bool _isSidebarCollapsed = false;
+  final ScrollController _navScrollController = DesktopSmoothScrollController();
+
+  @override
+  void dispose() {
+    _navScrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final currentPath = GoRouterState.of(context).uri.path;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final sidebarWidth = _isSidebarCollapsed ? _kSidebarCollapsedWidth : _kSidebarWidth;
-    
+    final sidebarWidth =
+        _isSidebarCollapsed ? _kSidebarCollapsedWidth : _kSidebarWidth;
+
     return Scaffold(
       body: Row(
         children: [
-          // 侧边栏
           AnimatedContainer(
-              duration: const Duration(milliseconds: 160),
-              curve: Curves.fastOutSlowIn,
-              width: sidebarWidth,
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF8F9FA),
-                border: Border(
-                  right: BorderSide(
-                    color: isDark ? const Color(0xFF333333) : const Color(0xFFE8EAED),
-                    width: 1,
-                  ),
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.fastOutSlowIn,
+            width: sidebarWidth,
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF8F9FA),
+              border: Border(
+                right: BorderSide(
+                  color: isDark
+                      ? const Color(0xFF333333)
+                      : const Color(0xFFE8EAED),
+                  width: 1,
                 ),
               ),
-              child: Column(
-                children: [
-                  SizedBox(height: _isSidebarCollapsed ? 12 : 20),
-                  
-                  // 导航项
-                  Expanded(
-                    child: ListView.builder(
-                      controller: _navScrollController,
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      itemCount: _navItems.length,
-                      itemBuilder: (context, index) {
-                        final item = _navItems[index];
-                        final isSelected = currentPath == item.path ||
-                            (item.path == '/' &&
-                                (currentPath == '/home' ||
-                                    currentPath == resumeRoutePath));
-                        return _buildNavItem(item, isSelected, isDark, currentPath);
-                      },
-                    ),
-                  ),
-                  
-                  // 服务器状态
-                  _buildServerStatus(isDark),
-                  
-                  const SizedBox(height: 8),
-                  
-                  // 折叠按钮
-                  _buildCollapseButton(isDark),
-                  
-                  const SizedBox(height: 16),
-                ],
-              ),
             ),
-          
-          // 内容区
+            child: Column(
+              children: [
+                SizedBox(height: _isSidebarCollapsed ? 12 : 20),
+                Expanded(
+                  child: ListView.builder(
+                    controller: _navScrollController,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    itemCount: desktopNavItems.length,
+                    itemBuilder: (context, index) {
+                      final item = desktopNavItems[index];
+                      final isSelected =
+                          desktopSelectedNavIndex(currentPath) == index;
+                      return _buildNavItem(
+                          item, isSelected, isDark, currentPath);
+                    },
+                  ),
+                ),
+                _buildServerStatus(isDark),
+                const SizedBox(height: 8),
+                _buildCollapseButton(isDark),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
           Expanded(
             child: Container(
               color: Theme.of(context).scaffoldBackgroundColor,
@@ -128,19 +127,24 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
       ),
     );
   }
-  
-  Widget _buildNavItem(_NavItem item, bool isSelected, bool isDark, String currentPath) {
+
+  Widget _buildNavItem(
+      DesktopNavItem item, bool isSelected, bool isDark, String currentPath) {
     final theme = Theme.of(context);
     final bgColor = isSelected
         ? const Color(0xFF5B8DEF).withValues(alpha: 0.15)
         : Colors.transparent;
     final iconColor = isSelected
         ? const Color(0xFF5B8DEF)
-        : isDark ? const Color(0xFFAAAAAA) : const Color(0xFF666666);
+        : isDark
+            ? const Color(0xFFAAAAAA)
+            : const Color(0xFF666666);
     final textColor = isSelected
         ? const Color(0xFF5B8DEF)
-        : isDark ? const Color(0xFFFFFFFF) : const Color(0xFF1A1A1A);
-    
+        : isDark
+            ? const Color(0xFFFFFFFF)
+            : const Color(0xFF1A1A1A);
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: MouseRegion(
@@ -166,17 +170,26 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
                 ? Center(
                     child: Tooltip(
                       message: item.label,
-                      child: Icon(item.icon, color: iconColor, size: 22),
+                      child: Icon(
+                        isSelected ? item.selectedIcon : item.icon,
+                        color: iconColor,
+                        size: 22,
+                      ),
                     ),
                   )
                 : Row(
                     children: [
-                      Icon(item.icon, color: iconColor, size: 22),
+                      Icon(
+                        isSelected ? item.selectedIcon : item.icon,
+                        color: iconColor,
+                        size: 22,
+                      ),
                       const SizedBox(width: 12),
                       Text(
                         item.label,
                         style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: isSelected ? FontWeight.w700 : FontWeight.w400,
+                          fontWeight:
+                              isSelected ? FontWeight.w700 : FontWeight.w400,
                           color: textColor,
                         ),
                       ),
@@ -198,17 +211,18 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
       ),
     );
   }
-  
+
   Widget _buildServerStatus(bool isDark) {
     final currentServer = ref.watch(currentServerProvider);
     final authState = ref.watch(authStateProvider);
     final theme = Theme.of(context);
-    
+
     if (currentServer == null) return const SizedBox.shrink();
-    
+
     final isConnected = authState == AuthState.authenticated;
-    final statusColor = isConnected ? const Color(0xFF4CAF50) : const Color(0xFFFFA726);
-    
+    final statusColor =
+        isConnected ? const Color(0xFF4CAF50) : const Color(0xFFFFA726);
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12),
       padding: const EdgeInsets.all(12),
@@ -255,7 +269,7 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
             ),
     );
   }
-  
+
   Widget _buildCollapseButton(bool isDark) {
     return MouseRegion(
       cursor: SystemMouseCursors.click,
