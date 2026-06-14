@@ -226,12 +226,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                 selection.fallbackRequest!.enableAutoStreamCopyVideo,
           );
 
-    Duration? startPosition;
-    if (item.userData?.playbackPositionTicks != null) {
-      startPosition = Duration(
-        milliseconds: (item.userData!.playbackPositionTicks! / 10000).round(),
-      );
-    }
+    final startPosition = await _resolveResumeStartPosition(api, item);
 
     ref.read(currentPlayingItemProvider.notifier).state = item;
     ref.read(selectedMediaSourceProvider.notifier).state = mediaSource?.id;
@@ -279,8 +274,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           selection.startsWithSoftwareDecoding && hardwareDecoding,
       fallbackReason: selection.fallbackReason,
       preferredSubtitleLanguage: preferredSubtitleLanguage,
-      surfaceViewId: surfaceViewId,  // Pass for gpu-next rendering
-      useGpuNext: gpuNextEnabled,  // Pass gpu-next rendering mode
+      surfaceViewId: surfaceViewId, // Pass for gpu-next rendering
+      useGpuNext: gpuNextEnabled, // Pass gpu-next rendering mode
       onStart: (info) async {
         try {
           await api.playback.reportPlaybackStart(info);
@@ -337,6 +332,29 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _playerService.setSubtitleFont(ref.read(subtitleFontProvider));
     _playerService.setSubtitleBackground(ref.read(subtitleBackgroundProvider));
     _playerService.setAspectRatio(ref.read(aspectRatioProvider));
+  }
+
+  Future<Duration?> _resolveResumeStartPosition(
+    ApiClientFactory api,
+    MediaItem item,
+  ) async {
+    final remotePlayed = item.userData?.played ?? false;
+    final remotePositionTicks =
+        remotePlayed ? null : item.userData?.playbackPositionTicks?.round();
+    final scopeKey = buildWatchHistoryScopeKey(ref.read(currentServerProvider));
+    final resolvedTicks = scopeKey == null
+        ? remotePositionTicks
+        : await ref.read(watchHistoryProvider).resolveResumePositionTicks(
+              scopeKey: scopeKey,
+              api: api,
+              item: item,
+              remotePositionTicks: remotePositionTicks,
+              remotePlayed: remotePlayed,
+            );
+    if (resolvedTicks == null || resolvedTicks <= 0) {
+      return null;
+    }
+    return Duration(milliseconds: (resolvedTicks / 10000).round());
   }
 
   Future<void> _waitForTracksReady() async {
@@ -555,7 +573,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         lower.contains('pgs')) {
       return 'sup';
     }
-    if (coreType == PlayerCoreType.mpv || coreType == PlayerCoreType.nativeMpv) {
+    if (coreType == PlayerCoreType.mpv ||
+        coreType == PlayerCoreType.nativeMpv) {
       return 'ass';
     }
     return 'srt';
@@ -2524,19 +2543,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         ),
       if (!Platform.isAndroid)
         ListTile(
-        title: const Text('MPV (media_kit)', style: TextStyle(color: Colors.white)),
-        subtitle: const Text('libmpv FFI，全格式/HDR/高级字幕',
-            style: TextStyle(fontSize: 12, color: Colors.white70)),
-        leading: currentCore == 'mpv'
-            ? const Icon(Icons.check_circle, color: Color(0xFF5B8DEF))
-            : null,
-        onTap: () {
-          Navigator.pop(context);
-          if (currentCore != 'mpv') {
-            _switchCore('mpv');
-          }
-        },
-      ),
+          title: const Text('MPV (media_kit)',
+              style: TextStyle(color: Colors.white)),
+          subtitle: const Text('libmpv FFI，全格式/HDR/高级字幕',
+              style: TextStyle(fontSize: 12, color: Colors.white70)),
+          leading: currentCore == 'mpv'
+              ? const Icon(Icons.check_circle, color: Color(0xFF5B8DEF))
+              : null,
+          onTap: () {
+            Navigator.pop(context);
+            if (currentCore != 'mpv') {
+              _switchCore('mpv');
+            }
+          },
+        ),
     ];
 
     _showRightPanel(
