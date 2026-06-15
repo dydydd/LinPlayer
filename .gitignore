@@ -141,6 +141,10 @@ packaging/
 /dist/
 *.lpk
 
+# 插件开发参考素材（uhdnow 用户面板的保存网页，仅供解析参考，不提交）
+/user.htm
+/user_files/
+
 # Vendored 三方包（third_party/flutter_qjs 源码需提交，但其构建产物不提交）。
 # build/、.dart_tool/、coverage/、*.iml 已被上面的全局规则覆盖；此处仅作显式声明。
 third_party/**/.dart_tool/

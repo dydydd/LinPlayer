@@ -10,6 +10,7 @@ import '../../../core/providers/media_providers.dart';
 import '../../../core/services/watch_history/watch_history_models.dart';
 import '../../../core/theme/app_motion.dart';
 import '../../../core/widgets/app_shimmer.dart';
+import '../../../plugins/ui/plugin_home_stats.dart';
 import '../../../ui/utils/media_helpers.dart';
 import '../../../ui/widgets/common/media_widgets.dart';
 import '../../widgets/desktop_cover_radii.dart';
@@ -563,7 +564,7 @@ class _DesktopTopBarState extends ConsumerState<_DesktopTopBar> {
       );
     }
 
-    return AnimatedSwitcher(
+    final mediaStats = AnimatedSwitcher(
       duration: const Duration(milliseconds: 180),
       switchInCurve: Curves.easeOutCubic,
       switchOutCurve: Curves.easeOutCubic,
@@ -591,6 +592,19 @@ class _DesktopTopBarState extends ConsumerState<_DesktopTopBar> {
           ],
         ),
       ),
+    );
+
+    // 在媒体计数旁边追加插件注册的首页统计（如 uhdnow 流量统计）。
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        mediaStats,
+        PluginHomeStatsView(
+          labelStyle: labelStyle,
+          valueStyle: valueStyle,
+          dividerColor: dividerColor,
+        ),
+      ],
     );
   }
 

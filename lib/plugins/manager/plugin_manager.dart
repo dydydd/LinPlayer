@@ -68,16 +68,70 @@ class PluginManager extends ChangeNotifier {
 
   Future<void> _init() async {
     if (_initialized) return;
-    final docs = await getApplicationDocumentsDirectory();
-    _pluginsRootDir = p.join(docs.path, 'plugins');
-    _dataRootDir = p.join(docs.path, 'plugin_data');
+    final base = await _resolvePluginBaseDir();
+    _pluginsRootDir = p.join(base, 'plugins');
+    _dataRootDir = p.join(base, 'plugin_data');
     await Directory(_pluginsRootDir).create(recursive: true);
     await Directory(_dataRootDir).create(recursive: true);
     _installer = PluginInstaller(_pluginsRootDir);
+    _log.i('PluginManager', '插件目录: $_pluginsRootDir');
 
     _enabledIds = _readEnabledIds();
     _initialized = true;
     await scan();
+  }
+
+  /// 解析插件根目录所在的基准目录，目标是「卸载即清理、不残留」。
+  ///
+  /// - **Windows / Linux**（便携解压）：放在**可执行文件同目录**——删除应用
+  ///   文件夹即连同插件一并清理，不散落到 AppData。
+  /// - **macOS**（便携解压）：放在 **.app 包同级目录**；若 .app 已被移到
+  ///   `/Applications` 等系统位置（不可写）则回退到应用支持目录。
+  /// - **移动端 / TV（iOS/Android/tvOS/Android TV）**：放在**应用支持目录**。
+  ///   它在应用私有沙盒内，**卸载应用时由系统随沙盒一并删除**（自动清理），
+  ///   且不污染用户可见的 Documents（移动端无法把文件放到二进制旁边）。
+  /// - 任何便携路径不可写时，统一回退到应用支持目录。
+  Future<String> _resolvePluginBaseDir() async {
+    if (Platform.isWindows || Platform.isLinux) {
+      final dir =
+          await _probeWritable(File(Platform.resolvedExecutable).parent.path);
+      if (dir != null) return dir;
+    } else if (Platform.isMacOS) {
+      final sibling = _macAppSiblingDir();
+      if (sibling != null) {
+        final dir = await _probeWritable(sibling);
+        if (dir != null) return dir;
+      }
+    }
+    // 移动端 / TV / 回退：应用支持目录（沙盒内，卸载随应用删除）。
+    final support = await getApplicationSupportDirectory();
+    return support.path;
+  }
+
+  /// 探测目录可写（能创建 plugins/ 子目录）则返回该目录，否则 null。
+  Future<String?> _probeWritable(String dir) async {
+    try {
+      await Directory(p.join(dir, 'plugins')).create(recursive: true);
+      return dir;
+    } catch (e) {
+      _log.w('PluginManager', '目录不可写，回退: $dir ($e)');
+      return null;
+    }
+  }
+
+  /// macOS：返回 .app 包所在的同级目录（便携解压场景）。
+  /// 位于 /Applications 或 /System 等系统位置时返回 null（改用应用支持目录）。
+  String? _macAppSiblingDir() {
+    final exe = Platform.resolvedExecutable; // .../Foo.app/Contents/MacOS/Foo
+    const marker = '.app/';
+    final idx = exe.indexOf(marker);
+    if (idx < 0) return null;
+    final appBundle = exe.substring(0, idx + marker.length - 1); // .../Foo.app
+    final container = File(appBundle).parent.path; // 含 .app 的文件夹
+    if (container == '/Applications' || container.startsWith('/System')) {
+      return null;
+    }
+    return container;
   }
 
   Set<String> _readEnabledIds() {

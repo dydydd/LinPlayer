@@ -24,6 +24,9 @@ enum PluginExtensionType {
   /// 设置页面。
   settingsPages('settingsPages'),
 
+  /// 首页统计指标（显示在媒体计数旁，如流量统计）。
+  homeStats('homeStats'),
+
   /// 播放器覆盖层（叠加在视频上的 UI）。
   playerOverlays('playerOverlays'),
 
@@ -73,6 +76,11 @@ class PluginExtensionSupport {
       PluginPlatform.tv,
     },
     PluginExtensionType.settingsPages: {
+      PluginPlatform.mobile,
+      PluginPlatform.desktop,
+      PluginPlatform.tv,
+    },
+    PluginExtensionType.homeStats: {
       PluginPlatform.mobile,
       PluginPlatform.desktop,
       PluginPlatform.tv,

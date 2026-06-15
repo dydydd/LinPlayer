@@ -35,8 +35,23 @@ lib/plugins/
     └── plugin_settings_page_host.dart # 声明式设置页渲染
 ```
 
-插件目录：各平台「应用文档目录」下的 `plugins/`（`path_provider`）。
-插件数据：`plugin_data/<id>/storage.json`（与插件目录分离，升级不丢数据）。
+插件存储位置（`PluginManager._resolvePluginBaseDir`），目标是「卸载即清理、不残留」：
+
+| 平台 | 基准目录 | 卸载是否自动清理 |
+|------|----------|------------------|
+| Windows / Linux（便携） | **可执行文件所在目录** | 删除应用文件夹即清理 |
+| macOS（便携） | **.app 包同级目录**（移到 `/Applications` 则回退应用支持目录） | 删除解压文件夹即清理 |
+| iOS / Android / tvOS / Android TV | **应用支持目录**（`getApplicationSupportDirectory`，沙盒内） | ✅ 系统卸载时随沙盒一并删除 |
+
+设计要点：
+- 桌面便携版把插件放在可执行文件/`.app` 同级，使整个解压文件夹**自包含**，
+  删文件夹即清理，不散落到 AppData。
+- 移动端/TV 无法把文件放到二进制旁边，但应用支持目录在**应用私有沙盒**内，
+  **卸载时由系统连同沙盒一起删除**，天然不残留；且不污染用户可见的 Documents。
+- 任何便携路径不可写（如装到只读位置）时，统一回退到应用支持目录。
+
+- `plugins/<id>/`：安装后的插件文件（重装会整体覆盖该子目录）。
+- `plugin_data/<id>/storage.json`：插件存储，**与插件目录分离**，所以升级/重装不丢数据。
 
 ## manifest.json
 
@@ -80,7 +95,13 @@ lib/plugins/
 ## 扩展点
 
 `sidebarItems`、`mediaSources`、`actions`、`eventListeners`、`settingsPages`、
-`playerOverlays`、`contextMenus`。
+`playerOverlays`、`contextMenus`、`homeStats`。
+
+`homeStats`（首页统计指标）：handler 返回 `{ metrics: [{label, value}, ...] }`，
+宿主渲染在首页媒体计数（电影/剧集/总共）旁边。**桌面端已接入**
+（`desktop_home_screen.dart` 的 `_buildServerStats` + `PluginHomeStatsView`）；
+移动端/TV 端按相同方式读取 `pluginRegistryProvider` 即可接。
+示例见 `plugins_examples/uhdnow_traffic/`（uhdnow 服务器流量统计）。
 
 - 静态：在 manifest 的 `extends` 声明；
 - 动态：运行时 `ctx.extensions.register(type, descriptor)`。
