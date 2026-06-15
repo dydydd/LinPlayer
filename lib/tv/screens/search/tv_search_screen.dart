@@ -1,78 +1,53 @@
 import 'package:flutter/material.dart';
-import '../../../core/theme/app_motion.dart';
-import '../../theme/tv_design_tokens.dart';
-import '../../widgets/tv_focusable.dart';
-import '../../widgets/tv_toast.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
-/// TV 搜索页
-/// 左侧虚拟键盘 + 右侧搜索结果/搜索历史
-class TvSearchScreen extends StatefulWidget {
+import '../../../core/api/api_interfaces.dart';
+import '../../../core/providers/app_providers.dart';
+import '../../../core/providers/media_providers.dart';
+import '../../../ui/utils/media_helpers.dart';
+import '../../../ui/widgets/common/media_widgets.dart';
+import '../../theme/tv_design_tokens.dart';
+import '../../widgets/tv_button.dart';
+import '../../widgets/tv_focusable.dart';
+
+/// TV 搜索页 —— 左侧虚拟键盘 + 右侧真实搜索结果 / 历史。
+class TvSearchScreen extends ConsumerStatefulWidget {
   const TvSearchScreen({super.key});
 
   @override
-  State<TvSearchScreen> createState() => _TvSearchScreenState();
+  ConsumerState<TvSearchScreen> createState() => _TvSearchScreenState();
 }
 
-class _TvSearchScreenState extends State<TvSearchScreen> {
+class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
   final TextEditingController _searchController = TextEditingController();
-  final FocusNode _searchFocusNode = FocusNode();
-  String _query = '';
   bool _hasSearched = false;
-  List<String> _searchHistory = [];
 
   @override
   void dispose() {
     _searchController.dispose();
-    _searchFocusNode.dispose();
     super.dispose();
   }
 
-  void _onSearch(String query) {
-    if (query.trim().isEmpty) return;
-    setState(() {
-      _query = query;
-      _hasSearched = true;
-      if (!_searchHistory.contains(query)) {
-        _searchHistory.insert(0, query);
-        if (_searchHistory.length > 20) {
-          _searchHistory.removeLast();
-        }
-      }
-    });
-  }
-
-  void _onClearHistory() {
-    setState(() => _searchHistory.clear());
-    TvToast.show(context, '搜索历史已清除');
+  void _submit(String query) {
+    final q = query.trim();
+    if (q.isEmpty) return;
+    ref.read(searchQueryProvider.notifier).state = q;
+    ref.read(searchHistoryProvider.notifier).addQuery(q);
+    setState(() => _hasSearched = true);
   }
 
   void _onKeyPress(String key) {
-    final text = _searchController.text;
-    final selection = _searchController.selection;
-    final newText = text.replaceRange(
-      selection.start,
-      selection.end,
-      key,
-    );
-    _searchController.text = newText;
-    _searchController.selection = TextSelection.collapsed(
-      offset: selection.start + key.length,
-    );
+    _searchController.text += key;
+    setState(() {});
   }
 
   void _onBackspace() {
-    final text = _searchController.text;
-    final selection = _searchController.selection;
-    if (selection.start > 0) {
-      final newText = text.replaceRange(
-        selection.start - 1,
-        selection.start,
-        '',
-      );
-      _searchController.text = newText;
-      _searchController.selection = TextSelection.collapsed(
-        offset: selection.start - 1,
-      );
+    final t = _searchController.text;
+    if (t.isNotEmpty) {
+      _searchController.text = t.substring(0, t.length - 1);
+      setState(() {});
     }
   }
 
@@ -82,7 +57,6 @@ class _TvSearchScreenState extends State<TvSearchScreen> {
       backgroundColor: TvDesignTokens.background,
       body: Row(
         children: [
-          // 左侧搜索区域
           Expanded(
             flex: 2,
             child: Padding(
@@ -90,7 +64,6 @@ class _TvSearchScreenState extends State<TvSearchScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // 搜索标题
                   const Text(
                     '搜索',
                     style: TextStyle(
@@ -100,63 +73,13 @@ class _TvSearchScreenState extends State<TvSearchScreen> {
                     ),
                   ),
                   const SizedBox(height: TvDesignTokens.spacingLg),
-                  // 搜索输入框
-                  TvFocusable(
-                    autofocus: true,
-                    onSelect: () => _searchFocusNode.requestFocus(),
-                    child: Container(
-                      padding: const EdgeInsets.all(TvDesignTokens.spacingMd),
-                      decoration: BoxDecoration(
-                        color: TvDesignTokens.surface,
-                        borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.search,
-                            color: TvDesignTokens.textSecondary,
-                            size: 32,
-                          ),
-                          const SizedBox(width: TvDesignTokens.spacingMd),
-                          Expanded(
-                            child: Text(
-                              _searchController.text.isEmpty
-                                  ? '输入搜索内容...'
-                                  : _searchController.text,
-                              style: TextStyle(
-                                fontSize: TvDesignTokens.fontSizeMd,
-                                color: _searchController.text.isEmpty
-                                    ? TvDesignTokens.textDisabled
-                                    : TvDesignTokens.textPrimary,
-                              ),
-                            ),
-                          ),
-                          if (_searchController.text.isNotEmpty)
-                            TvFocusable(
-                              onSelect: () {
-                                _searchController.clear();
-                                setState(() {});
-                              },
-                              child: const Icon(
-                                Icons.clear,
-                                color: TvDesignTokens.textSecondary,
-                                size: 28,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
+                  _buildInputBox(),
                   const SizedBox(height: TvDesignTokens.spacingLg),
-                  // 虚拟键盘
-                  Expanded(
-                    child: _buildVirtualKeyboard(),
-                  ),
+                  Expanded(child: _buildVirtualKeyboard()),
                 ],
               ),
             ),
           ),
-          // 右侧结果区域
           Expanded(
             flex: 3,
             child: Container(
@@ -171,120 +94,110 @@ class _TvSearchScreenState extends State<TvSearchScreen> {
     );
   }
 
+  Widget _buildInputBox() {
+    final hasText = _searchController.text.isNotEmpty;
+    return Container(
+      padding: const EdgeInsets.all(TvDesignTokens.spacingMd),
+      decoration: BoxDecoration(
+        color: TvDesignTokens.surface,
+        borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.search,
+              color: TvDesignTokens.textSecondary, size: 32),
+          const SizedBox(width: TvDesignTokens.spacingMd),
+          Expanded(
+            child: Text(
+              hasText ? _searchController.text : '输入搜索内容...',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: TvDesignTokens.fontSizeMd,
+                color: hasText
+                    ? TvDesignTokens.textPrimary
+                    : TvDesignTokens.textDisabled,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildVirtualKeyboard() {
-    final rows = [
+    const rows = [
       ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
       ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
       ['z', 'x', 'c', 'v', 'b', 'n', 'm'],
     ];
-
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        ...rows.map((row) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: TvDesignTokens.keyboardKeySpacing),
+        for (final row in rows)
+          Padding(
+            padding: const EdgeInsets.only(
+                bottom: TvDesignTokens.keyboardKeySpacing),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
-              children: row.map((key) {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: TvDesignTokens.keyboardKeySpacing,
-                  ),
-                  child: TvFocusable(
-                    onSelect: () => _onKeyPress(key),
-                    child: Container(
-                      width: TvDesignTokens.keyboardKeyWidth,
-                      height: TvDesignTokens.keyboardKeyHeight,
-                      decoration: BoxDecoration(
-                        color: TvDesignTokens.surfaceElevated,
-                        borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
-                      ),
-                      child: Center(
-                        child: Text(
-                          key.toUpperCase(),
-                          style: const TextStyle(
-                            fontSize: TvDesignTokens.keyboardFontSize,
-                            color: TvDesignTokens.textPrimary,
+              children: [
+                for (final key in row)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: TvDesignTokens.keyboardKeySpacing),
+                    child: TvFocusable(
+                      autofocus: row == rows.first && key == 'q',
+                      padding: const EdgeInsets.all(4),
+                      onSelect: () => _onKeyPress(key),
+                      child: Container(
+                        width: TvDesignTokens.keyboardKeyWidth,
+                        height: TvDesignTokens.keyboardKeyHeight,
+                        decoration: BoxDecoration(
+                          color: TvDesignTokens.surfaceElevated,
+                          borderRadius: BorderRadius.circular(
+                              TvDesignTokens.posterRadius),
+                        ),
+                        child: Center(
+                          child: Text(
+                            key.toUpperCase(),
+                            style: const TextStyle(
+                              fontSize: TvDesignTokens.keyboardFontSize,
+                              color: TvDesignTokens.textPrimary,
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                );
-              }).toList(),
+              ],
             ),
-          );
-        }),
-        // 功能行
+          ),
         Padding(
           padding: const EdgeInsets.only(top: TvDesignTokens.spacingMd),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               TvFocusable(
+                padding: const EdgeInsets.all(4),
+                onSelect: () => _onKeyPress(' '),
+                child: _keyCap(width: 160, child: const Text('空格',
+                    style: TextStyle(
+                        fontSize: TvDesignTokens.fontSizeSm,
+                        color: TvDesignTokens.textPrimary))),
+              ),
+              const SizedBox(width: TvDesignTokens.spacingMd),
+              TvFocusable(
+                padding: const EdgeInsets.all(4),
                 onSelect: _onBackspace,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: TvDesignTokens.spacingMd,
-                    vertical: TvDesignTokens.spacingSm,
-                  ),
-                  decoration: BoxDecoration(
-                    color: TvDesignTokens.surfaceElevated,
-                    borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
-                  ),
-                  child: const Icon(
-                    Icons.backspace,
-                    color: TvDesignTokens.textPrimary,
-                    size: 28,
-                  ),
-                ),
+                child: _keyCap(
+                    child: const Icon(Icons.backspace,
+                        color: TvDesignTokens.textPrimary, size: 28)),
               ),
               const SizedBox(width: TvDesignTokens.spacingMd),
-              TvFocusable(
-                onSelect: () {
-                  _searchController.clear();
-                  setState(() {});
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: TvDesignTokens.spacingMd,
-                    vertical: TvDesignTokens.spacingSm,
-                  ),
-                  decoration: BoxDecoration(
-                    color: TvDesignTokens.surfaceElevated,
-                    borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
-                  ),
-                  child: const Text(
-                    '清除',
-                    style: TextStyle(
-                      fontSize: TvDesignTokens.fontSizeSm,
-                      color: TvDesignTokens.textPrimary,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: TvDesignTokens.spacingMd),
-              TvFocusable(
-                onSelect: () => _onSearch(_searchController.text),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: TvDesignTokens.spacingLg,
-                    vertical: TvDesignTokens.spacingSm,
-                  ),
-                  decoration: BoxDecoration(
-                    color: TvDesignTokens.brand,
-                    borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
-                  ),
-                  child: const Text(
-                    '搜索',
-                    style: TextStyle(
-                      fontSize: TvDesignTokens.fontSizeMd,
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
+              TvButton(
+                text: '搜索',
+                icon: Icons.search,
+                onPressed: () => _submit(_searchController.text),
               ),
             ],
           ),
@@ -293,51 +206,58 @@ class _TvSearchScreenState extends State<TvSearchScreen> {
     );
   }
 
+  Widget _keyCap({double? width, required Widget child}) {
+    return Container(
+      width: width,
+      height: TvDesignTokens.keyboardKeyHeight,
+      padding: const EdgeInsets.symmetric(horizontal: TvDesignTokens.spacingMd),
+      decoration: BoxDecoration(
+        color: TvDesignTokens.surfaceElevated,
+        borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+      ),
+      child: Center(child: child),
+    );
+  }
+
   Widget _buildSearchHistory() {
-    if (_searchHistory.isEmpty) {
+    final history = ref.watch(searchHistoryProvider);
+    if (history.isEmpty) {
       return const Center(
-        child: Text(
-          '暂无搜索历史',
-          style: TextStyle(
-            fontSize: TvDesignTokens.fontSizeMd,
-            color: TvDesignTokens.textDisabled,
-          ),
-        ),
+        child: Text('暂无搜索历史',
+            style: TextStyle(
+                fontSize: TvDesignTokens.fontSizeMd,
+                color: TvDesignTokens.textDisabled)),
       );
     }
-
     return ListView(
       padding: const EdgeInsets.all(TvDesignTokens.spacingLg),
       children: [
         Row(
           children: [
-            const Text(
-              '搜索历史',
-              style: TextStyle(
-                fontSize: TvDesignTokens.fontSizeLg,
-                color: TvDesignTokens.textPrimary,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+            const Text('搜索历史',
+                style: TextStyle(
+                    fontSize: TvDesignTokens.fontSizeLg,
+                    color: TvDesignTokens.textPrimary,
+                    fontWeight: FontWeight.bold)),
             const Spacer(),
             TvFocusable(
-              onSelect: _onClearHistory,
-              child: const Text(
-                '清除全部',
-                style: TextStyle(
-                  fontSize: TvDesignTokens.fontSizeSm,
-                  color: TvDesignTokens.brand,
-                ),
-              ),
+              padding: const EdgeInsets.all(6),
+              onSelect: () =>
+                  ref.read(searchHistoryProvider.notifier).clear(),
+              child: const Text('清除全部',
+                  style: TextStyle(
+                      fontSize: TvDesignTokens.fontSizeSm,
+                      color: TvDesignTokens.brand)),
             ),
           ],
         ),
         const SizedBox(height: TvDesignTokens.spacingLg),
-        ..._searchHistory.map((query) {
-          return TvFocusable(
+        for (final query in history)
+          TvFocusable(
+            padding: const EdgeInsets.all(4),
             onSelect: () {
               _searchController.text = query;
-              _onSearch(query);
+              _submit(query);
             },
             child: Container(
               padding: const EdgeInsets.all(TvDesignTokens.spacingMd),
@@ -348,94 +268,136 @@ class _TvSearchScreenState extends State<TvSearchScreen> {
               ),
               child: Row(
                 children: [
-                  const Icon(
-                    Icons.history,
-                    color: TvDesignTokens.textSecondary,
-                    size: 24,
-                  ),
+                  const Icon(Icons.history,
+                      color: TvDesignTokens.textSecondary, size: 24),
                   const SizedBox(width: TvDesignTokens.spacingMd),
                   Expanded(
-                    child: Text(
-                      query,
-                      style: const TextStyle(
-                        fontSize: TvDesignTokens.fontSizeMd,
-                        color: TvDesignTokens.textPrimary,
-                      ),
-                    ),
+                    child: Text(query,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: TvDesignTokens.fontSizeMd,
+                            color: TvDesignTokens.textPrimary)),
                   ),
                 ],
               ),
             ),
-          );
-        }),
+          ),
       ],
     );
   }
 
   Widget _buildSearchResults() {
-    // TODO: 从 Provider 获取真实搜索结果
-    return ListView(
-      padding: const EdgeInsets.all(TvDesignTokens.spacingLg),
-      children: [
-        Text(
-          '"$_query" 的搜索结果',
-          style: const TextStyle(
-            fontSize: TvDesignTokens.fontSizeLg,
-            color: TvDesignTokens.textPrimary,
-            fontWeight: FontWeight.bold,
+    final resultsAsync = ref.watch(searchResultsProvider);
+    final query = ref.watch(searchQueryProvider);
+    final api = ref.read(apiClientProvider);
+
+    return resultsAsync.when(
+      data: (items) {
+        if (items.isEmpty) {
+          return Center(
+            child: Text('未找到“$query”的结果',
+                style: const TextStyle(
+                    fontSize: TvDesignTokens.fontSizeMd,
+                    color: TvDesignTokens.textDisabled)),
+          );
+        }
+        return ListView(
+          padding: const EdgeInsets.all(TvDesignTokens.spacingLg),
+          children: [
+            Text('“$query” 的搜索结果（${items.length}）',
+                style: const TextStyle(
+                    fontSize: TvDesignTokens.fontSizeLg,
+                    color: TvDesignTokens.textPrimary,
+                    fontWeight: FontWeight.bold)),
+            const SizedBox(height: TvDesignTokens.spacingLg),
+            for (final entry in items.asMap().entries)
+              _buildResultRow(api, entry.value).animate().fadeIn(
+                    delay: Duration(milliseconds: 30 * entry.key),
+                    duration: TvDesignTokens.contentFadeDuration,
+                  ),
+          ],
+        );
+      },
+      loading: () =>
+          const Center(child: CircularProgressIndicator(color: TvDesignTokens.brand)),
+      error: (e, _) => Center(
+        child: Text('搜索失败：$e',
+            style: const TextStyle(
+                fontSize: TvDesignTokens.fontSizeSm,
+                color: TvDesignTokens.textSecondary)),
+      ),
+    );
+  }
+
+  Widget _buildResultRow(ApiClientFactory api, MediaItem item) {
+    final urls = resolveMediaItemLandscapeImageUrls(api, item, maxWidth: 360);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: TvDesignTokens.spacingSm),
+      child: TvFocusable(
+        padding: const EdgeInsets.all(4),
+        onSelect: () => context.push('/tv/detail/${item.id}'),
+        child: Container(
+          padding: const EdgeInsets.all(TvDesignTokens.spacingMd),
+          decoration: BoxDecoration(
+            color: TvDesignTokens.background,
+            borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+          ),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+                child: SizedBox(
+                  width: 124,
+                  height: 70,
+                  child: urls.isNotEmpty
+                      ? MediaImage(
+                          imageUrl: urls.first,
+                          width: 124,
+                          height: 70,
+                          fit: BoxFit.cover,
+                        )
+                      : const ColoredBox(
+                          color: TvDesignTokens.surfaceElevated,
+                          child: Icon(Icons.movie_outlined,
+                              color: TvDesignTokens.textDisabled)),
+                ),
+              ),
+              const SizedBox(width: TvDesignTokens.spacingMd),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(item.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: TvDesignTokens.fontSizeMd,
+                            color: TvDesignTokens.textPrimary)),
+                    const SizedBox(height: TvDesignTokens.spacingXs),
+                    Text(_resultSubtitle(item),
+                        style: const TextStyle(
+                            fontSize: TvDesignTokens.fontSizeSm,
+                            color: TvDesignTokens.textSecondary)),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: TvDesignTokens.spacingLg),
-        // 占位结果
-        ...List.generate(5, (index) {
-          return TvFocusable(
-            onSelect: () => TvToast.show(context, '选择结果 $index'),
-            child: Container(
-              padding: const EdgeInsets.all(TvDesignTokens.spacingMd),
-              margin: const EdgeInsets.only(bottom: TvDesignTokens.spacingSm),
-              decoration: BoxDecoration(
-                color: TvDesignTokens.background,
-                borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 120,
-                    height: 67,
-                    decoration: BoxDecoration(
-                      color: TvDesignTokens.surfaceElevated,
-                      borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
-                    ),
-                  ),
-                  const SizedBox(width: TvDesignTokens.spacingMd),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '搜索结果 $index',
-                          style: const TextStyle(
-                            fontSize: TvDesignTokens.fontSizeMd,
-                            color: TvDesignTokens.textPrimary,
-                          ),
-                        ),
-                        const SizedBox(height: TvDesignTokens.spacingXs),
-                        Text(
-                          '电影 · 2024',
-                          style: const TextStyle(
-                            fontSize: TvDesignTokens.fontSizeSm,
-                            color: TvDesignTokens.textSecondary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ).appEntrance(index: index);
-        }),
-      ],
+      ),
     );
+  }
+
+  String _resultSubtitle(MediaItem item) {
+    final type = switch (item.type) {
+      'Movie' => '电影',
+      'Series' => '剧集',
+      'Episode' => '单集',
+      _ => item.type,
+    };
+    final parts = <String>[type];
+    if (item.productionYear != null) parts.add('${item.productionYear}');
+    return parts.join(' · ');
   }
 }

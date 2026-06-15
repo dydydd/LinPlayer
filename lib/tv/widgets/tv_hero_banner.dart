@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
 import '../../core/theme/app_motion.dart';
+import '../../ui/widgets/common/media_widgets.dart';
 import '../theme/tv_design_tokens.dart';
-import 'tv_focusable.dart';
+import 'tv_button.dart';
 
 /// TV Hero Banner
 /// 自动轮播（10秒），支持遥控器左右切换
@@ -166,12 +168,13 @@ class _TvHeroBannerState extends State<TvHeroBanner> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // 背景图
+        // 背景图（走持久化缓存，避免轮播回切时重新下载）
         item.imageUrl != null
-            ? Image.network(
-                item.imageUrl!,
+            ? MediaImage(
+                imageUrl: item.imageUrl,
+                width: double.infinity,
+                height: double.infinity,
                 fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
               )
             : _buildPlaceholder(),
         // 渐变遮罩
@@ -231,40 +234,28 @@ class _TvHeroBannerState extends State<TvHeroBanner> {
                 ),
               ],
               const SizedBox(height: TvDesignTokens.spacingLg),
-              // 播放按钮
-              if (item.onPlay != null)
-                TvFocusable(
-                  onSelect: item.onPlay,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: TvDesignTokens.spacingLg,
-                      vertical: TvDesignTokens.spacingSm,
+              // 操作按钮（TDesign 按钮 + TV 焦点）
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (item.onPlay != null)
+                    TvButton(
+                      text: '播放',
+                      icon: Icons.play_arrow,
+                      onPressed: item.onPlay,
                     ),
-                    decoration: BoxDecoration(
-                      color: TvDesignTokens.brand,
-                      borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+                  if (item.onDetail != null) ...[
+                    const SizedBox(width: TvDesignTokens.spacingSm),
+                    TvButton(
+                      text: '详情',
+                      icon: Icons.info_outline,
+                      type: TDButtonType.outline,
+                      theme: TDButtonTheme.light,
+                      onPressed: item.onDetail,
                     ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.play_arrow,
-                          color: Colors.white,
-                          size: 32,
-                        ),
-                        SizedBox(width: TvDesignTokens.spacingSm),
-                        Text(
-                          '播放',
-                          style: TextStyle(
-                            fontSize: TvDesignTokens.fontSizeMd,
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+                  ],
+                ],
+              ),
             ],
           ).appEntrance(),
         ),

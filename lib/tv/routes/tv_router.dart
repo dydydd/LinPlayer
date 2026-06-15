@@ -3,6 +3,7 @@ import '../screens/home/tv_home_screen.dart';
 import '../screens/search/tv_search_screen.dart';
 import '../screens/library/tv_library_screen.dart';
 import '../screens/server/tv_server_screen.dart';
+import '../screens/server/tv_add_server_screen.dart';
 import '../screens/settings/tv_settings_screen.dart';
 import '../screens/detail/tv_detail_screen.dart';
 import '../screens/player/tv_player_screen.dart';
@@ -30,6 +31,11 @@ final tvRouter = GoRouter(
           episodeId: episodeId,
         );
       },
+    ),
+    // 添加服务器（独立页面，全屏表单）
+    GoRoute(
+      path: '/tv/add-server',
+      builder: (context, state) => const TvAddServerScreen(),
     ),
     // 详情页（独立页面，无导航栏）
     GoRoute(

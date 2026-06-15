@@ -538,6 +538,10 @@ class VideoPlayerService extends ChangeNotifier {
     _adapter?.setSubtitleSelectionHint(codec, title: title);
   }
 
+  /// 当前选中的字幕 / 音频轨道 id（未选则为 null）。
+  String? get selectedSubtitleTrackId => _selectedSubtitleTrackId;
+  String? get selectedAudioTrackId => _selectedAudioTrackId;
+
   /// 选择字幕轨道（内封字幕切换）
   Future<void> selectSubtitleTrack(String trackId) async {
     _selectedSubtitleTrackId = trackId;

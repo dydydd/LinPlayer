@@ -523,82 +523,18 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     }
   }
 
-  String _embySubtitleCodec(String codec) {
-    final lower = codec.toLowerCase();
-    final isPgs = lower == 'pgssub' ||
-        lower == 'pgs' ||
-        lower == 'sup' ||
-        lower.contains('hdmv');
-    if (_playerService.coreType == PlayerCoreType.mpv ||
-        _playerService.coreType == PlayerCoreType.nativeMpv) {
-      switch (lower) {
-        case 'srt' || 'subrip':
-          return 'srt';
-        case 'vtt' || 'webvtt':
-          return 'vtt';
-        default:
-          if (isPgs) return 'pgs';
-          return 'ass';
-      }
-    } else {
-      switch (lower) {
-        case 'srt' || 'subrip':
-          return 'srt';
-        case 'vtt' || 'webvtt':
-          return 'vtt';
-        case 'ass' || 'ssa':
-          return 'ass';
-        case 'pgssub' || 'pgs' || 'sup':
-          return 'pgs';
-        default:
-          if (isPgs) return 'pgs';
-          return 'srt';
-      }
-    }
-  }
+  // 字幕编解码归一收敛到公共 [PlayerSubtitleLoader]（三端共用，逻辑一致）。
+  String _embySubtitleCodec(String codec) =>
+      PlayerSubtitleLoader.embySubtitleCodec(codec, _playerService.coreType);
 
-  String _subtitleFileExtension(String codec, PlayerCoreType coreType) {
-    final lower = codec.toLowerCase();
-    if (lower == 'srt' || lower == 'subrip') {
-      return 'srt';
-    }
-    if (lower == 'vtt' || lower == 'webvtt') {
-      return 'vtt';
-    }
-    if (lower == 'ass' || lower == 'ssa') {
-      return 'ass';
-    }
-    if (lower == 'pgssub' ||
-        lower == 'pgs' ||
-        lower == 'sup' ||
-        lower == 'dvdsub' ||
-        lower == 'vobsub' ||
-        lower.contains('hdmv') ||
-        lower.contains('pgs')) {
-      return 'sup';
-    }
-    if (coreType == PlayerCoreType.mpv ||
-        coreType == PlayerCoreType.nativeMpv) {
-      return 'ass';
-    }
-    return 'srt';
-  }
+  String _subtitleFileExtension(String codec, PlayerCoreType coreType) =>
+      PlayerSubtitleLoader.subtitleFileExtension(codec, coreType);
 
-  bool _isAssSubtitleCodec(String codec) {
-    final lower = codec.toLowerCase();
-    return lower == 'ass' || lower == 'ssa';
-  }
+  bool _isAssSubtitleCodec(String codec) =>
+      PlayerSubtitleLoader.isAssSubtitleCodec(codec);
 
-  bool _isGraphicalSubtitleCodec(String codec) {
-    final lower = codec.toLowerCase();
-    return lower == 'pgssub' ||
-        lower == 'sup' ||
-        lower == 'pgs' ||
-        lower == 'dvdsub' ||
-        lower == 'vobsub' ||
-        lower.contains('hdmv') ||
-        lower.contains('pgs');
-  }
+  bool _isGraphicalSubtitleCodec(String codec) =>
+      PlayerSubtitleLoader.isGraphicalSubtitleCodec(codec);
 
   Future<File> _prepareSubtitleFileForPlayer({
     required String subtitleUrl,
@@ -2077,13 +2013,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 
-  /// 播放停止时判断是否「看完」（进度≥90%），是则上报到已连接的同步服务。
-  /// onStop 可能因显式停止 + dispose 触发两次，用 [_didScrobble] 去重。
+  /// 播放停止时判断是否「看完」（进度达到设置里的统一观看阈值），是则上报到
+  /// 已连接的同步服务。onStop 可能因显式停止 + dispose 触发两次，用 [_didScrobble] 去重。
   Future<void> _maybeScrobbleWatched(PlaybackStopInfo info, MediaItem item) async {
     if (_didScrobble) return;
     final runtime = item.runTimeTicks;
     if (runtime == null || runtime <= 0) return;
-    if (info.positionTicks / runtime < 0.9) return;
+    // 复用设置页「观看阈值」（linplayer_watched_threshold，75~95，默认90）。
+    final thresholdPercent = ref.read(watchedThresholdProvider);
+    if (info.positionTicks / runtime < thresholdPercent / 100) return;
     _didScrobble = true;
 
     // 剧集需要所属剧的 ProviderIds 才能给 Bangumi 取 subject_id。

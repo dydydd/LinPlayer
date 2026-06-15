@@ -1,37 +1,25 @@
 import 'package:flutter/material.dart';
-import '../../theme/tv_design_tokens.dart';
-import '../../widgets/tv_focusable.dart';
-import '../../widgets/tv_toast.dart';
-import '../../widgets/tv_panel.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
-/// TV 服务器页
-/// 展示已添加的服务器列表，支持添加/编辑/删除
-class TvServerScreen extends StatefulWidget {
+import '../../../core/providers/app_providers.dart';
+import '../../../core/providers/media_providers.dart';
+import '../../theme/tv_design_tokens.dart';
+import '../../widgets/tv_button.dart';
+import '../../widgets/tv_focusable.dart';
+import '../../widgets/tv_panel.dart';
+import '../../widgets/tv_toast.dart';
+
+/// TV 服务器页 —— 真实服务器列表，支持切换当前服务器、删除、跳转添加。
+class TvServerScreen extends ConsumerWidget {
   const TvServerScreen({super.key});
 
   @override
-  State<TvServerScreen> createState() => _TvServerScreenState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final servers = ref.watch(serverListProvider);
+    final current = ref.watch(currentServerProvider);
 
-class _TvServerScreenState extends State<TvServerScreen> {
-  // TODO: 从 Provider 获取服务器列表
-  final List<Map<String, dynamic>> _servers = [
-    {
-      'name': '家庭服务器',
-      'url': 'http://192.168.1.100:8096',
-      'isOnline': true,
-    },
-    {
-      'name': '公司服务器',
-      'url': 'http://192.168.1.101:8096',
-      'isOnline': false,
-    },
-  ];
-
-  int? _selectedServerIndex;
-
-  @override
-  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: TvDesignTokens.background,
       body: Padding(
@@ -39,7 +27,6 @@ class _TvServerScreenState extends State<TvServerScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 标题
             const Text(
               '服务器',
               style: TextStyle(
@@ -49,17 +36,29 @@ class _TvServerScreenState extends State<TvServerScreen> {
               ),
             ),
             const SizedBox(height: TvDesignTokens.spacingLg),
-            // 服务器列表
             Expanded(
-              child: ListView.builder(
-                itemCount: _servers.length + 1, // +1 添加按钮
-                itemBuilder: (context, index) {
-                  if (index == _servers.length) {
-                    return _buildAddButton();
-                  }
-                  return _buildServerCard(index);
-                },
-              ),
+              child: servers.isEmpty
+                  ? _buildEmpty(context)
+                  : ListView(
+                      children: [
+                        for (final entry in servers.asMap().entries)
+                          _buildServerCard(
+                            context,
+                            ref,
+                            entry.value,
+                            isCurrent: entry.value.id == current?.id,
+                          ).animate().fadeIn(
+                                delay: Duration(milliseconds: 40 * entry.key),
+                                duration: TvDesignTokens.contentFadeDuration,
+                              ),
+                        const SizedBox(height: TvDesignTokens.spacingMd),
+                        TvButton(
+                          text: '添加服务器',
+                          icon: Icons.add,
+                          onPressed: () => context.go('/tv/add-server'),
+                        ),
+                      ],
+                    ),
             ),
           ],
         ),
@@ -67,314 +66,222 @@ class _TvServerScreenState extends State<TvServerScreen> {
     );
   }
 
-  Widget _buildServerCard(int index) {
-    final server = _servers[index];
-    final isSelected = _selectedServerIndex == index;
+  Widget _buildEmpty(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.dns_outlined,
+              color: TvDesignTokens.textSecondary, size: 80),
+          const SizedBox(height: TvDesignTokens.spacingLg),
+          const Text('还没有服务器',
+              style: TextStyle(
+                  fontSize: TvDesignTokens.fontSizeXl,
+                  color: TvDesignTokens.textPrimary,
+                  fontWeight: FontWeight.bold)),
+          const SizedBox(height: TvDesignTokens.spacingXl),
+          TvButton(
+            text: '添加服务器',
+            icon: Icons.add,
+            autofocus: true,
+            onPressed: () => context.go('/tv/add-server'),
+          ),
+        ],
+      ),
+    );
+  }
 
-    return TvFocusable(
-      onSelect: () {
-        setState(() => _selectedServerIndex = index);
-      },
-      child: Container(
-        padding: const EdgeInsets.all(TvDesignTokens.spacingLg),
-        margin: const EdgeInsets.only(bottom: TvDesignTokens.spacingMd),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? TvDesignTokens.brand.withOpacity(0.15)
-              : TvDesignTokens.surface,
-          borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
-          border: isSelected
-              ? Border.all(color: TvDesignTokens.brand, width: 2)
-              : null,
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                color: server['isOnline']
-                    ? TvDesignTokens.success.withOpacity(0.2)
-                    : TvDesignTokens.error.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+  Widget _buildServerCard(
+    BuildContext context,
+    WidgetRef ref,
+    ServerConfig server, {
+    required bool isCurrent,
+  }) {
+    final online = serverHasUsableAuth(server);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: TvDesignTokens.spacingMd),
+      child: TvFocusable(
+        padding: const EdgeInsets.all(6),
+        onSelect: () => _selectServer(context, ref, server),
+        child: Container(
+          padding: const EdgeInsets.all(TvDesignTokens.spacingLg),
+          decoration: BoxDecoration(
+            color: isCurrent
+                ? TvDesignTokens.brand.withValues(alpha: 0.15)
+                : TvDesignTokens.surface,
+            borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+            border: isCurrent
+                ? Border.all(color: TvDesignTokens.brand, width: 2)
+                : null,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: (online ? TvDesignTokens.success : TvDesignTokens.error)
+                      .withValues(alpha: 0.2),
+                  borderRadius:
+                      BorderRadius.circular(TvDesignTokens.posterRadius),
+                ),
+                child: Icon(Icons.storage,
+                    color:
+                        online ? TvDesignTokens.success : TvDesignTokens.error,
+                    size: 32),
               ),
-              child: Icon(
-                Icons.storage,
-                color: server['isOnline'] ? TvDesignTokens.success : TvDesignTokens.error,
-                size: 32,
-              ),
-            ),
-            const SizedBox(width: TvDesignTokens.spacingLg),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    server['name'],
-                    style: TextStyle(
-                      fontSize: TvDesignTokens.fontSizeLg,
-                      color: isSelected ? TvDesignTokens.brand : TvDesignTokens.textPrimary,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: TvDesignTokens.spacingXs),
-                  Text(
-                    server['url'],
-                    style: const TextStyle(
-                      fontSize: TvDesignTokens.fontSizeSm,
-                      color: TvDesignTokens.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: TvDesignTokens.spacingXs),
-                  Row(
-                    children: [
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: server['isOnline'] ? TvDesignTokens.success : TvDesignTokens.error,
-                          shape: BoxShape.circle,
+              const SizedBox(width: TvDesignTokens.spacingLg),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            server.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: TvDesignTokens.fontSizeLg,
+                              color: isCurrent
+                                  ? TvDesignTokens.brand
+                                  : TvDesignTokens.textPrimary,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: TvDesignTokens.spacingXs),
-                      Text(
-                        server['isOnline'] ? '在线' : '离线',
-                        style: TextStyle(
-                          fontSize: TvDesignTokens.fontSizeXs,
-                          color: server['isOnline'] ? TvDesignTokens.success : TvDesignTokens.error,
+                        if (isCurrent) ...[
+                          const SizedBox(width: TvDesignTokens.spacingSm),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: TvDesignTokens.brand,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text('当前',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: TvDesignTokens.spacingXs),
+                    Text(server.baseUrl,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: TvDesignTokens.fontSizeSm,
+                            color: TvDesignTokens.textSecondary)),
+                    const SizedBox(height: TvDesignTokens.spacingXs),
+                    Row(
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: online
+                                ? TvDesignTokens.success
+                                : TvDesignTokens.error,
+                            shape: BoxShape.circle,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            // 操作按钮
-            if (isSelected) ...[
-              TvFocusable(
-                onSelect: () => _showEditPanel(index),
-                child: const Icon(
-                  Icons.edit,
-                  color: TvDesignTokens.brand,
-                  size: 28,
+                        const SizedBox(width: TvDesignTokens.spacingXs),
+                        Text(online ? '已登录' : '未登录',
+                            style: TextStyle(
+                                fontSize: TvDesignTokens.fontSizeXs,
+                                color: online
+                                    ? TvDesignTokens.success
+                                    : TvDesignTokens.error)),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(width: TvDesignTokens.spacingMd),
               TvFocusable(
-                onSelect: () => _deleteServer(index),
-                child: const Icon(
-                  Icons.delete,
-                  color: TvDesignTokens.error,
-                  size: 28,
-                ),
+                padding: const EdgeInsets.all(TvDesignTokens.spacingXs),
+                onSelect: () => _confirmDelete(context, ref, server),
+                child: const Icon(Icons.delete_outline,
+                    color: TvDesignTokens.error, size: 28),
               ),
             ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAddButton() {
-    return TvFocusable(
-      onSelect: _showAddPanel,
-      child: Container(
-        padding: const EdgeInsets.all(TvDesignTokens.spacingLg),
-        margin: const EdgeInsets.only(bottom: TvDesignTokens.spacingMd),
-        decoration: BoxDecoration(
-          color: TvDesignTokens.surface,
-          borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
-          border: Border.all(
-            color: TvDesignTokens.divider,
-            width: 2,
-            style: BorderStyle.solid,
           ),
         ),
-        child: const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.add,
-              color: TvDesignTokens.brand,
-              size: 32,
-            ),
-            SizedBox(width: TvDesignTokens.spacingMd),
-            Text(
-              '添加服务器',
-              style: TextStyle(
-                fontSize: TvDesignTokens.fontSizeLg,
-                color: TvDesignTokens.brand,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
 
-  void _showAddPanel() {
-    showDialog(
-      context: context,
-      builder: (context) => TvPanel(
-        title: '添加服务器',
-        onClose: () => Navigator.pop(context),
-        children: [
-          // TODO: 添加服务器表单
-          const TvPanelSection(title: '服务器信息'),
-          TvPanelOption(
-            title: '服务器地址',
-            subtitle: 'http://192.168.1.100:8096',
-            onTap: () {},
-          ),
-          TvPanelOption(
-            title: '用户名',
-            onTap: () {},
-          ),
-          TvPanelOption(
-            title: '密码',
-            onTap: () {},
-          ),
-          const SizedBox(height: TvDesignTokens.spacingLg),
-          TvFocusable(
-            onSelect: () {
-              Navigator.pop(context);
-              TvToast.show(context, '添加服务器成功');
-            },
-            child: Container(
-              padding: const EdgeInsets.all(TvDesignTokens.spacingMd),
-              decoration: BoxDecoration(
-                color: TvDesignTokens.brand,
-                borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
-              ),
-              child: const Center(
-                child: Text(
-                  '保存',
-                  style: TextStyle(
-                    fontSize: TvDesignTokens.fontSizeMd,
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+  void _selectServer(BuildContext context, WidgetRef ref, ServerConfig server) {
+    ref.read(currentServerProvider.notifier).state = server;
+    ref.read(authStateProvider.notifier).state = serverHasUsableAuth(server)
+        ? AuthState.authenticated
+        : AuthState.unauthenticated;
+    ref.invalidate(librariesProvider);
+    ref.invalidate(resumeItemsProvider);
+    ref.invalidate(randomRecommendationsProvider);
+    TvToast.show(context, '已切换到 ${server.name}');
   }
 
-  void _showEditPanel(int index) {
-    final server = _servers[index];
+  void _confirmDelete(BuildContext context, WidgetRef ref, ServerConfig server) {
     showDialog(
       context: context,
-      builder: (context) => TvPanel(
-        title: '编辑服务器',
-        onClose: () => Navigator.pop(context),
-        children: [
-          TvPanelSection(title: server['name']),
-          TvPanelOption(
-            title: '服务器地址',
-            subtitle: server['url'],
-            onTap: () {},
-          ),
-          const SizedBox(height: TvDesignTokens.spacingLg),
-          TvFocusable(
-            onSelect: () {
-              Navigator.pop(context);
-              TvToast.show(context, '保存成功');
-            },
-            child: Container(
-              padding: const EdgeInsets.all(TvDesignTokens.spacingMd),
-              decoration: BoxDecoration(
-                color: TvDesignTokens.brand,
-                borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
-              ),
-              child: const Center(
-                child: Text(
-                  '保存',
-                  style: TextStyle(
-                    fontSize: TvDesignTokens.fontSizeMd,
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _deleteServer(int index) {
-    showDialog(
-      context: context,
-      builder: (context) => TvPanel(
+      builder: (dialogContext) => TvPanel(
         title: '删除服务器',
-        onClose: () => Navigator.pop(context),
+        onClose: () => Navigator.pop(dialogContext),
         children: [
-          Text(
-            '确定要删除 "${_servers[index]['name']}" 吗？',
-            style: const TextStyle(
-              fontSize: TvDesignTokens.fontSizeMd,
-              color: TvDesignTokens.textPrimary,
-            ),
-          ),
+          Text('确定要删除 “${server.name}” 吗？',
+              style: const TextStyle(
+                  fontSize: TvDesignTokens.fontSizeMd,
+                  color: TvDesignTokens.textPrimary)),
           const SizedBox(height: TvDesignTokens.spacingLg),
           Row(
             children: [
               Expanded(
                 child: TvFocusable(
-                  onSelect: () => Navigator.pop(context),
-                  child: Container(
-                    padding: const EdgeInsets.all(TvDesignTokens.spacingMd),
-                    decoration: BoxDecoration(
-                      color: TvDesignTokens.surface,
-                      borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
-                    ),
-                    child: const Center(
-                      child: Text(
-                        '取消',
-                        style: TextStyle(
-                          fontSize: TvDesignTokens.fontSizeMd,
-                          color: TvDesignTokens.textPrimary,
-                        ),
-                      ),
-                    ),
-                  ),
+                  autofocus: true,
+                  onSelect: () => Navigator.pop(dialogContext),
+                  child: _dialogButton('取消', TvDesignTokens.surface,
+                      TvDesignTokens.textPrimary),
                 ),
               ),
               const SizedBox(width: TvDesignTokens.spacingMd),
               Expanded(
                 child: TvFocusable(
                   onSelect: () {
-                    setState(() => _servers.removeAt(index));
-                    Navigator.pop(context);
+                    ref.read(serverListProvider.notifier).removeServer(server.id);
+                    if (ref.read(currentServerProvider)?.id == server.id) {
+                      ref.read(currentServerProvider.notifier).clear();
+                    }
+                    Navigator.pop(dialogContext);
                     TvToast.show(context, '服务器已删除');
                   },
-                  child: Container(
-                    padding: const EdgeInsets.all(TvDesignTokens.spacingMd),
-                    decoration: BoxDecoration(
-                      color: TvDesignTokens.error,
-                      borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
-                    ),
-                    child: const Center(
-                      child: Text(
-                        '删除',
-                        style: TextStyle(
-                          fontSize: TvDesignTokens.fontSizeMd,
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
+                  child:
+                      _dialogButton('删除', TvDesignTokens.error, Colors.white),
                 ),
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _dialogButton(String text, Color bg, Color fg) {
+    return Container(
+      padding: const EdgeInsets.all(TvDesignTokens.spacingMd),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+      ),
+      child: Center(
+        child: Text(text,
+            style: TextStyle(
+                fontSize: TvDesignTokens.fontSizeMd,
+                color: fg,
+                fontWeight: FontWeight.bold)),
       ),
     );
   }
