@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LinPlayer · Bangumi 授权</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: #0f1115; color: #e8eaed;
+    }
+    .card {
+      width: min(92vw, 460px); background: #1b1e25; border: 1px solid #2a2e37;
+      border-radius: 16px; padding: 28px 24px; box-shadow: 0 8px 32px rgba(0,0,0,.4); text-align: center;
+    }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    p { color: #9aa0aa; font-size: 13px; line-height: 1.6; margin: 8px 0; }
+    .code {
+      user-select: all; font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+      font-size: 18px; font-weight: 700; letter-spacing: 1px; word-break: break-all;
+      background: #11141a; border: 1px solid #2a2e37; border-radius: 10px;
+      padding: 14px 12px; margin: 16px 0;
+    }
+    button {
+      appearance: none; border: 0; border-radius: 10px; padding: 12px 18px; cursor: pointer;
+      font-size: 14px; font-weight: 600; background: #ff4d6d; color: #fff;
+    }
+    button:active { transform: scale(.98); }
+    .err { color: #ff7081; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>LinPlayer · Bangumi 授权</h1>
+    <div id="content">
+      <p>正在读取授权码…</p>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search);
+      var code = params.get('code');
+      var error = params.get('error');
+      var box = document.getElementById('content');
+      if (error) {
+        box.innerHTML = '<p class="err">授权失败：' + error + '</p><p>请返回 App 重试。</p>';
+        return;
+      }
+      if (!code) {
+        box.innerHTML = '<p class="err">未检测到授权码。</p><p>请从 App 内重新发起授权。</p>';
+        return;
+      }
+      box.innerHTML =
+        '<p>复制下面的授权码，粘贴回 LinPlayer：</p>' +
+        '<div class="code" id="code">' + code + '</div>' +
+        '<button id="copy">复制授权码</button>' +
+        '<p style="margin-top:16px">复制后回到 App 粘贴即可完成连接。</p>';
+      document.getElementById('copy').addEventListener('click', function () {
+        var t = document.getElementById('code').textContent;
+        navigator.clipboard && navigator.clipboard.writeText(t);
+        this.textContent = '已复制 ✓';
+      });
+    })();
+  </script>
+</body>
+</html>

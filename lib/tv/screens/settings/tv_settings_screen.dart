@@ -3,6 +3,7 @@ import '../../theme/tv_design_tokens.dart';
 import '../../widgets/tv_focusable.dart';
 import '../../widgets/tv_toast.dart';
 import '../../widgets/tv_panel.dart';
+import 'tv_sync_settings.dart';
 
 /// TV 设置页
 /// 左侧设置分类 + 右侧设置项
@@ -20,6 +21,7 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
     _SettingCategory(Icons.play_circle_outline, '播放'),
     _SettingCategory(Icons.settings, '通用'),
     _SettingCategory(Icons.subtitles, '字幕'),
+    _SettingCategory(Icons.sync, '同步'),
     _SettingCategory(Icons.info_outline, '关于'),
   ];
 
@@ -90,6 +92,8 @@ class _TvSettingsScreenState extends State<TvSettingsScreen> {
       case 2:
         return _buildSubtitleSettings();
       case 3:
+        return const TvSyncSettings();
+      case 4:
         return _buildAboutSettings();
       default:
         return const SizedBox.shrink();
