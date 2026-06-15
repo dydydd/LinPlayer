@@ -37,7 +37,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.linplayer_mobile"
-        minSdk = flutter.minSdkVersion
+        minSdk = 24  // Vulkan 支持需要 API 24+ (Android 7.0+)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
