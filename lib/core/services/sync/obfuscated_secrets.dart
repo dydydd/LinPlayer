@@ -36,22 +36,20 @@ class ObfuscatedSecrets {
     12, 30, 3, 103, 92, 36, 250, 79, 111, 206, 250, 40, 27, 0, 140, 56,
     26, 76, 182, 143, 229, 240, 82, 115, 44, 95, 184, 208, 142, 157, 230, 39
   ];
-  static const List<int> _traktSecret = [
-    88, 64, 84, 111, 86, 39, 161, 25, 106, 146, 250, 125, 70, 4, 142, 59, //
-    29, 28, 177, 141, 176, 167, 82, 113, 47, 11, 227, 129, 139, 203, 228, 119,
-    90, 27, 81, 110, 86, 35, 167, 27, 111, 206, 161, 115, 73, 7, 222, 63,
-    27, 73, 228, 142, 180, 245, 84, 35, 44, 7, 226, 133, 216, 200, 230, 113
-  ];
+  // secret 已迁移到后端代理（Cloudflare Pages 环境变量），客户端不再持有。
+  // 详见 lib/core/services/sync/sync_config.dart 与 oauth-proxy/README.md。
+  // 这两个数组刻意留空：所有需要 secret 的换/刷令牌都经代理完成。
+  static const List<int> _traktSecret = [];
+  static const List<int> _bangumiSecret = [];
   static const List<int> _bangumiId = [
     8, 31, 88, 107, 89, 35, 247, 29, 50, 150, 245, 40, 76, 85, 220, 59, //
     28, 72, 179, 139
   ];
-  static const List<int> _bangumiSecret = [
-    90, 74, 12, 106, 10, 114, 163, 30, 58, 199, 247, 44, 71, 1, 217, 106, //
-    29, 77, 227, 138, 224, 247, 86, 47, 45, 14, 225, 129, 139, 145, 182, 113
-  ];
 
   static String get traktClientId => _reveal(_traktId);
+
+  /// secret 已移交后端代理；客户端侧返回空串（仅在未配置代理的直连回退路径中
+  /// 才会被读到，而本项目已固定走代理）。
   static String get traktClientSecret => _reveal(_traktSecret);
   static String get bangumiAppId => _reveal(_bangumiId);
   static String get bangumiAppSecret => _reveal(_bangumiSecret);
