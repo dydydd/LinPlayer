@@ -108,6 +108,10 @@ const String kPluginBootstrapJs = r'''
   var emby = {
     getCurrentUser: function () { return __callHost('emby', 'getCurrentUser', []); },
     getServerUrl: function () { return __callHost('emby', 'getServerUrl', []); },
+    // 返回 { url, name, username, userId }（username 来自添加服务器时填写的账号）
+    getServerInfo: function () { return __callHost('emby', 'getServerInfo', []); },
+    // 返回 { username, password, url }（需要 emby.credentials 权限）
+    getCredentials: function () { return __callHost('emby', 'getCredentials', []); },
     apiRequest: function (opts) { return __callHost('emby', 'apiRequest', [opts || {}]); }
   };
 
@@ -130,6 +134,8 @@ const String kPluginBootstrapJs = r'''
     ui: ui,
     emby: emby,
     extensions: extensions,
+    // 延时（毫秒），用于重试退避。封顶 10s。
+    sleep: function (ms) { return __callHost('util', 'sleep', [Number(ms) || 0]); },
     // 插件元信息，由宿主在加载后通过 __lp_setMeta 注入
     plugin: {}
   };

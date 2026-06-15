@@ -80,6 +80,8 @@ class PluginContextBridge {
         return _emby(method, args);
       case 'extensions':
         return _extensions(method, args);
+      case 'util':
+        return _util(method, args);
       default:
         throw Exception('未知能力通道: $channel');
     }
@@ -282,11 +284,31 @@ class PluginContextBridge {
       case 'getServerUrl':
         _require(PluginPermissions.embyRead.id);
         return container.read(currentServerProvider)?.activeLineUrl;
+      case 'getServerInfo':
+        _require(PluginPermissions.embyRead.id);
+        final s = container.read(currentServerProvider);
+        if (s == null) return null;
+        return {
+          'url': s.activeLineUrl,
+          'baseUrl': s.baseUrl,
+          'name': s.name,
+          'username': s.username,
+          'userId': s.userId,
+        };
       case 'getCurrentUser':
         _require(PluginPermissions.embyRead.id);
         final user = await container.read(currentUserProvider.future);
         if (user == null) return null;
         return {'id': user.id, 'name': user.name};
+      case 'getCredentials':
+        _require(PluginPermissions.embyCredentials.id);
+        final s = container.read(currentServerProvider);
+        if (s == null) return null;
+        return {
+          'username': s.username,
+          'password': s.password,
+          'url': s.activeLineUrl,
+        };
       case 'apiRequest':
         _require(PluginPermissions.embyApi.id);
         return _embyApiRequest(
@@ -354,6 +376,20 @@ class PluginContextBridge {
         return null;
       default:
         throw Exception('未知 extensions 方法: $method');
+    }
+  }
+
+  // ---- util（无需权限）----
+  Future<dynamic> _util(String method, List args) async {
+    switch (method) {
+      case 'sleep':
+        // 退避/重试用的延时，封顶 10s（避免占用单次调用预算过久）。
+        final ms = (args.isNotEmpty ? args[0] : 0) as num;
+        final clamped = ms.clamp(0, 10000).toInt();
+        await Future<void>.delayed(Duration(milliseconds: clamped));
+        return null;
+      default:
+        throw Exception('未知 util 方法: $method');
     }
   }
 

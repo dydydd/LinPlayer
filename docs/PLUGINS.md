@@ -84,7 +84,8 @@ lib/plugins/
 | `ctx.player` | `play/pause/seek` | `player.control` |
 | `ctx.player` | `on(event,fn)/off(event,fn)` | `player.read` |
 | `ctx.ui` | `showToast/showDialog/showForm/openPage` | `ui` |
-| `ctx.emby` | `getCurrentUser/getServerUrl` | `emby.read` |
+| `ctx.emby` | `getCurrentUser/getServerUrl/getServerInfo` | `emby.read` |
+| `ctx.emby` | `getCredentials()`（返回 username/password/url） | `emby.credentials` |
 | `ctx.emby` | `apiRequest({method,path,query,body})` | `emby.api` |
 | `ctx.extensions` | `register(type,desc)/unregister(type,id)` | `extensions` |
 

@@ -141,9 +141,13 @@ packaging/
 /dist/
 *.lpk
 
-# 插件开发参考素材（uhdnow 用户面板的保存网页，仅供解析参考，不提交）
+# 插件开发参考素材：保存到本地的网页（仅供解析/逆向参考，不提交 GitHub）
+# 「保存完整网页」会生成 <名字>.html + <名字>_files/ 一对，这里按需忽略。
 /user.htm
 /user_files/
+/*UHD Service*
+登录 — UHD Service.html
+登录 — UHD Service_files/
 
 # Vendored 三方包（third_party/flutter_qjs 源码需提交，但其构建产物不提交）。
 # build/、.dart_tool/、coverage/、*.iml 已被上面的全局规则覆盖；此处仅作显式声明。

@@ -22,10 +22,10 @@ class PluginRuntime {
   /// 单次进入 JS 的墙钟超时（失控/卡死保护）。
   ///
   /// 说明：插件运行在独立 isolate，即便陷入死循环也不会阻塞主程序；本超时用于
-  /// 判定「该插件失控」并停止与之通信（禁用）。由于异步能力（http 等）合法地会
-  /// 超过 1s，这里用 8s 墙钟作为卡死阈值，而纯同步 CPU 的 1s 预算需依赖原生中断
-  /// （见 docs/PLUGINS.md 的超时说明）。
-  static const Duration callTimeout = Duration(seconds: 8);
+  /// 判定「该插件失控」并停止与之通信（禁用）。由于异步能力（http 登录 + 重试等）
+  /// 合法地可能耗时较久，这里用 30s 墙钟作为卡死阈值；纯同步 CPU 的预算需依赖
+  /// 原生中断（见 docs/PLUGINS.md 的超时说明）。
+  static const Duration callTimeout = Duration(seconds: 30);
 
   final PluginManifest manifest;
   final String mainJsSource;

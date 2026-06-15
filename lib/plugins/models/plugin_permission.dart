@@ -76,6 +76,13 @@ class PluginPermissions {
     dangerous: true,
   );
 
+  static const embyCredentials = PluginPermission(
+    id: 'emby.credentials',
+    title: '读取登录账号密码',
+    description: '读取你添加服务器时填写的用户名与密码（用于代你登录配套网站）。',
+    dangerous: true,
+  );
+
   static const extensions = PluginPermission(
     id: 'extensions',
     title: '扩展界面',
@@ -97,6 +104,7 @@ class PluginPermissions {
     ui,
     embyRead,
     embyApi,
+    embyCredentials,
     extensions,
     log,
   ];

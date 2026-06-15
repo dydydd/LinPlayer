@@ -1,82 +1,201 @@
 // UHDNow 流量统计插件
 //
-// 行为：当 Emby 服务器地址包含关键字 "uhdnow" 时，在首页媒体计数旁注册一个
-// 「流量」统计（剩余流量 / 总流量）。数据来自 uhdnow 用户面板页（SSR 渲染的 HTML，
-// 形如「已用 12.90 GB ... 共 700.00 GB」）。
+// 当 Emby 服务器（地址或名称）含关键字 "uhdnow" 时，在首页媒体计数旁显示
+// 「剩余流量 / 总流量」。
 //
-// 申请权限：emby.read（读服务器地址）、http、storage、ui、extensions。
-// 域名白名单：www.uhdnow.com、uhdnow.com（manifest.httpAllowedHosts）。
+// 登录：在插件「设置」里填写 **uhdnow 网站账号密码**（网站账号可能和 Emby 不同），
+// 自动登录拿 token 后读取流量。也会回退到「添加服务器时的 Emby 账密」（若两者相同）。
+//
+// 接口（逆向自 www.uhdnow.com 前端，已实测）：
+//   POST /api/v1/auth/login  {username,password} -> {ok, data:{token, expires_at}}
+//   GET  /api/v1/traffic/me  (Header Authorization: <token>) ->
+//        {ok, data:{used_bytes, limit_bytes}}
 
 'use strict';
 
-// 命中这些关键字的 Emby 服务器才启用流量统计。
 var KEYWORDS = ['uhdnow'];
-var DEFAULT_URL = 'https://www.uhdnow.com/user';
+var API_BASE = 'https://www.uhdnow.com';
+var UA = 'Mozilla/5.0';
+var GiB = 1073741824; // 1024^3
 
-function matchesKeyword(url) {
-  var u = (url || '').toLowerCase();
+function matchesKeyword(text) {
+  var u = (text || '').toLowerCase();
   for (var i = 0; i < KEYWORDS.length; i++) {
     if (u.indexOf(KEYWORDS[i]) >= 0) return true;
   }
   return false;
 }
 
-function parseGB(html, re) {
-  var m = html.match(re);
-  return m ? parseFloat(m[1]) : null;
+// 取登录凭据：优先用插件设置里填的网站账密，回退 Emby 账密。
+async function getCreds() {
+  var u = await ctx.storage.get('site_username');
+  var p = await ctx.storage.get('site_password');
+  if (u && p) return { username: u, password: p };
+  try {
+    var c = (await ctx.emby.getCredentials()) || {};
+    if (c.username && c.password) return { username: c.username, password: c.password };
+  } catch (e) { /* 没有 emby.credentials 权限或未存密码 */ }
+  return null;
+}
+
+// 登录（带重试）。返回 { token } 或 { error, msg }。
+//   error: NO_CREDS（没填账密）/ AUTH（账密错误，不重试）/ NETWORK（网络，已重试）
+async function login() {
+  var creds = await getCreds();
+  if (!creds) return { error: 'NO_CREDS' };
+
+  var attempts = 3;
+  for (var i = 0; i < attempts; i++) {
+    try {
+      var res = await ctx.http.post(
+        API_BASE + '/api/v1/auth/login',
+        { username: creds.username, password: creds.password },
+        { headers: { 'Content-Type': 'application/json', 'User-Agent': UA } }
+      );
+      var b = res.body;
+      if (res.status === 200 && b && b.ok && b.data && b.data.token) {
+        await ctx.storage.set('token', b.data.token);
+        ctx.log.info('uhdnow 登录成功');
+        return { token: b.data.token };
+      }
+      // 账号或密码错误：明确失败，不重试
+      if (res.status === 400 || res.status === 401 ||
+          (b && b.ok === false)) {
+        var msg = (b && b.msg) ? b.msg : ('HTTP ' + res.status);
+        ctx.log.error('登录被拒: ' + msg);
+        return { error: 'AUTH', msg: msg };
+      }
+      ctx.log.warn('登录返回 ' + res.status + '，第 ' + (i + 1) + ' 次重试');
+    } catch (e) {
+      ctx.log.warn('登录网络异常，第 ' + (i + 1) + ' 次重试: ' + e);
+    }
+    if (i < attempts - 1) await ctx.sleep(400 * (i + 1)); // 400ms / 800ms 退避
+  }
+  return { error: 'NETWORK' };
+}
+
+async function requestTraffic(token) {
+  return ctx.http.get(API_BASE + '/api/v1/traffic/me', {
+    headers: { 'Authorization': token, 'User-Agent': UA }
+  });
+}
+
+function gb(bytes) { return (Number(bytes) || 0) / GiB; }
+
+// 拉流量（带重试 + 401 自动重登）。返回 { data } 或 { error, msg }。
+async function getTraffic() {
+  var token = await ctx.storage.get('token');
+  if (!token) {
+    var r0 = await login();
+    if (!r0.token) return r0; // 透传错误
+    token = r0.token;
+  }
+
+  for (var i = 0; i < 2; i++) {
+    var res;
+    try {
+      res = await requestTraffic(token);
+    } catch (e) {
+      ctx.log.warn('流量请求异常，重试: ' + e);
+      await ctx.sleep(400);
+      continue;
+    }
+    var b = res.body;
+    if (res.status === 200 && b && b.ok && b.data) {
+      return { data: b.data };
+    }
+    // token 过期：清掉重登再试一轮
+    if (res.status === 401 || (b && b.ok === false)) {
+      await ctx.storage.delete('token');
+      var r = await login();
+      if (!r.token) return r;
+      token = r.token;
+      continue;
+    }
+    return { error: 'HTTP', msg: String(res.status) };
+  }
+  return { error: 'NETWORK' };
+}
+
+function errLabel(err) {
+  switch (err) {
+    case 'NO_CREDS': return '未配置';
+    case 'AUTH': return '账密错误';
+    case 'NETWORK': return '网络错误';
+    default: return '获取失败';
+  }
 }
 
 // 首页流量统计 handler：返回 { metrics: [{label, value}, ...] }
 async function fetchTraffic() {
-  var cookie = await ctx.storage.get('cookie');
-  var url = (await ctx.storage.get('dashboardUrl')) || DEFAULT_URL;
-
-  if (!cookie) {
-    return { metrics: [{ label: '流量', value: '未配置' }] };
+  var info = (await ctx.emby.getServerInfo()) || {};
+  if (!(matchesKeyword(info.url) || matchesKeyword(info.baseUrl) ||
+        matchesKeyword(info.name))) {
+    return { metrics: [] }; // 非 uhdnow 服务器：不显示
   }
 
-  var res;
-  try {
-    res = await ctx.http.get(url, {
-      headers: {
-        'Cookie': cookie,
-        'User-Agent': 'Mozilla/5.0',
-        'Accept': 'text/html'
-      }
-    });
-  } catch (e) {
-    ctx.log.error('请求流量页失败: ' + e);
-    return { metrics: [{ label: '流量', value: '请求失败' }] };
+  var r = await getTraffic();
+  if (!r.data) {
+    return { metrics: [{ label: '流量', value: errLabel(r.error) }] };
   }
 
-  if (res.status === 401 || res.status === 403) {
-    return { metrics: [{ label: '流量', value: 'Cookie 失效' }] };
-  }
-  if (res.status !== 200 || typeof res.body !== 'string') {
-    return { metrics: [{ label: '流量', value: '错误 ' + res.status }] };
-  }
-
-  var html = res.body;
-  // 页面 SSR 渲染：「已用 12.90 GB</span><span>共 700.00 GB」
-  var used = parseGB(html, /已用\s*([\d.]+)\s*GB/);
-  var total = parseGB(html, /共\s*([\d.]+)\s*GB/);
-
-  if (used === null || total === null) {
-    ctx.log.warn('未能解析流量（页面结构变化或未登录）');
-    return { metrics: [{ label: '流量', value: '解析失败' }] };
-  }
-
-  var remaining = Math.max(0, total - used);
+  var used = gb(r.data.used_bytes);
+  var limit = gb(r.data.limit_bytes);
+  var remaining = Math.max(0, limit - used);
   return {
     metrics: [
-      { label: '剩余流量', value: remaining.toFixed(2) + ' GB' },
-      { label: '总流量', value: total.toFixed(0) + ' GB' }
+      { label: '剩余流量', value: remaining.toFixed(1) + ' GB' },
+      { label: '总流量', value: limit.toFixed(0) + ' GB' }
     ]
   };
 }
 
-// 注册/重注册首页流量统计。重注册会生成新的 handler 句柄，
-// 使首页缓存失效，从而在保存设置后立即刷新数据。
+// 设置页：填写网站账号密码，保存即试登并给出反馈。
+async function openSettings() {
+  var info = (await ctx.emby.getServerInfo()) || {};
+  var u = (await ctx.storage.get('site_username')) || (info.username || '');
+  var p = (await ctx.storage.get('site_password')) || '';
+
+  var values = await ctx.ui.showForm({
+    title: 'UHDNow 流量 · 网站账号',
+    fields: [
+      {
+        key: 'username',
+        label: '网站用户名',
+        type: 'text',
+        default: u,
+        hint: 'uhdnow 网站登录账号（可能与 Emby 不同）'
+      },
+      {
+        key: 'password',
+        label: '网站密码',
+        type: 'password',
+        default: p
+      }
+    ],
+    submitLabel: '保存并登录',
+    cancelLabel: '取消'
+  });
+  if (!values) return;
+
+  await ctx.storage.set('site_username', (values.username || '').trim());
+  await ctx.storage.set('site_password', (values.password || '').trim());
+  await ctx.storage.delete('token'); // 用新账密强制重登
+
+  var r = await login();
+  if (r.token) {
+    ctx.ui.showToast('登录成功，回到首页查看流量');
+  } else if (r.error === 'AUTH') {
+    ctx.ui.showToast('账号或密码错误：' + (r.msg || ''));
+  } else if (r.error === 'NO_CREDS') {
+    ctx.ui.showToast('请填写账号和密码');
+  } else {
+    ctx.ui.showToast('登录失败（网络问题），稍后会自动重试');
+  }
+  await registerTraffic();
+}
+
+// 无条件注册首页流量统计（是否显示由 handler 动态判断）。
 async function registerTraffic() {
   await ctx.extensions.unregister('homeStats', 'traffic');
   await ctx.extensions.register('homeStats', {
@@ -86,51 +205,8 @@ async function registerTraffic() {
   });
 }
 
-// 设置页（由 manifest 的 settingsPages.handler = "openSettings" 触发）。
-async function openSettings() {
-  var cookie = (await ctx.storage.get('cookie')) || '';
-  var dashboardUrl = (await ctx.storage.get('dashboardUrl')) || DEFAULT_URL;
-
-  var values = await ctx.ui.showForm({
-    title: 'UHDNow 流量设置',
-    fields: [
-      {
-        key: 'cookie',
-        label: '登录 Cookie',
-        type: 'password',
-        default: cookie,
-        hint: '在浏览器登录 uhdnow 后，从开发者工具复制请求里的 Cookie'
-      },
-      {
-        key: 'dashboardUrl',
-        label: '面板地址',
-        type: 'text',
-        default: dashboardUrl,
-        hint: '默认 https://www.uhdnow.com/user'
-      }
-    ],
-    submitLabel: '保存',
-    cancelLabel: '取消'
-  });
-
-  if (!values) return;
-  await ctx.storage.set('cookie', (values.cookie || '').trim());
-  await ctx.storage.set('dashboardUrl', (values.dashboardUrl || DEFAULT_URL).trim());
-  ctx.ui.showToast('已保存，回到首页即可看到最新流量');
-
-  var serverUrl = (await ctx.emby.getServerUrl()) || '';
-  if (matchesKeyword(serverUrl)) {
-    await registerTraffic();
-  }
-}
-
 ctx.onEnable(async function () {
-  var serverUrl = (await ctx.emby.getServerUrl()) || '';
-  if (!matchesKeyword(serverUrl)) {
-    ctx.log.info('当前服务器（' + serverUrl + '）不含 uhdnow，跳过流量统计');
-    return;
-  }
-  ctx.log.info('检测到 uhdnow 服务器，注册首页流量统计');
+  ctx.log.info('UHDNow 流量统计已启用');
   await registerTraffic();
 });
 

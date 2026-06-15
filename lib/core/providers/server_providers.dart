@@ -25,6 +25,9 @@ class ServerConfig {
   final String? username;
   final String? authToken;
   final String? userId;
+  // 登录密码（可选）。用于需要凭据重新登录的场景（如插件登录配套网站）。
+  // 仅在用户添加服务器时填写后保存；通过权限 emby.credentials 暴露给插件。
+  final String? password;
 
   ServerConfig({
     required this.id,
@@ -37,6 +40,7 @@ class ServerConfig {
     this.username,
     this.authToken,
     this.userId,
+    this.password,
   });
 
   String get activeLineUrl {
@@ -56,6 +60,7 @@ class ServerConfig {
     String? username,
     String? authToken,
     String? userId,
+    String? password,
   }) {
     return ServerConfig(
       id: id ?? this.id,
@@ -68,6 +73,7 @@ class ServerConfig {
       username: username ?? this.username,
       authToken: authToken ?? this.authToken,
       userId: userId ?? this.userId,
+      password: password ?? this.password,
     );
   }
 }
@@ -303,6 +309,7 @@ Map<String, dynamic> _serverConfigToJson(ServerConfig server) {
     'username': server.username,
     'authToken': server.authToken,
     'userId': server.userId,
+    'password': server.password,
   };
 }
 
@@ -333,6 +340,7 @@ ServerConfig _serverConfigFromJson(Map<String, dynamic> json) {
     username: _emptyToNull(json['username'] as String?),
     authToken: _emptyToNull(json['authToken'] as String?),
     userId: _emptyToNull(json['userId'] as String?),
+    password: _emptyToNull(json['password'] as String?),
   );
 }
 
