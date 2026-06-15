@@ -435,7 +435,9 @@ class MpvPlayerPlugin(
 
         // Subtitles
         MPVLib.setOptionString("sub-visibility", "yes")
-        MPVLib.setOptionString("blend-subtitles", "video")
+        // 字幕走 OSD 覆盖层渲染，不混入视频帧。blend-subtitles=video 会让
+        // PGS/SUP 位图字幕每次刷新都重绘整帧，造成视频画面闪现。
+        MPVLib.setOptionString("blend-subtitles", "no")
         MPVLib.setOptionString("sub-auto", "all")
         MPVLib.setOptionString("sub-ass", "yes")
         MPVLib.setOptionString("sub-codepage", "utf-8")

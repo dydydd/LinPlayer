@@ -158,8 +158,10 @@ class MpvConfigManager {
     buffer.writeln('sub-ass=yes');
     buffer.writeln('sub-ass-override=no');
     buffer.writeln('slang=chi,zh,eng,en');
-    // 使用视频混合路径，确保 PGS/SUP 等位图字幕稳定渲染。
-    buffer.writeln('blend-subtitles=video');
+    // 字幕走 OSD 覆盖层渲染，不混入视频帧。
+    // blend-subtitles=video 会让 PGS/SUP 位图字幕的每次刷新都重绘整帧，
+    // 在 libmpv 渲染 API + 硬解路径下导致画面闪现，因此默认关闭。
+    buffer.writeln('blend-subtitles=no');
 
     final configPath = configFilePath;
     final file = File(configPath);

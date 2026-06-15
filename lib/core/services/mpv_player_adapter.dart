@@ -505,8 +505,10 @@ class MpvPlayerAdapter implements PlayerAdapter {
           // 默认关闭次字幕可见性，只有用户明确选择次字幕时才开启
           // 避免同时显示两个字幕（主字幕+次字幕）
           await np.setProperty('secondary-sub-visibility', 'no');
-          // 使用视频混合路径，确保 PGS/SUP 等位图字幕稳定显示。
-          await np.setProperty('blend-subtitles', 'video');
+          // 字幕走 OSD 覆盖层渲染（不混入视频帧）。
+          // blend-subtitles=video 会让位图字幕(PGS/SUP)每次刷新都重绘整帧，
+          // 导致视频画面闪现；覆盖层渲染同样能稳定显示 PGS/SUP。
+          await np.setProperty('blend-subtitles', 'no');
           await np.setProperty('sub-visibility', 'yes');
           await np.setProperty('hwdec', hardwareDecoding ? 'auto-safe' : 'no');
           await _applyShaderList(_glslShaders);
@@ -1468,7 +1470,10 @@ class MpvPlayerAdapter implements PlayerAdapter {
       await np.setProperty('sub-delay', _subtitleDelay.toStringAsFixed(3));
 
       if (_hasBitmapSubtitle) {
-        await np.setProperty('blend-subtitles', 'video');
+        // PGS/SUP 位图字幕必须走 OSD 覆盖层渲染：
+        // blend-subtitles=video 会把字幕混入视频帧，PGS 频繁的合成刷新
+        // (含清屏段) 会触发整帧重绘，在桌面端造成视频画面闪现。
+        await np.setProperty('blend-subtitles', 'no');
         // PGS/SUP 等位图字幕：关闭 ASS 处理，避免 libass 干扰原生渲染
         await np.setProperty('sub-ass', 'no');
         await np.setProperty('sub-ass-override', 'no');
