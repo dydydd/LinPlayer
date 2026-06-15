@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 import '../../../core/api/api_interfaces.dart';
 import '../../../core/providers/app_providers.dart';
@@ -215,8 +214,7 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
         TvButton(
           text: favorited ? '已收藏' : '收藏',
           icon: favorited ? Icons.favorite : Icons.favorite_border,
-          type: TDButtonType.outline,
-          theme: TDButtonTheme.light,
+          outlined: true,
           onPressed: () => _toggleFavorite(item, favorited),
         ),
       ],

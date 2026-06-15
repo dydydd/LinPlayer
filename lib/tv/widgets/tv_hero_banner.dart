@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:tdesign_flutter/tdesign_flutter.dart';
 import '../../core/theme/app_motion.dart';
 import '../../ui/widgets/common/media_widgets.dart';
 import '../theme/tv_design_tokens.dart';
@@ -249,8 +248,7 @@ class _TvHeroBannerState extends State<TvHeroBanner> {
                     TvButton(
                       text: '详情',
                       icon: Icons.info_outline,
-                      type: TDButtonType.outline,
-                      theme: TDButtonTheme.light,
+                      outlined: true,
                       onPressed: item.onDetail,
                     ),
                   ],

@@ -1,23 +1,22 @@
 import 'package:flutter/material.dart';
-import 'package:tdesign_flutter/tdesign_flutter.dart';
 
 import '../theme/tv_design_tokens.dart';
 import 'tv_focusable.dart';
 
-/// TV 主操作按钮 —— TV 端「TDesign + 焦点 + flutter_animate」组件基建的范例。
+/// TV 主操作按钮 —— 原生实现 + TV 焦点（放大 / 描边 / 品牌色光晕，flutter_animate 驱动）
+/// 与遥控器确认键触发。
 ///
-/// 以 TDesign 的 [TDButton] 作视觉底座，外层套 [TvFocusable] 叠加 TV 焦点效果
-/// （放大 / 白描边 / 品牌色光晕，均由 flutter_animate 驱动）与遥控器确认键触发。
-/// 这样既复用了 TDesign 的视觉规范，又满足 TV 十足距离 + 焦点导航的交互。
+/// 视觉沿用 TDesign 的圆角填充/描边规范，但不引入 tdesign_flutter 依赖
+/// （该包在较新 Flutter 上无法编译）。
 class TvButton extends StatelessWidget {
   final String text;
   final IconData? icon;
   final VoidCallback? onPressed;
   final bool autofocus;
   final FocusNode? focusNode;
-  final TDButtonType type;
-  final TDButtonTheme theme;
-  final TDButtonSize size;
+
+  /// true = 描边按钮（次要操作）；false = 品牌色填充（主操作）。
+  final bool outlined;
 
   const TvButton({
     super.key,
@@ -26,27 +25,47 @@ class TvButton extends StatelessWidget {
     this.onPressed,
     this.autofocus = false,
     this.focusNode,
-    this.type = TDButtonType.fill,
-    this.theme = TDButtonTheme.primary,
-    this.size = TDButtonSize.large,
+    this.outlined = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final fg = outlined ? TvDesignTokens.textPrimary : Colors.white;
     return TvFocusable(
       autofocus: autofocus,
       focusNode: focusNode,
       onSelect: onPressed,
       scale: 1.08,
       padding: const EdgeInsets.all(TvDesignTokens.spacingXs),
-      child: TDButton(
-        text: text,
-        icon: icon,
-        type: type,
-        theme: theme,
-        size: size,
-        shape: TDButtonShape.round,
-        onTap: onPressed,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: TvDesignTokens.spacingLg,
+          vertical: TvDesignTokens.spacingSm,
+        ),
+        decoration: BoxDecoration(
+          color: outlined ? Colors.transparent : TvDesignTokens.brand,
+          borderRadius: BorderRadius.circular(999),
+          border: outlined
+              ? Border.all(color: TvDesignTokens.textSecondary, width: 2)
+              : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, color: fg, size: 28),
+              const SizedBox(width: TvDesignTokens.spacingXs),
+            ],
+            Text(
+              text,
+              style: TextStyle(
+                fontSize: TvDesignTokens.fontSizeMd,
+                color: fg,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

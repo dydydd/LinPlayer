@@ -6,6 +6,7 @@ import 'package:media_kit/media_kit.dart';
 
 import 'app.dart';
 import 'core/providers/app_providers.dart';
+import 'core/services/app_logger.dart';
 import 'core/services/cache_service.dart';
 import 'core/theme/app_motion.dart';
 import 'core/utils/platform_utils.dart';
@@ -16,6 +17,10 @@ import 'tv/tv_app.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 日志：尽早初始化文件落盘 + 捕获未处理异常（三端统一、原生输出、可被 AI 读取）。
+  await AppLogger().init();
+  AppLogger().installErrorHandlers();
 
   // 统一三端动效基线（时长/曲线），见 core/theme/app_motion.dart
   AppMotion.applyGlobalDefaults();

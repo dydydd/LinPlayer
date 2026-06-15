@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/providers/app_providers.dart';
+import '../../../core/services/app_logger.dart';
 import '../../theme/tv_design_tokens.dart';
 import '../../widgets/tv_focusable.dart';
 import '../../widgets/tv_panel.dart';
+import '../../widgets/tv_toast.dart';
 import 'tv_sync_settings.dart';
 
 /// TV 设置页 —— 左侧分类 + 右侧真实可持久化设置项。
@@ -213,11 +216,26 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
       _staticItem(title: '应用', subtitle: 'LinPlayer for TV'),
       _staticItem(title: '版本', subtitle: '1.0.0'),
       _actionItem(
+        title: '导出日志',
+        subtitle: '导出到文件并复制路径（排查问题用）',
+        onTap: _exportLogs,
+      ),
+      _actionItem(
         title: '重新查看引导',
         subtitle: '打开 TV 引导页',
         onTap: () => context.go('/tv/onboarding'),
       ),
     ]);
+  }
+
+  Future<void> _exportLogs() async {
+    try {
+      final path = await AppLogger().exportToFile();
+      await Clipboard.setData(ClipboardData(text: path));
+      if (mounted) TvToast.show(context, '日志已导出并复制路径: $path');
+    } catch (e) {
+      if (mounted) TvToast.show(context, '导出日志失败: $e');
+    }
   }
 
   // ============ 复用控件 ============
