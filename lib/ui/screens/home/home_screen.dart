@@ -984,6 +984,7 @@ class ContinueWatchingSection extends ConsumerWidget {
         showModalBottomSheet(
           context: context,
           isScrollControlled: true,
+          backgroundColor: Colors.transparent,
           builder: (context) => DraggableScrollableSheet(
             initialChildSize: 0.7,
             minChildSize: 0.3,
