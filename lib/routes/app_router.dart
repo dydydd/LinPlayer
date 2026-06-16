@@ -20,6 +20,7 @@ import '../ui/screens/server/icon_select_screen.dart';
 import '../ui/screens/server/server_lines_screen.dart';
 import '../ui/screens/server/server_list_screen.dart';
 import '../ui/screens/settings/settings_screen.dart';
+import '../ui/utils/image_size_helper.dart';
 import '../ui/utils/media_helpers.dart';
 import '../ui/widgets/common/media_widgets.dart';
 
@@ -77,14 +78,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                     path: 'home',
                     pageBuilder: (context, state) => _buildHorizontalPage(
                       child: const HomeScreen(),
-                      state: state,
-                      direction: _PageTransitionDirection.forward,
-                    ),
-                  ),
-                  GoRoute(
-                    path: 'resume',
-                    pageBuilder: (context, state) => _buildHorizontalPage(
-                      child: const _ResumeRouteScreen(),
                       state: state,
                       direction: _PageTransitionDirection.forward,
                     ),
@@ -164,6 +157,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           state: state,
           direction: _PageTransitionDirection.forward,
         ),
+      ),
+      GoRoute(
+        path: '/resume',
+        builder: (context, state) => const _ResumeRouteScreen(),
       ),
       GoRoute(
         path: '/detail/:id',
@@ -541,22 +538,76 @@ class _ResumeRouteScreen extends ConsumerWidget {
             );
           }
 
+          final sizePreference = ImageSizeHelper.analyzeForResumeSection(items);
+
           return GridView.builder(
             padding: const EdgeInsets.all(16),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 2,
-              childAspectRatio: 0.7,
+              childAspectRatio: 1.3,
               crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
+              mainAxisSpacing: 16,
             ),
             itemCount: items.length,
             itemBuilder: (context, index) {
               final item = items[index];
-              return MediaPoster(
-                item: item,
-                width: 150,
-                height: 200,
+              final api = ref.read(apiClientProvider);
+              final imageUrls = resolveMediaItemImageUrls(
+                api,
+                item,
+                maxWidth: 400,
+                preferThumb: true,
+              );
+
+              return GestureDetector(
                 onTap: () => context.push(mediaRouteForItem(item)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // 封面图
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            MediaImage(
+                              imageUrl: imageUrls.isNotEmpty ? imageUrls.first : null,
+                              imageUrls: imageUrls.length > 1 ? imageUrls.sublist(1) : null,
+                              width: 400,
+                              height: 225,
+                              fit: BoxFit.cover,
+                            ),
+                            // 进度条
+                            if (item.progress != null)
+                              Positioned(
+                                bottom: 0,
+                                left: 0,
+                                right: 0,
+                                child: LinearProgressIndicator(
+                                  value: item.progress,
+                                  backgroundColor: Colors.white.withValues(alpha: 0.3),
+                                  valueColor: const AlwaysStoppedAnimation(Color(0xFF5B8DEF)),
+                                  minHeight: 3,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    // 标题
+                    SizedBox(
+                      height: 16,
+                      child: Text(
+                        item.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
               );
             },
           );

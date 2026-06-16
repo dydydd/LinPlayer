@@ -958,7 +958,7 @@ class ContinueWatchingSection extends ConsumerWidget {
             HorizontalList(
               height: sizePreference.height + 50, // 高度 + 标题区域
               children: unplayedItems.asMap().entries.map((entry) {
-                return _ContinueWatchingCard(
+                return ContinueWatchingCard(
                   item: entry.value,
                   sizePreference: sizePreference,
                 ).appEntrance(index: entry.key);
@@ -978,11 +978,12 @@ class ContinueWatchingSection extends ConsumerWidget {
   }
 }
 
-class _ContinueWatchingCard extends ConsumerWidget {
+/// 公开的继续观看卡片，供其他页面使用
+class ContinueWatchingCard extends ConsumerWidget {
   final MediaItem item;
   final ImageSizePreference sizePreference;
 
-  const _ContinueWatchingCard({
+  const ContinueWatchingCard({
     required this.item,
     required this.sizePreference,
   });
